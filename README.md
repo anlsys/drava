@@ -1,2 +1,12 @@
-# drava
-End-to-end functional simulation for BIA systems and simulations
+# Drava
+Accelerator model with state machine on UpDown network
+
+
+### Run the accelerator model
+```shell
+python accelerator.py
+```
+
+
+### ToDo
+- Sync on UpDown current states passing to the accelerator
