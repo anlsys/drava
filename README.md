@@ -1,2 +1,27 @@
 # drava
 End-to-end functional simulation for BIA systems and simulations
+
+## Installation
+
+### Requirements
+- A C/C++ compiler with support for C++20 (the only compiler tested is LLVM >=20.x)
+- xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
+
+### on JLSE
+On JLSE, requirements are preinstalled.
+```bash
+# C/C++ 20 compiler
+module load llvm/master-nightly
+
+# XKRT for A100/H100 nodes
+module use /home/rpereira/shared/modules
+module load xkaapi/2eccf0916665/Debug
+```
+
+### Example build
+```bash
+mkdir build-debug
+cd build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make
+```
