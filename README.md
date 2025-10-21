@@ -7,8 +7,9 @@ End-to-end functional simulation for BIA systems and simulations
 - A C/C++ compiler with support for C++20 (the only compiler tested is LLVM >=20.x)
 - xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
 
-### on JLSE
-On JLSE, requirements are preinstalled.
+### On JLSE
+Requirements are preinstalled:
+
 ```bash
 # C/C++ 20 compiler
 module load llvm/master-nightly
