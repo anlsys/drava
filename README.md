@@ -17,6 +17,9 @@ module load llvm/master-nightly
 # XKRT for A100/H100 nodes
 module use /home/rpereira/shared/modules
 module load xkaapi/2eccf0916665/Debug
+
+# if using swig
+module load swig/4.1.1
 ```
 
 ### Example build

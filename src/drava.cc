@@ -33,6 +33,9 @@ typedef struct  drava_device_t
     /* the list of places for that device (= 1x cpuset) */
     thread_place_t places_list;
 
+    /* the routine to run */
+    drava_routine_t routine;
+
 }               drava_device_t;
 
 /* The routine executed by each thread of each team of each device */
@@ -43,6 +46,8 @@ drava_main(team_t * team, thread_t * thread)
     assert(drava_device);
 
     LOGGER_DEBUG("Starting thread %u on device %d", thread->tid, drava_device->device_global_id);
+
+    drava_device->routine();    // TODO: remove me, just here to test python
 
     sleep(1);
     LOGGER_FATAL("TODO: read on socket and progress Drava operations");
@@ -62,6 +67,7 @@ drava_t::run(drava_routine_t routine)
         drava_device_t * drava_device = drava_devices + i;
         drava_device->drava = this;
         drava_device->device_global_id = i;
+        drava_device->routine = routine;
 
         /* setup the team */
         team_t * team = &drava_device->team;
