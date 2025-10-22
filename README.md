@@ -15,9 +15,10 @@ Requirements are preinstalled:
 # C/C++ 20 compiler
 module load llvm/master-nightly
 
-# XKRT for A100/H100 nodes
+# XKRT
 module use /home/rpereira/shared/modules
-module load xkaapi/2eccf0916665/Debug
+module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
+module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
 
 # if using swig
 module load swig/4.1.1
