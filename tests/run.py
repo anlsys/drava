@@ -4,5 +4,5 @@ def func():
     print("Hello Python")
 
 drava.init()
-drava.run(func)
+drava.listen(func)
 drava.deinit()

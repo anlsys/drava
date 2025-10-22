@@ -37,7 +37,7 @@ typedef void * (*drava_routine_t)(void);
 int drava_init(void);
 
 /* Read until the socket is closed */
-int drava_run(drava_routine_t routine);
+int drava_listen(drava_routine_t routine);
 
 /* Deinitialize drava */
 int drava_deinit(void);

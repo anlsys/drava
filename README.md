@@ -6,6 +6,7 @@ End-to-end functional simulation for BIA systems and simulations
 ### Requirements
 - A C/C++ compiler with support for C++20 (the only compiler tested is LLVM >=20.x)
 - xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
+- swig if generating Python bindings
 
 ### On JLSE
 Requirements are preinstalled:
@@ -28,4 +29,15 @@ mkdir build-debug
 cd build-debug
 cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
+```
+
+### Example run
+In terminal A
+```
+socat UNIX-LISTEN:/tmp/accel_2048.sock,fork -
+``
+
+In terminal B
+```
+./tests/tests
 ```

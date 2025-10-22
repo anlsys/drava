@@ -16,8 +16,19 @@ extern "C" {
 };
 
 # include <xkrt/runtime.h>
+XKRT_NAMESPACE_USE;
 
-struct drava_t
+struct  drava_device_t
+{
+   /* xkrt team of threads */
+    team_t team;
+
+    /* the list of places for that device (= 1x cpuset) */
+    thread_place_t places_list;
+
+};
+
+struct  drava_t
 {
     /***********/
     /* Members */
@@ -25,6 +36,12 @@ struct drava_t
 
     /* runtime instance */
     xkrt::runtime_t runtime;
+
+    /* devices */
+    drava_device_t devices[XKRT_DEVICES_MAX];
+
+    /* the routine to run */
+    drava_routine_t routine;
 
     /***********/
     /* Methods */
@@ -34,11 +51,13 @@ struct drava_t
     int init(void);
 
     /* Read until the socket is closed */
-    int run(drava_routine_t routine);
+    int listen(drava_routine_t routine);
 
     /* Deinitialize drava */
     int deinit(void);
-
 };
+
+/* main for a thread on a given device */
+int drava_device_main(drava_t * drava, device_global_id_t device_global_id, thread_t * thread);
 
 # endif /* __DRAVA_H__ */

@@ -10,8 +10,6 @@
 
 # include <drava/drava.h>
 
-XKRT_NAMESPACE_USE;
-
 int
 drava_t::init(void)
 {
@@ -19,61 +17,50 @@ drava_t::init(void)
     return DRAVA_SUCCESS;
 }
 
-typedef struct  drava_device_t
-{
-    /* drava instance */
+struct drava_args_t {
     drava_t * drava;
-
-    /* xkrt team of threads */
-    team_t team;
-
-    /* the device of that team */
     device_global_id_t device_global_id;
-
-    /* the list of places for that device (= 1x cpuset) */
-    thread_place_t places_list;
-
-    /* the routine to run */
-    drava_routine_t routine;
-
-}               drava_device_t;
+};
 
 /* The routine executed by each thread of each team of each device */
 static void *
 drava_main(team_t * team, thread_t * thread)
 {
-    drava_device_t * drava_device = (drava_device_t *) team->desc.args;
-    assert(drava_device);
+    drava_args_t * args = (drava_args_t *) team->desc.args;
+    assert(args);
 
-    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid, drava_device->device_global_id);
-
-    drava_device->routine();    // TODO: remove me, just here to test python
-
-    sleep(1);
-    LOGGER_FATAL("TODO: read on socket and progress Drava operations");
+    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid, args->device_global_id);
+    drava_device_main(args->drava, args->device_global_id, thread);
 
     return NULL;
 }
 
 int
-drava_t::run(drava_routine_t routine)
+drava_t::listen(drava_routine_t routine)
 {
+    this->routine = routine;
+
     /* Fork a team of threads for each device */
-    drava_device_t drava_devices[XKRT_DEVICES_MAX];
+    drava_args_t args[XKRT_DEVICES_MAX];
 
     for (device_global_id_t i = 0 ; i < this->runtime.get_ndevices() ; ++i)
     {
+        if (i == HOST_DEVICE_GLOBAL_ID)
+            continue ;
+
         /* save team information */
-        drava_device_t * drava_device = drava_devices + i;
-        drava_device->drava = this;
-        drava_device->device_global_id = i;
-        drava_device->routine = routine;
+        drava_args_t * arg = args + i;
+        arg->drava = this;
+        arg->device_global_id = i;
+
+        /* drava device */
+        drava_device_t * drava_device = this->devices + i;
 
         /* setup the team */
         team_t * team = &drava_device->team;
         team->desc.routine             = drava_main;
-        team->desc.args                = drava_device;
-        team->desc.nthreads            = 1;
+        team->desc.args                = arg;
+        team->desc.nthreads            = 4;
         team->desc.master_is_member    = false;
         team->desc.binding.mode        = XKRT_TEAM_BINDING_MODE_COMPACT;
         team->desc.binding.places      = XKRT_TEAM_BINDING_PLACES_EXPLICIT;
@@ -88,7 +75,8 @@ drava_t::run(drava_routine_t routine)
         driver_t * driver = this->runtime.driver_get(device->driver_type);
         assert(driver);
 
-        int err = driver->f_device_cpuset(this->runtime.topology, team->desc.binding.places_list, device->driver_id);
+        int err = driver->f_device_cpuset(this->runtime.topology,
+                team->desc.binding.places_list, device->driver_id);
         if (err)
             LOGGER_FATAL("Fail to retrieve cpuset for device %u", i);
 
@@ -98,7 +86,7 @@ drava_t::run(drava_routine_t routine)
 
     /* Wait for all teams completion */
     for (device_global_id_t i = 0 ; i < this->runtime.get_ndevices() ; ++i)
-        this->runtime.team_join(&drava_devices[i].team);
+        this->runtime.team_join(&this->devices[i].team);
 
     return DRAVA_SUCCESS;
 }

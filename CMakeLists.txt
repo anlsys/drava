@@ -24,6 +24,7 @@ project(${DRAVA_NAME})
 
 SET(SOURCE_FILES
     ${CMAKE_SOURCE_DIR}/src/drava.cc
+    ${CMAKE_SOURCE_DIR}/src/device.cc
 )
 
 # C bindings to its own custom lib
@@ -63,6 +64,7 @@ if (USE_SWIG)
     include(UseSWIG)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
+    set_source_files_properties(${SWIG_SOURCE_FILES} PROPERTIES SWIG_DEPENDS ${CMAKE_SOURCE_DIR}/api/c/include/drava/drava_c.h)
     swig_add_library(${DRAVA_NAME}_python LANGUAGE python SOURCES ${SWIG_SOURCE_FILES})
     swig_link_libraries(${DRAVA_NAME}_python ${DRAVA_NAME} ${Python3_LIBRARIES})
 
