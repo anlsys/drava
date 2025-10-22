@@ -50,8 +50,11 @@ struct  drava_t
     /* Initialize drava */
     int init(void);
 
+    /* Register a routine (TODO: add an event associated with it?) */
+    int register_routine(drava_routine_t routine);
+
     /* Read until the socket is closed */
-    int listen(drava_routine_t routine);
+    int listen(void);
 
     /* Deinitialize drava */
     int deinit(void);

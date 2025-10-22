@@ -1,0 +1,54 @@
+/*******************************************************************************
+ * Copyright 2025 UChicago Argonne, LLC.
+ * (c.f. AUTHORS, LICENSE)
+ *
+ * This file is part of the drava project.
+ * For more info, see https://github.com/anlsys/drava
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *****************************************************************************/
+
+# include <drava/drava_c.h>
+# include <Python.h>
+
+/* Python routines */
+static PyObject * g_routine = NULL;
+
+static void *
+drava_routine_trampoline(void)
+{
+    if (!g_routine)
+        return NULL;
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    PyObject_CallObject(g_routine, NULL);
+    PyGILState_Release(gstate);
+
+    return NULL;
+}
+
+/* Called from Python to register the routine */
+void
+drava_register_routine_py(PyObject *cb)
+{
+    Py_XINCREF(cb);
+    Py_XDECREF(g_routine);
+    g_routine = cb;
+    drava_register_routine(drava_routine_trampoline);
+}
+
+/* Listen from python */
+int
+drava_listen_py(void)
+{
+    /* release the GIL and save thread state */
+    PyThreadState * _save = PyEval_SaveThread();  /* releases GIL */
+
+    /* Other threads may now acquire the GIL from routines */
+    int rc = drava_listen();
+
+    /* restore the GIL for the current thread */
+    PyEval_RestoreThread(_save);
+
+    return rc;
+}

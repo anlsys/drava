@@ -22,8 +22,9 @@ handler(void)
 int
 main(void)
 {
-    assert(drava_init()          == DRAVA_SUCCESS);
-    assert(drava_listen(handler) == DRAVA_SUCCESS);
-    assert(drava_deinit()        == DRAVA_SUCCESS);
+    assert(drava_init()                     == DRAVA_SUCCESS);
+    assert(drava_register_routine(handler)  == DRAVA_SUCCESS);
+    assert(drava_listen()                   == DRAVA_SUCCESS);
+    assert(drava_deinit()                   == DRAVA_SUCCESS);
     return 0;
 }

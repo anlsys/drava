@@ -14,6 +14,7 @@ int
 drava_t::init(void)
 {
     this->runtime.init();
+    this->routine = NULL;
     return DRAVA_SUCCESS;
 }
 
@@ -36,10 +37,15 @@ drava_main(team_t * team, thread_t * thread)
 }
 
 int
-drava_t::listen(drava_routine_t routine)
+drava_t::register_routine(drava_routine_t routine)
 {
     this->routine = routine;
+    return DRAVA_SUCCESS;
+}
 
+int
+drava_t::listen(void)
+{
     /* Fork a team of threads for each device */
     drava_args_t args[XKRT_DEVICES_MAX];
 

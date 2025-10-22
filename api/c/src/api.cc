@@ -23,9 +23,16 @@ drava_init(void)
 
 extern "C"
 int
-drava_listen(drava_routine_t routine)
+drava_register_routine(drava_routine_t routine)
 {
-    return drava.listen(routine);
+    return drava.register_routine(routine);
+}
+
+extern "C"
+int
+drava_listen(void)
+{
+    return drava.listen();
 }
 
 extern "C"

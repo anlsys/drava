@@ -58,7 +58,7 @@ include_directories(${CMAKE_SOURCE_DIR}/api/c/include/)
 
 if (USE_SWIG)
 
-    set(SWIG_SOURCE_FILES ${CMAKE_SOURCE_DIR}/api/python/drava.i)
+    set(SWIG_SOURCE_FILES ${CMAKE_SOURCE_DIR}/api/python/drava.i ${CMAKE_SOURCE_DIR}/api/python/drava_routine_wrap.c)
 
     find_package(SWIG REQUIRED)
     include(UseSWIG)

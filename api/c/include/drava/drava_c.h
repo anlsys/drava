@@ -33,13 +33,10 @@ typedef enum    drava_op_t
 /** Drava routine type */
 typedef void * (*drava_routine_t)(void);
 
-/* Initialize drava */
+/* see `drava_t` methods */
 int drava_init(void);
-
-/* Read until the socket is closed */
-int drava_listen(drava_routine_t routine);
-
-/* Deinitialize drava */
+int drava_register_routine(drava_routine_t routine);
+int drava_listen(void);
 int drava_deinit(void);
 
 # endif /* __DRAVA_C_H__ */

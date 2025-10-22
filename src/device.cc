@@ -20,6 +20,21 @@
 /* TODO: env variable or something, socket path */
 static char const * SOCK_PATH = "/tmp/accel_2048.sock";
 
+/* Parse a line read from the socket for the passed device */
+static void
+parse_line(
+    drava_t * drava,
+    device_global_id_t device_global_id,
+    const std::string & line
+) {
+    // TODO
+    LOGGER_DEBUG("Parsing: %s", line.c_str());
+
+    // TODO
+    if (drava->routine)
+        drava->routine();
+}
+
 /* custom socketbuf to readline on the socket */
 class socketbuf : public std::streambuf
 {
@@ -90,8 +105,7 @@ drava_device_main(
 
             /* spawn a task for each line */
             drava->runtime.team_task_spawn(team, [=] (task_t * task) {
-                    // TODO: parse the line
-                    LOGGER_DEBUG("Processing %s", line.c_str());
+                    parse_line(drava, device_global_id, line);
                 }
             );
         }
