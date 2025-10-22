@@ -35,7 +35,7 @@ make
 In terminal A
 ```
 socat UNIX-LISTEN:/tmp/accel_2048.sock,fork -
-``
+```
 
 In terminal B
 ```
