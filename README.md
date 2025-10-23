@@ -12,12 +12,15 @@ End-to-end functional simulation for BIA systems and simulations
 Requirements are preinstalled:
 
 ```bash
-# C/C++ 20 compiler
+# module path setup
 module use /soft/modulefiles
+module load spack/gcc-0.6.1
+module use /home/rpereira/shared/modules
+
+# C/C++ 20 compiler
 module load llvm/master-nightly
 
 # XKRT
-module use /home/rpereira/shared/modules
 module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
 module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
 
