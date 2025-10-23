@@ -13,6 +13,7 @@ Requirements are preinstalled:
 
 ```bash
 # C/C++ 20 compiler
+module use /soft/modulefiles
 module load llvm/master-nightly
 
 # XKRT
@@ -28,7 +29,7 @@ module load swig/4.1.1
 ```bash
 mkdir build-debug
 cd build-debug
-cmake -DCMAKE_BUILD_TYPE=Debug ..
+cmake -DCMAKE_BUILD_TYPE=Debug ..    # must use a C++20 compiler, CC=clang CXX=clang++
 make
 ```
 
