@@ -19,6 +19,8 @@ module use /home/rpereira/shared/modules
 
 # C/C++ 20 compiler
 module load llvm/master-nightly
+module load intel/oneapi/release/2024.1
+module load cuda/12.3.0
 
 # XKRT
 module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
