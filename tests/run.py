@@ -1,7 +1,7 @@
 import drava
 
-def func():
-    print("Hello Python")
+def func(s):
+    print("Hello Python, received: {}".format(s))
 
 drava.init()
 drava.register_routine_py(func)

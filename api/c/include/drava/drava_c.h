@@ -31,7 +31,7 @@ typedef enum    drava_op_t
 }               drava_op_t;
 
 /** Drava routine type */
-typedef void * (*drava_routine_t)(void);
+typedef void * (*drava_routine_t)(const char * s);
 
 /* see `drava_t` methods */
 int drava_init(void);

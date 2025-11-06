@@ -32,7 +32,7 @@ parse_line(
 
     // TODO
     if (drava->routine)
-        drava->routine();
+        drava->routine(line.c_str());   // convert std::string to char *
 }
 
 /* custom socketbuf to readline on the socket */
