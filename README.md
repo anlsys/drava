@@ -36,6 +36,7 @@ mkdir build-debug
 cd build-debug
 cmake -DCMAKE_BUILD_TYPE=Debug ..    # must use a C++20 compiler, CC=clang CXX=clang++
 make
+export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
 
 ### Example run
