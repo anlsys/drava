@@ -13,9 +13,9 @@
 # include <stdio.h>
 
 static void *
-handler(void)
+handler(const char * s)
 {
-    puts("Handler raised");
+    printf("Handler raised , received %s\n", s);
     return NULL;
 }
 
@@ -23,7 +23,7 @@ int
 main(void)
 {
     assert(drava_init()                     == DRAVA_SUCCESS);
-    assert(drava_register_routine(handler)  == DRAVA_SUCCESS);
+    assert(drava_register_routine(handler)  == DRAVA_SUCCESS); //- this is a toy
     assert(drava_listen()                   == DRAVA_SUCCESS);
     assert(drava_deinit()                   == DRAVA_SUCCESS);
     return 0;

@@ -15,13 +15,26 @@
 static PyObject * g_routine = NULL;
 
 static void *
-drava_routine_trampoline(void)
+drava_routine_trampoline(const char * s)
 {
     if (!g_routine)
         return NULL;
 
     PyGILState_STATE gstate = PyGILState_Ensure();
-    PyObject_CallObject(g_routine, NULL);
+
+    /* Step 1: Create Python string from C string */
+    PyObject * py_arg = PyUnicode_FromString(s);
+
+    /* Step 2: Create a tuple to hold the argument(s) */
+    PyObject * args = PyTuple_New(1);
+    PyTuple_SetItem(args, 0, py_arg);  // Steals a reference to py_arg
+
+    /* Step 3: call */
+    PyObject_CallObject(g_routine, args);
+
+    /* Step 4: Cleanup */
+    Py_DECREF(args);
+
     PyGILState_Release(gstate);
 
     return NULL;

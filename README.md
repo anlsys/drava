@@ -12,16 +12,23 @@ End-to-end functional simulation for BIA systems and simulations
 Requirements are preinstalled:
 
 ```bash
+# module path setup
+module use /soft/modulefiles
+module load spack/gcc-0.6.1
+module use /home/rpereira/shared/modules
+
 # C/C++ 20 compiler
 module use /soft/modulefiles
 module load llvm/master-nightly
+<<<<<<< HEAD
 module load cmake
 module load spack/gcc-0.6.1
+=======
+>>>>>>> origin/main
 module load intel/oneapi/release/2024.1
 module load cuda/12.3.0
 
 # XKRT
-module use /home/rpereira/shared/modules
 module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
 module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
 
@@ -48,6 +55,7 @@ make install
 mkdir build-debug-nats && cd build-debug-nats
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_NATS=ON -DNATS_ROOT=$HOME/opt/nats ..
 make
+export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
 
 ### Example run using Jetstream
