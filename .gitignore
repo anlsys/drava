@@ -214,3 +214,5 @@ __marimo__/
 
 # Nats server
 jetstream/nats-server
+
+.DS_Store
