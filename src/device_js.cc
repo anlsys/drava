@@ -29,7 +29,7 @@ parse_line(
 ) {
     LOGGER_DEBUG("Parsing: %s", line.c_str());
     if (drava->routine)
-        drava->routine();
+        drava->routine(line.c_str());
 }
 
 int
