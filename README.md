@@ -4,14 +4,17 @@ Runtime and end-to-end simulation for BIA systems and simulations
 ## Installation
 
 ### Requirements
-- A C/C++ compiler with support for C++20 (the only compiler tested is LLVM >=20.x)
+- C/C++ compiler with C++20 support (tested: LLVM ≥ 20.x)
 - xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
 - swig if generating Python bindings
+- NATS server if run with Jetstream
 
 ### On JLSE
 Requirements are preinstalled:
 
 ```bash
+# GPU 
+
 # module path setup
 module use /soft/modulefiles
 module load spack/gcc-0.6.1
@@ -27,16 +30,18 @@ module load hwloc
 
 # XKRT
 module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
-module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
 
 # if using swig
 module load swig/4.1.1
+
+module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
+
 ```
 
-### Example build using Jetstream
-- Get NATS server binary
+### Building with JetStream (NATS)
+- Install NATS server
 ```bash
-cd jetstream
+cd ~/nats_binary
 curl -fsSL https://binaries.nats.dev/nats-io/nats-server/v2@v2.11.6 | sh
 ```
 - Build NATS C client
@@ -55,26 +60,7 @@ make
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
 
-### Example run using Jetstream
-- In terminal 1, run the NATS server
-```bash
-./nats-server -js -sd ./jsdata
-```
-- In terminal 2, run the subscriber script
-```bash
-cd jetstream
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python publisher.py
-```
-- In terminal 3, run Python example of the inference task
-```bash
-cd jetstream
-source venv/bin/activate
-python sample_task.py
-```
-### Example build using Sockets
+### Building with Sockets
 ```bash
 mkdir build-debug-sockets
 cd build-debug-sockets
@@ -82,15 +68,14 @@ CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
-### Example run using Sockets
-- In terminal 1:
-```
-socat UNIX-LISTEN:/tmp/accel_2048.sock,fork -
-```
-- In terminal 2:
-```
-./tests/tests
-```
+
+## Applications
+
+Example applications are located in [examples](examples) directory.
+Each application contains its own README with instructions for running it.
+Available applications:
+- [Iris Inferrence](examples/iris_knn)
+- [Dataflow](examples/dataflow)
 
 
 ### References

@@ -7,6 +7,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 option(USE_TESTS "Compile tests"                   ON)
 option(USE_SWIG  "Compile python bindings"         ON)
 option(USE_NATS  "Use JetStream instead of socket" OFF)
+option(BUILD_EXAMPLES "Build example applications" ON)
 
 ###############
 # C++ version #
@@ -152,9 +153,9 @@ install(TARGETS ${DRAVA_NAME}
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/       DESTINATION include FILES_MATCHING PATTERN "*.h*")
 install(DIRECTORY ${CMAKE_BINARY_DIR}/api/c/include/ DESTINATION include FILES_MATCHING PATTERN "*.h*")
 
-###############
-# DEPENDENCES #
-###############
+##############
+# DEPENDENCY #
+##############
 # XK Runtime
 find_package(XKRT REQUIRED)
 target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
@@ -164,5 +165,9 @@ target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 ################
 if (USE_TESTS)
   add_subdirectory(tests/)
+endif()
+
+if (BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
