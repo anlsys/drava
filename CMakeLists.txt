@@ -163,11 +163,4 @@ target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 ################
 # Sub projects #
 ################
-if (USE_TESTS)
-  add_subdirectory(tests/)
-endif()
-
-if (BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
 
