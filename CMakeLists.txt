@@ -4,9 +4,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 ###########
 # OPTIONS #
 ###########
-option(USE_TESTS "Compile tests"            ON)
-option(USE_SWIG  "Compile python bindings"  ON)
-option(USE_NATS  "Build JetStream device instead of socket device" ON)
+option(USE_TESTS "Compile tests"                   ON)
+option(USE_SWIG  "Compile python bindings"         ON)
+option(USE_NATS  "Use JetStream instead of socket" OFF)
 
 ###############
 # C++ version #
@@ -36,7 +36,6 @@ endif()
 ######################
 # Core source files  #
 ######################
-# NOTE: you renamed device.cc -> device_socket.cc, so DO NOT list device.cc.
 set(SOURCE_FILES
   ${CMAKE_SOURCE_DIR}/src/drava.cc
   ${DEVICE_SRC}
@@ -58,32 +57,42 @@ set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 ##########
 # DRAVA  #
 ##########
+
+# DRAVA Lib (contains C bindings)
 add_library(${DRAVA_NAME} SHARED ${SOURCE_FILES} ${C_SOURCE_FILES})
 
-target_include_directories(${DRAVA_NAME} PUBLIC
-  ${CMAKE_SOURCE_DIR}/include/
-  ${CMAKE_SOURCE_DIR}/src/
-  ${CMAKE_SOURCE_DIR}/api/c/include/
-)
+# Include directory
+include_directories(${CMAKE_SOURCE_DIR}/include/)
+include_directories(${CMAKE_SOURCE_DIR}/src/)
+include_directories(${CMAKE_SOURCE_DIR}/api/c/include/)
 
-###############
-# DEPENDENCES #
-###############
-# XK Runtime
-find_package(XKRT REQUIRED)
-target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 
-###########################
-# NATS (no pkg-config)    #
-###########################
+############################
+# NATS / JetStream support #
+############################
 if (USE_NATS)
-  # Allow -DNATS_ROOT=... ; default to $HOME/opt/nats
-  if (NOT DEFINED NATS_ROOT)
-    if (DEFINED ENV{HOME})
-      set(NATS_ROOT "$ENV{HOME}/opt/nats")
+  # Determine NATS_ROOT from:
+  #   1) -DNATS_ROOT=... (CMake cache)
+  #   2) environment variable NATS_ROOT
+  #   Otherwise: error
+
+  set(NATS_ROOT "" CACHE PATH "Root of NATS installation")
+
+  if(NOT NATS_ROOT)
+    if(DEFINED ENV{NATS_ROOT})
+      set(NATS_ROOT "$ENV{NATS_ROOT}")
+      message(STATUS "Using NATS_ROOT from environment: ${NATS_ROOT}")
     else()
-      set(NATS_ROOT "${CMAKE_SOURCE_DIR}/third_party/nats")
+      message(FATAL_ERROR
+              "USE_NATS=ON but NATS_ROOT is not set.\n"
+              "Please specify NATS_ROOT via either:\n"
+              "  cmake -DNATS_ROOT=/path/to/nats ..\n"
+              "or environment variable:\n"
+              "  export NATS_ROOT=/path/to/nats"
+      )
     endif()
+  else()
+    message(STATUS "Using user-provided NATS_ROOT: ${NATS_ROOT}")
   endif()
 
   find_path(NATS_INCLUDE_DIR
@@ -113,64 +122,25 @@ if (USE_NATS)
   endif()
 endif()
 
-
-
 ###################
 # Python bindings #
 ###################
+
 if (USE_SWIG)
-  set(SWIG_SOURCE_FILES
-      ${CMAKE_SOURCE_DIR}/api/python/drava.i
-      ${CMAKE_SOURCE_DIR}/api/python/drava_routine_wrap.c)
+
+  set(SWIG_SOURCE_FILES ${CMAKE_SOURCE_DIR}/api/python/drava.i ${CMAKE_SOURCE_DIR}/api/python/drava_routine_wrap.c)
 
   find_package(SWIG REQUIRED)
   include(UseSWIG)
   find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-  # SWIG needs its own -I flags; it does not inherit target include dirs.
-  set(SWIG_INC_DIRS
-      ${CMAKE_SOURCE_DIR}/api/c/include
-      ${CMAKE_BINARY_DIR}/api/c/include
-      ${CMAKE_SOURCE_DIR}/include)
-
-  # Feed -I... to the SWIG preprocessor
-  foreach(dir ${SWIG_INC_DIRS})
-    list(APPEND CMAKE_SWIG_FLAGS "-I${dir}")
-  endforeach()
-
-  # If your .i includes depend on this header, declare it so changes retrigger SWIG
-  set_source_files_properties(${SWIG_SOURCE_FILES}
-    PROPERTIES SWIG_DEPENDS ${CMAKE_SOURCE_DIR}/api/c/include/drava/drava_c.h)
-
+  set_source_files_properties(${SWIG_SOURCE_FILES} PROPERTIES SWIG_DEPENDS ${CMAKE_SOURCE_DIR}/api/c/include/drava/drava_c.h)
   swig_add_library(${DRAVA_NAME}_python LANGUAGE python SOURCES ${SWIG_SOURCE_FILES})
-
-  # Also add include dirs for compiling the generated wrapper C/C++
-  target_include_directories(${DRAVA_NAME}_python PRIVATE
-      ${SWIG_INC_DIRS}
-      ${Python3_INCLUDE_DIRS})
-
   swig_link_libraries(${DRAVA_NAME}_python ${DRAVA_NAME} ${Python3_LIBRARIES})
 
-  # Ensure the core lib is built before SWIG tries to compile/link against it
-  add_dependencies(${DRAVA_NAME}_python ${DRAVA_NAME})
+  include_directories(${Python3_INCLUDE_DIRS})
+
 endif()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ################
 # INSTALLATION #
@@ -181,6 +151,13 @@ install(TARGETS ${DRAVA_NAME}
 )
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/       DESTINATION include FILES_MATCHING PATTERN "*.h*")
 install(DIRECTORY ${CMAKE_BINARY_DIR}/api/c/include/ DESTINATION include FILES_MATCHING PATTERN "*.h*")
+
+###############
+# DEPENDENCES #
+###############
+# XK Runtime
+find_package(XKRT REQUIRED)
+target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 
 ################
 # Sub projects #

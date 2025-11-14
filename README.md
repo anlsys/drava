@@ -1,5 +1,5 @@
-# drava
-End-to-end functional simulation for BIA systems and simulations
+# Drava
+Runtime and end-to-end simulation for BIA systems and simulations
 
 ## Installation
 
@@ -20,13 +20,10 @@ module use /home/rpereira/shared/modules
 # C/C++ 20 compiler
 module use /soft/modulefiles
 module load llvm/master-nightly
-<<<<<<< HEAD
 module load cmake
-module load spack/gcc-0.6.1
-=======
->>>>>>> origin/main
 module load intel/oneapi/release/2024.1
 module load cuda/12.3.0
+module load hwloc
 
 # XKRT
 module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
@@ -65,23 +62,32 @@ export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python 
 ```
 - In terminal 2, run the subscriber script
 ```bash
+cd jetstream
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python jetstream/publisher.py
+python publisher.py
 ```
-- In terminal 3, run test
+- In terminal 3, run Python example of the inference task
 ```bash
-./tests/tests
+cd jetstream
+source venv/bin/activate
+python sample_task.py
 ```
-
+### Example build using Sockets
+```bash
+mkdir build-debug-sockets
+cd build-debug-sockets
+CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
+make
+export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
+```
 ### Example run using Sockets
-In terminal A
+- In terminal 1:
 ```
 socat UNIX-LISTEN:/tmp/accel_2048.sock,fork -
 ```
-
-In terminal B
+- In terminal 2:
 ```
 ./tests/tests
 ```
