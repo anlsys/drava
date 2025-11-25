@@ -216,3 +216,4 @@ __marimo__/
 jetstream/nats-server
 
 .DS_Store
+commit_config.txt

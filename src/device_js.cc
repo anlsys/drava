@@ -16,16 +16,16 @@
 
 #include <nats/nats.h>  // Core + JetStream API (libnats 3.12.x)
 
-static inline const char* ENV(const char* k, const char* defv) {
-    const char* v = std::getenv(k);
+static inline const char *ENV(const char *k, const char *defv) {
+    const char *v = std::getenv(k);
     return v ? v : defv;
 }
 
 static void
 parse_line(
-        drava_t * drava,
+        drava_t *drava,
         device_global_id_t device_global_id,
-        const std::string & line
+        const std::string &line
 ) {
     LOGGER_DEBUG("Parsing: %s", line.c_str());
     if (drava->routine)
@@ -34,21 +34,20 @@ parse_line(
 
 int
 drava_device_main(
-        drava_t * drava,
+        drava_t *drava,
         device_global_id_t device_global_id,
-        thread_t * thread
+        thread_t *thread
 ) {
-    drava_device_t * drava_device = drava->devices + device_global_id;
-    team_t * team = &drava_device->team;
+    drava_device_t *drava_device = drava->devices + device_global_id;
+    team_t *team = &drava_device->team;
 
     /* thread 0: subscribe + fetch from JetStream, spawn a task per message */
-    if (thread->tid == 0)
-    {
+    if (thread->tid == 0) {
         LOGGER_INFO("JetStream trying to connect");
-        const char* NATS_URL = ENV("NATS_URL", "nats://127.0.0.1:4222");
-        const char* STREAM   = ENV("DRAVA_STREAM", "FRAMES");
-        const char* SUBJECT  = ENV("DRAVA_SUBJECT", "frames.raw");
-        const char* DURABLE  = ENV("DRAVA_DURABLE", "drava_consumer");
+        const char *NATS_URL = ENV("NATS_URL", "nats://127.0.0.1:4222");
+        const char *STREAM = ENV("DRAVA_STREAM", "FRAMES");
+        const char *SUBJECT = ENV("DRAVA_SUBJECT", "frames.raw");
+        const char *DURABLE = ENV("DRAVA_DURABLE", "drava_consumer");
 
         natsStatus s;
         natsConnection *nc = nullptr;
@@ -61,37 +60,36 @@ drava_device_main(
             LOGGER_FATAL("NATS connect failed: %s", natsStatus_GetText(s));
 
         // JetStream context
-        jsOptions jopts; jsOptions_Init(&jopts);
+        jsOptions jopts;
+        jsOptions_Init(&jopts);
         s = natsConnection_JetStream(&js, nc, &jopts);
         if (s != NATS_OK)
             LOGGER_FATAL("JetStream ctx failed: %s", natsStatus_GetText(s));
 
         // Ensure stream exists (subjects must include frames.raw)
-        {
-            jsStreamConfig sc; std::memset(&sc, 0, sizeof(sc));
-            sc.Name       = STREAM;
-            sc.Storage    = js_FileStorage;     // persisted by server to -sd dir
-            sc.Retention  = js_LimitsPolicy;
-            const char* subs[] = {"frames.*", nullptr};
-            sc.Subjects   = subs;
-            sc.SubjectsLen = 1;
+        jsStreamConfig sc;
+        std::memset(&sc, 0, sizeof(sc));
+        sc.Name = STREAM;
+        sc.Storage = js_FileStorage;     // persisted by server to -sd dir
+        sc.Retention = js_LimitsPolicy;
+        const char *subs[] = {"frames.*", nullptr};
+        sc.Subjects = subs;
+        sc.SubjectsLen = 1;
 
-            jsStreamInfo *si = nullptr;
-            (void) js_AddStream(&si, js, &sc, /*opts*/nullptr, /*err*/nullptr);
-            jsStreamInfo_Destroy(si); // ok if it already existed
-        }
+        jsStreamInfo *si = nullptr;
+        (void) js_AddStream(&si, js, &sc, /*opts*/nullptr, /*err*/nullptr);
+        jsStreamInfo_Destroy(si); // ok if it already existed
 
         // Ensure durable consumer filtered to SUBJECT (explicit acks)
-        {
-            jsConsumerConfig cc; std::memset(&cc, 0, sizeof(cc));
-            cc.Durable       = DURABLE;
-            cc.AckPolicy     = js_AckExplicit;
-            cc.FilterSubject = SUBJECT;
+        jsConsumerConfig cc;
+        std::memset(&cc, 0, sizeof(cc));
+        cc.Durable = DURABLE;
+        cc.AckPolicy = js_AckExplicit;
+        cc.FilterSubject = SUBJECT;
 
-            jsConsumerInfo *ci = nullptr;
-            (void) js_AddConsumer(&ci, js, STREAM, &cc, /*opts*/nullptr, /*err*/nullptr);
-            jsConsumerInfo_Destroy(ci);
-        }
+        jsConsumerInfo *ci = nullptr;
+        (void) js_AddConsumer(&ci, js, STREAM, &cc, /*opts*/nullptr, /*err*/nullptr);
+        jsConsumerInfo_Destroy(ci);
 
         // Pull subscribe
         s = js_PullSubscribe(&sub, js, SUBJECT, STREAM,
@@ -103,8 +101,7 @@ drava_device_main(
                     NATS_URL, STREAM, SUBJECT, DURABLE);
 
         // Fetch loop — pull batches and spawn Drava tasks
-        while (true)
-        {
+        while (true) {
             natsMsgList list = {0};
             s = natsSubscription_Fetch(&list, sub, /*batch*/8, /*timeout ms*/1000, /*err*/nullptr);
             if (s == NATS_TIMEOUT) {
@@ -115,24 +112,27 @@ drava_device_main(
                 LOGGER_FATAL("Fetch error: %s", natsStatus_GetText(s));
             }
 
-            for (int i = 0; i < list.Count; ++i)
-            {
+            for (int i = 0; i < list.Count; ++i) {
                 natsMsg *msg = list.Msgs[i];
 
                 // Optional: log JetStream metadata (seq numbers)
                 jsMsgMetaData *md = nullptr;
                 if (natsMsg_GetMetaData(&md, msg) == NATS_OK && md != nullptr) {
-                    LOGGER_DEBUG("[stream_seq=%" PRIu64 " consumer_seq=%" PRIu64 "]",
-                            (uint64_t)md->Sequence.Stream, (uint64_t)md->Sequence.Consumer);
+                    LOGGER_DEBUG("[stream_seq=%"
+                    PRIu64
+                    " consumer_seq=%"
+                    PRIu64
+                    "]",
+                            (uint64_t) md->Sequence.Stream, (uint64_t) md->Sequence.Consumer);
                     jsMsgMetaData_Destroy(md);
                 }
 
                 // Extract payload into std::string (publisher sends JSON)
                 std::string line(natsMsg_GetData(msg),
-                                 (size_t)natsMsg_GetDataLength(msg));
+                                 (size_t) natsMsg_GetDataLength(msg));
 
                 // Spawn a task per message (same pattern as socket lines)
-                drava->runtime.team_task_spawn(team, [=] (task_t * task) {
+                drava->runtime.team_task_spawn(team, [=](task_t *task) {
                     parse_line(drava, device_global_id, line);
                 });
 
