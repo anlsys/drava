@@ -4,9 +4,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 ###########
 # OPTIONS #
 ###########
-option(USE_TESTS "Compile tests"                   ON)
-option(USE_SWIG  "Compile python bindings"         ON)
-option(USE_NATS  "Use JetStream instead of socket" OFF)
+option(USE_TESTS "Compile tests" ON)
+option(USE_SWIG "Compile python bindings" ON)
+#option(USE_NATS  "Use JetStream instead of socket" OFF)
 option(BUILD_EXAMPLES "Build example applications" ON)
 
 ###############
@@ -17,34 +17,71 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall -Wextra -Wreturn-type)
 
-# Project
+##########
+# PROJECT
+##########
 set(DRAVA_NAME drava)
 project(${DRAVA_NAME})
 
-########################
-# Choose device source #
-########################
-# Default to socket device; override when USE_NATS=ON
-set(DEVICE_SRC ${CMAKE_SOURCE_DIR}/src/device_socket.cc)
-if (USE_NATS)
-  message(STATUS "USE_NATS=ON: building JetStream device (device_js.cc)")
-  set(DEVICE_SRC ${CMAKE_SOURCE_DIR}/src/device_js.cc)
-  add_compile_definitions(DRAVA_USE_NATS=1)
-else()
-  message(STATUS "USE_NATS=OFF: building UNIX socket device (device_socket.cc)")
-endif()
+
+##########################################
+# Optional NATS / JetStream auto-detect  #
+##########################################
+set(NATS_ENABLED FALSE)
+set(NATS_INCLUDE_DIR "")
+set(NATS_LIBRARY "")
+
+# Allow override via CMake cache, but default to env var if present
+set(NATS_ROOT "$ENV{NATS_ROOT}" CACHE PATH "Root of NATS installation (optional)")
+
+if (NATS_ROOT)
+    message(STATUS "Trying to enable NATS backend using NATS_ROOT=${NATS_ROOT}")
+
+    find_path(NATS_INCLUDE_DIR
+            NAMES nats/nats.h
+            HINTS
+            "${NATS_ROOT}/include"
+            "${NATS_ROOT}/include/nats"
+    )
+
+    find_library(NATS_LIBRARY
+            NAMES nats
+            HINTS
+            "${NATS_ROOT}/lib64"
+            "${NATS_ROOT}/lib"
+    )
+
+    if (NATS_INCLUDE_DIR AND NATS_LIBRARY)
+        set(NATS_ENABLED TRUE)
+        message(STATUS "NATS backend enabled (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
+        find_package(Threads REQUIRED)
+    else ()
+        message(WARNING
+                "NATS_ROOT is set to ${NATS_ROOT} but libnats or headers not found.\n"
+                "NATS backend will be disabled and only socket backend will be available.")
+    endif ()
+else ()
+    message(STATUS "NATS_ROOT not set: building without NATS backend (socket only)")
+endif ()
 
 ######################
 # Core source files  #
 ######################
+
+# Always compile socket backend
 set(SOURCE_FILES
-  ${CMAKE_SOURCE_DIR}/src/drava.cc
-  ${DEVICE_SRC}
+        ${CMAKE_SOURCE_DIR}/src/drava.cc
+        ${CMAKE_SOURCE_DIR}/src/transport_socket.cc
 )
+
+# Optionally add JetStream backend
+if (NATS_ENABLED)
+    list(APPEND SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/transport_js.cc)
+endif ()
 
 # C bindings to its own custom lib
 set(C_SOURCE_FILES
-  ${CMAKE_SOURCE_DIR}/api/c/src/api.cc
+        ${CMAKE_SOURCE_DIR}/api/c/src/api.cc
 )
 
 #########
@@ -68,60 +105,45 @@ include_directories(${CMAKE_SOURCE_DIR}/src/)
 include_directories(${CMAKE_SOURCE_DIR}/api/c/include/)
 
 
-############################
-# NATS / JetStream support #
-############################
-if (USE_NATS)
-  # Determine NATS_ROOT from:
-  #   1) -DNATS_ROOT=... (CMake cache)
-  #   2) environment variable NATS_ROOT
-  #   Otherwise: error
+##########################################
+# Optional NATS / JetStream auto-detect  #
+##########################################
+set(NATS_ENABLED FALSE)
+set(NATS_INCLUDE_DIR "")
+set(NATS_LIBRARY "")
 
-  set(NATS_ROOT "" CACHE PATH "Root of NATS installation")
+# Allow override via CMake cache, but default to env var if present
+set(NATS_ROOT "$ENV{NATS_ROOT}" CACHE PATH "Root of NATS installation (optional)")
 
-  if(NOT NATS_ROOT)
-    if(DEFINED ENV{NATS_ROOT})
-      set(NATS_ROOT "$ENV{NATS_ROOT}")
-      message(STATUS "Using NATS_ROOT from environment: ${NATS_ROOT}")
-    else()
-      message(FATAL_ERROR
-              "USE_NATS=ON but NATS_ROOT is not set.\n"
-              "Please specify NATS_ROOT via either:\n"
-              "  cmake -DNATS_ROOT=/path/to/nats ..\n"
-              "or environment variable:\n"
-              "  export NATS_ROOT=/path/to/nats"
-      )
-    endif()
-  else()
-    message(STATUS "Using user-provided NATS_ROOT: ${NATS_ROOT}")
-  endif()
+if (NATS_ROOT)
+    message(STATUS "Trying to enable NATS backend using NATS_ROOT=${NATS_ROOT}")
 
-  find_path(NATS_INCLUDE_DIR
-    NAMES nats/nats.h
-    HINTS "${NATS_ROOT}/include"
-  )
+    find_path(NATS_INCLUDE_DIR
+            NAMES nats/nats.h
+            HINTS
+            "${NATS_ROOT}/include"
+            "${NATS_ROOT}/include/nats"
+    )
 
-  find_library(NATS_LIBRARY
-    NAMES nats
-    HINTS "${NATS_ROOT}/lib64" "${NATS_ROOT}/lib"
-  )
+    find_library(NATS_LIBRARY
+            NAMES nats
+            HINTS
+            "${NATS_ROOT}/lib64"
+            "${NATS_ROOT}/lib"
+    )
 
-  if (NOT NATS_INCLUDE_DIR OR NOT NATS_LIBRARY)
-    message(FATAL_ERROR "USE_NATS=ON but libnats not found.
-      Set -DNATS_ROOT=/path/to/nats (expect include/nats/nats.h and lib64/libnats.so).")
-  endif()
-
-  find_package(Threads REQUIRED)
-
-  target_include_directories(${DRAVA_NAME} PRIVATE ${NATS_INCLUDE_DIR})
-  target_link_libraries(${DRAVA_NAME} PRIVATE ${NATS_LIBRARY} Threads::Threads)
-
-  # rpath to where libnats.so lives (helps at runtime)
-  get_filename_component(_NATS_LIBDIR "${NATS_LIBRARY}" DIRECTORY)
-  if (_NATS_LIBDIR)
-    target_link_options(${DRAVA_NAME} PRIVATE "-Wl,-rpath,${_NATS_LIBDIR}")
-  endif()
-endif()
+    if (NATS_INCLUDE_DIR AND NATS_LIBRARY)
+        set(NATS_ENABLED TRUE)
+        message(STATUS "NATS backend enabled (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
+        find_package(Threads REQUIRED)
+    else ()
+        message(WARNING
+                "NATS_ROOT is set to ${NATS_ROOT} but libnats or headers not found.\n"
+                "NATS backend will be disabled and only socket backend will be available.")
+    endif ()
+else ()
+    message(STATUS "NATS_ROOT not set: building without NATS backend (socket only)")
+endif ()
 
 ###################
 # Python bindings #
@@ -129,28 +151,28 @@ endif()
 
 if (USE_SWIG)
 
-  set(SWIG_SOURCE_FILES ${CMAKE_SOURCE_DIR}/api/python/drava.i ${CMAKE_SOURCE_DIR}/api/python/drava_routine_wrap.c)
+    set(SWIG_SOURCE_FILES ${CMAKE_SOURCE_DIR}/api/python/drava.i ${CMAKE_SOURCE_DIR}/api/python/drava_routine_wrap.c)
 
-  find_package(SWIG REQUIRED)
-  include(UseSWIG)
-  find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+    find_package(SWIG REQUIRED)
+    include(UseSWIG)
+    find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-  set_source_files_properties(${SWIG_SOURCE_FILES} PROPERTIES SWIG_DEPENDS ${CMAKE_SOURCE_DIR}/api/c/include/drava/drava_c.h)
-  swig_add_library(${DRAVA_NAME}_python LANGUAGE python SOURCES ${SWIG_SOURCE_FILES})
-  swig_link_libraries(${DRAVA_NAME}_python ${DRAVA_NAME} ${Python3_LIBRARIES})
+    set_source_files_properties(${SWIG_SOURCE_FILES} PROPERTIES SWIG_DEPENDS ${CMAKE_SOURCE_DIR}/api/c/include/drava/drava_c.h)
+    swig_add_library(${DRAVA_NAME}_python LANGUAGE python SOURCES ${SWIG_SOURCE_FILES})
+    swig_link_libraries(${DRAVA_NAME}_python ${DRAVA_NAME} ${Python3_LIBRARIES})
 
-  include_directories(${Python3_INCLUDE_DIRS})
+    include_directories(${Python3_INCLUDE_DIRS})
 
-endif()
+endif ()
 
 ################
 # INSTALLATION #
 ################
 install(TARGETS ${DRAVA_NAME}
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
 )
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/       DESTINATION include FILES_MATCHING PATTERN "*.h*")
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include FILES_MATCHING PATTERN "*.h*")
 install(DIRECTORY ${CMAKE_BINARY_DIR}/api/c/include/ DESTINATION include FILES_MATCHING PATTERN "*.h*")
 
 ##############

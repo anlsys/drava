@@ -33,7 +33,7 @@ parse_line(
 }
 
 int
-drava_device_main(
+drava_transport_nats_main(
         drava_t *drava,
         device_global_id_t device_global_id,
         thread_t *thread

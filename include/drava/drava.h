@@ -12,15 +12,15 @@
 # define __DRAVA_H__
 
 extern "C" {
-    # include <drava/drava_c.h>
+# include <drava/drava_c.h>
 };
 
 # include <xkrt/runtime.h>
+
 XKRT_NAMESPACE_USE;
 
-struct  drava_device_t
-{
-   /* xkrt team of threads */
+struct drava_device_t {
+    /* xkrt team of threads */
     team_t team;
 
     /* the list of places for that device (= 1x cpuset) */
@@ -28,8 +28,7 @@ struct  drava_device_t
 
 };
 
-struct  drava_t
-{
+struct drava_t {
     /***********/
     /* Members */
     /***********/
@@ -43,12 +42,15 @@ struct  drava_t
     /* the routine to run */
     drava_routine_t routine;
 
+    /* which transport backend to use (socket or NATS) */
+    drava_transport_t transport_type;
+
     /***********/
     /* Methods */
     /***********/
 
     /* Initialize drava */
-    int init(void);
+    int init(drava_transport_t transport_type);
 
     /* Register a routine (TODO: add an event associated with it?) */
     int register_routine(drava_routine_t routine);
@@ -60,7 +62,18 @@ struct  drava_t
     int deinit(void);
 };
 
+/* Transport-specific entry points (implemented in transport_*.cc) */
+int drava_transport_socket_main(drava_t *drava,
+                                device_global_id_t device_global_id,
+                                thread_t *thread);
+
+int drava_transport_nats_main(drava_t *drava,
+                              device_global_id_t device_global_id,
+                              thread_t *thread);
+
 /* main for a thread on a given device */
-int drava_device_main(drava_t * drava, device_global_id_t device_global_id, thread_t * thread);
+int drava_transport_main(drava_t *drava,
+                      device_global_id_t device_global_id,
+                      thread_t *thread);
 
 # endif /* __DRAVA_H__ */
