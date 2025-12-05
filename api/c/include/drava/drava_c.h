@@ -52,6 +52,8 @@ int drava_init_with_transport(drava_transport_t transport_type);
  */
 int drava_init(const char *transport_name);
 
+int drava_init_from_string(const char *transport_name);
+
 int drava_register_routine(drava_routine_t routine);
 
 int drava_listen(void);

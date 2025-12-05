@@ -34,10 +34,12 @@ drava_transport_main(drava_t *drava,
 {
     switch (drava->transport_type) {
         case DRAVA_TRANSPORT_SOCKET:
+            LOGGER_DEBUG("Drava transport: Socket");
             return drava_transport_socket_main(drava, device_global_id, thread);
 
         case DRAVA_TRANSPORT_NATS:
 #ifdef DRAVA_HAS_NATS
+            LOGGER_DEBUG("Drava transport: NATS");
             return drava_transport_nats_main(drava, device_global_id, thread);
 #else
             LOGGER_FATAL("NATS transport selected at runtime but not compiled in");
@@ -45,7 +47,7 @@ drava_transport_main(drava_t *drava,
 #endif
 
         default:
-            LOGGER_FATAL("Unknown transport kind %d", (int)drava->transport_kind);
+            LOGGER_FATAL("Unknown transport kind %d", (int)drava->transport_type);
             return -1;
     }
 }

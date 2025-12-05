@@ -54,16 +54,9 @@ make install
 ```
 - Build Drava
 ```bash
+# Define the nats root
+export NATS_ROOT=$HOME/opt/nats
 mkdir build-debug-nats && cd build-debug-nats
-CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_NATS=ON -DNATS_ROOT=$HOME/opt/nats ..
-make
-export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
-```
-
-### Building with Sockets
-```bash
-mkdir build-debug-sockets
-cd build-debug-sockets
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path

@@ -46,7 +46,7 @@ def func(s: str):
 
     print(f"frame_id={msg.get('frame_id')} | prediction={predicted_species}")
 
-drava.init()
+drava.init("nats")
 drava.register_routine_py(func)
 drava.listen_py()
 drava.deinit()

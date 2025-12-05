@@ -27,42 +27,40 @@ project(${DRAVA_NAME})
 ##########################################
 # Optional NATS / JetStream auto-detect  #
 ##########################################
-set(NATS_ENABLED FALSE)
-set(NATS_INCLUDE_DIR "")
-set(NATS_LIBRARY "")
-
-# Allow override via CMake cache, but default to env var if present
+# --- NATS / JetStream detection -----------------------------------------
 set(NATS_ROOT "$ENV{NATS_ROOT}" CACHE PATH "Root of NATS installation (optional)")
 
+set(NATS_ENABLED FALSE)
+
 if (NATS_ROOT)
-    message(STATUS "Trying to enable NATS backend using NATS_ROOT=${NATS_ROOT}")
+    message(STATUS "Trying to enable NATS as transport using NATS_ROOT=${NATS_ROOT}")
 
     find_path(NATS_INCLUDE_DIR
             NAMES nats/nats.h
-            HINTS
-            "${NATS_ROOT}/include"
-            "${NATS_ROOT}/include/nats"
+            HINTS "${NATS_ROOT}/include"
+            NO_DEFAULT_PATH
     )
 
     find_library(NATS_LIBRARY
             NAMES nats
-            HINTS
-            "${NATS_ROOT}/lib64"
-            "${NATS_ROOT}/lib"
+            HINTS "${NATS_ROOT}/lib64" "${NATS_ROOT}/lib"
+            NO_DEFAULT_PATH
     )
+    message(STATUS "NATS backend searched in the (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
 
-    if (NATS_INCLUDE_DIR AND NATS_LIBRARY)
+    if (NOT NATS_INCLUDE_DIR OR NOT NATS_LIBRARY)
+        message(FATAL_ERROR "Expect include/nats/nats.h and lib64/libnats.so in NATS_ROOT.")
+    else ()
         set(NATS_ENABLED TRUE)
         message(STATUS "NATS backend enabled (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
-        find_package(Threads REQUIRED)
-    else ()
-        message(WARNING
-                "NATS_ROOT is set to ${NATS_ROOT} but libnats or headers not found.\n"
-                "NATS backend will be disabled and only socket backend will be available.")
-    endif ()
-else ()
-    message(STATUS "NATS_ROOT not set: building without NATS backend (socket only)")
-endif ()
+    endif()
+else()
+    message(STATUS "NATS_ROOT not set: building without NATS backend (socket only).\n
+    If you want to use NATS specify NATS_ROOT as environment variable:\n
+    export NATS_ROOT=/path/to/nats
+    ")
+endif()
+# ------------------------------------------------------------------------
 
 ######################
 # Core source files  #
@@ -74,10 +72,11 @@ set(SOURCE_FILES
         ${CMAKE_SOURCE_DIR}/src/transport_socket.cc
 )
 
-# Optionally add JetStream backend
+# Optionally add JetStream as transport
 if (NATS_ENABLED)
     list(APPEND SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/transport_js.cc)
-endif ()
+    find_package(Threads REQUIRED)
+endif()
 
 # C bindings to its own custom lib
 set(C_SOURCE_FILES
@@ -104,47 +103,18 @@ include_directories(${CMAKE_SOURCE_DIR}/include/)
 include_directories(${CMAKE_SOURCE_DIR}/src/)
 include_directories(${CMAKE_SOURCE_DIR}/api/c/include/)
 
+# NATS-specific properties
+if (NATS_ENABLED)
+    target_include_directories(${DRAVA_NAME} PRIVATE ${NATS_INCLUDE_DIR})
+    target_link_libraries(${DRAVA_NAME} PRIVATE ${NATS_LIBRARY} Threads::Threads)
+    target_compile_definitions(${DRAVA_NAME} PRIVATE DRAVA_HAS_NATS=1)
 
-##########################################
-# Optional NATS / JetStream auto-detect  #
-##########################################
-set(NATS_ENABLED FALSE)
-set(NATS_INCLUDE_DIR "")
-set(NATS_LIBRARY "")
-
-# Allow override via CMake cache, but default to env var if present
-set(NATS_ROOT "$ENV{NATS_ROOT}" CACHE PATH "Root of NATS installation (optional)")
-
-if (NATS_ROOT)
-    message(STATUS "Trying to enable NATS backend using NATS_ROOT=${NATS_ROOT}")
-
-    find_path(NATS_INCLUDE_DIR
-            NAMES nats/nats.h
-            HINTS
-            "${NATS_ROOT}/include"
-            "${NATS_ROOT}/include/nats"
-    )
-
-    find_library(NATS_LIBRARY
-            NAMES nats
-            HINTS
-            "${NATS_ROOT}/lib64"
-            "${NATS_ROOT}/lib"
-    )
-
-    if (NATS_INCLUDE_DIR AND NATS_LIBRARY)
-        set(NATS_ENABLED TRUE)
-        message(STATUS "NATS backend enabled (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
-        find_package(Threads REQUIRED)
-    else ()
-        message(WARNING
-                "NATS_ROOT is set to ${NATS_ROOT} but libnats or headers not found.\n"
-                "NATS backend will be disabled and only socket backend will be available.")
-    endif ()
-else ()
-    message(STATUS "NATS_ROOT not set: building without NATS backend (socket only)")
-endif ()
-
+    # rpath to where libnats.so lives (helps at runtime)
+    get_filename_component(_NATS_LIBDIR "${NATS_LIBRARY}" DIRECTORY)
+    if (_NATS_LIBDIR)
+        target_link_options(${DRAVA_NAME} PRIVATE "-Wl,-rpath,${_NATS_LIBDIR}")
+    endif()
+endif()
 ###################
 # Python bindings #
 ###################
