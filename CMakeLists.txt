@@ -6,7 +6,6 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 ###########
 option(USE_TESTS "Compile tests" ON)
 option(USE_SWIG "Compile python bindings" ON)
-#option(USE_NATS  "Use JetStream instead of socket" OFF)
 option(BUILD_EXAMPLES "Build example applications" ON)
 
 ###############
