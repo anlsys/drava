@@ -15,14 +15,14 @@
 static void *
 handler(const char * s)
 {
-    printf("Handler raised , received %s\n", s);
+    printf("C app: Received %s\n", s);
     return NULL;
 }
 
 int
 main(void)
 {
-    assert(drava_init()                     == DRAVA_SUCCESS);
+    assert(drava_init("nats")                     == DRAVA_SUCCESS);
     assert(drava_register_routine(handler)  == DRAVA_SUCCESS); //- this is a toy
     assert(drava_listen()                   == DRAVA_SUCCESS);
     assert(drava_deinit()                   == DRAVA_SUCCESS);

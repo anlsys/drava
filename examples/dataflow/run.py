@@ -1,9 +1,10 @@
 import drava
 
 def func(s):
-    print("Hello Python, received: {}".format(s))
+    print("Python app received: {}".format(s))
 
-drava.init()
+drava.init("socket")
+# drava.init("nats")
 drava.register_routine_py(func)
 drava.listen_py()
 drava.deinit()
