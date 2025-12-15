@@ -1,24 +1,60 @@
-## Iris Dataset Inference Example
+## PtychoNN Example
 
-This example demonstrates an end-to-end publisher (Jetstream) → Drava (consumer) → app inference
-workflow using a pre-trained KNN model. A one-row Iris feature vector is published through JetStream,
-delivered by Drava, decoded by the app which then classify it using a pre-trained KNN model.
+This example demonstrates an end-to-end inference workflow for PtychoNN (TF v2) using Drava as the runtime.
+Diffraction patches are sent from a publisher in batches, transported through Drava using either
+JetStream or a Unix domain socket, and consumed by the application. 
+
+The application accumulates all
+incoming patches and runs inference once on the complete dataset, followed by stitching and MSE
+evaluation.
+
 
 ### Dataset and model
 
-The Iris dataset is a classic benchmark in pattern recognition containing 150 samples (50 per class) of 3 Iris
-species. Each sample includes 4 numeric features: [sepal length, sepal width, petal length, petal width]
-The target label is one of the species: [Iris setosa, Iris versicolor, Iris virginica]
+The example uses test data and pre-trained weights from the official PtychoNN dataset hosted on
+Hugging Face.
 
-We generate the [iris_knn_model.pkl](iris_knn_model.pkl) file by training
-a 3-NN classifier on the Iris dataset using scikit-learn and serializing it with joblib.
-At inference time, the app receives a single feature row with the four feature values.
-Using the fixed KNN model, the app returns the predicted species name.
+Input data:
+- X_test.npy  
+  Shape: (N, 64, 64, 1)  
+  Each entry is a diffraction patch used as input to the network.
 
+Ground truth (optional, for evaluation):
+- Y_I_test.npy  
+  Ground-truth amplitude patches.
+- Y_phi_test.npy  
+  Ground-truth phase patches.
+
+Model selection:
+- wts4/min_epoch.npy  
+  Contains the epoch index of the best-performing model during training.
+
+Model file:
+- wts4/weights.<min_epoch>.hdf5  
+  This is the actual Keras model file. The network has two outputs:
+   - predicted amplitude
+   - predicted phase
+
+### Downloading required data and files
+Before running the example, download the required files using the Hugging Face Hub API.
+```shell 
+cd examples/ptychonn
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python download_partial.py
+```
 
 ## Build
 
 Follow the build instructions for Drava from the root [README file](../../README.md). To ensure Jetstream support, put the `NATS_ROOT` path in the environment variable.
+
+Add the build directory to `PYTHONPATH` before running the app.
+```shell
+cd ~/drava/build-debug-nats # the build dir
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+```
+
 
 ## Transport layers
 
@@ -36,10 +72,13 @@ Both ultimately deliver a JSON payload to `app.py`.
 JetStream → (pull) → Drava → (push) → app.py
 
 1. Publisher [publisher_jetstream.py](publisher_jetstream.py):
-    - Creates a single-row Iris sample using NumPy/Pandas.
-    - Encodes the feature matrix into base64 for transport.
-    - Packages metadata (rows, cols, dtype, frame_id, feature names).
-    - Publishes the message to a JetStream subject (`frames.raw`).
+   - Loads `X_test.npy`.
+   - Splits it into batches.
+   - Encodes each batch as base64 (`float32`, row-major).
+   - Publishes messages to the JetStream subject `frames.raw` with metadata:
+      - `job_id`, `start`, `end`
+      - `rows`, `patch_side`, `n_total`
+      - `dtype`, `order`, `frame_id`
 
 2. Transport Layer (JetStream + Drava runtime):
     - JetStream provides a reliable messaging backend.
@@ -47,11 +86,10 @@ JetStream → (pull) → Drava → (push) → app.py
     - Drava invokes the registered Python callback (`func`) with the message payload.
 
 3. Application (`app.py`):
-    - Drava passes the JSON payload to the application.
-    - Application reconstructs the NumPy array and DataFrame.
-    - A KNN model (`iris_knn_model.pkl`) is loaded once at startup.
-    - The model predicts the Iris species.
-    - Application prints the prediction with its associated `frame_id`.
+   - Loads the PtychoNN `.hdf5` model, the ground truth files (`Y_I_test.npy`, `Y_phi_test.npy`) once at startup.
+   - Decodes incoming batches into `(B, 64, 64, 1)` tensors.
+   - Runs prediction, stitching, and MSE
+     once all patches are received.
 
 ### Run using Jetstream
 
@@ -65,7 +103,7 @@ cd ~/nats_binary
 - In terminal 2, run the publisher script
 
 ```shell
-cd examples/iris_knn
+cd examples/ptychonn
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -75,7 +113,7 @@ python publisher_jetstream.py
 - In terminal 3, run the app ensuring it is using `drava.init("nats")`:
 
 ```shell
-cd examples/iris_knn
+cd examples/ptychonn
 source venv/bin/activate
 python app.py
 ```
@@ -104,7 +142,7 @@ socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
 - In terminal 2, run the publisher script
 
 ```shell
-cd examples/iris_knn
+cd examples/ptychonn
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -114,31 +152,12 @@ python publisher_socket.py
 - In terminal 3, run the app ensuring it is using `drava.init("socket")`:
 
 ```shell
-cd examples/iris_knn
+cd examples/ptychonn
 source venv/bin/activate
 python app.py
 ```
 
-### Common error and fix
-#### `Drava` module error in Python app
-#### Scenario
-While running `python app.py` may raise the following error:
-```shell
-Traceback (most recent call last):
-File "/home/ashovon/drava/examples/iris_knn/app.py", line 1, in <module>
-import drava
-ModuleNotFoundError: No module named 'drava'
-```
-This error shows Python cannot locate the Drava Python bindings. This happens because the drava Python module is generated inside build directory (e.g., `build-debug-nats`) and is not installed into the virtual environment.
-
-#### Solution
-Add the build directory to `PYTHONPATH` before running the app.
-```shell
-cd ~/drava/build-debug-nats # the build dir
-export PYTHONPATH="$(pwd):$PYTHONPATH"
-```
-
 ### References
 
-- [Iris plants dataset](https://scikit-learn.org/stable/datasets/toy_dataset.html#iris-plants-dataset)
-- [KNeighborsClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html)
+- []()
+- []()
