@@ -12,6 +12,7 @@ from skimage.transform import resize
 # -----------------------------
 def configure_gpu_memory_growth():
     gpus = tf.config.experimental.list_physical_devices("GPU")
+    print(f"Total GPUs: {len(gpus)}")
     if gpus:
         try:
             for gpu in gpus:

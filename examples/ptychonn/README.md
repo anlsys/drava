@@ -145,6 +145,8 @@ socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
 cd examples/ptychonn
 python -m venv venv
 source venv/bin/activate
+# JLSE Interactive node
+# pip install --proxy http://proxy.ftm.alcf.anl.gov:3128 -r requirements.txt
 pip install -r requirements.txt
 python publisher_socket.py
 ```
@@ -158,6 +160,6 @@ python app.py
 ```
 
 ### References
-
-- []()
-- []()
+- [PtychoNN Github repository](https://github.com/mcherukara/PtychoNN)
+- [PtychoNN HuggingFace repository](https://huggingface.co/datasets/mcherukara/PtychoNN_data/tree/main)
+- Cherukara, M. J., Zhou, T., Nashed, Y., Enfedaque, P., Hexemer, A., Harder, R. J., & Holt, M. V. (2020). AI-enabled high-resolution scanning coherent diffraction imaging. Applied Physics Letters, 117(4).
