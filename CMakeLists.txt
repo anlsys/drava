@@ -152,6 +152,9 @@ find_package(XKRT REQUIRED)
 target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 
 ################
-# Sub projects #
+# Tests
 ################
-
+if (USE_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

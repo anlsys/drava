@@ -9,13 +9,13 @@
  *****************************************************************************/
 
 #ifndef __DRAVA_H__
-# define __DRAVA_H__
+#define __DRAVA_H__
 
 extern "C" {
-# include <drava/drava_c.h>
+#include <drava/drava_c.h>
 };
 
-# include <xkrt/runtime.h>
+#include <xkrt/runtime.h>
 
 XKRT_NAMESPACE_USE;
 
@@ -25,7 +25,6 @@ struct drava_device_t {
 
     /* the list of places for that device (= 1x cpuset) */
     thread_place_t places_list;
-
 };
 
 struct drava_t {
@@ -62,6 +61,10 @@ struct drava_t {
     int deinit(void);
 };
 
+void parse_line(drava_t *drava,
+                device_global_id_t device_global_id,
+                const std::string &line);
+
 /* Transport-specific entry points (implemented in transport_*.cc) */
 int drava_transport_socket_main(drava_t *drava,
                                 device_global_id_t device_global_id,
@@ -73,7 +76,7 @@ int drava_transport_nats_main(drava_t *drava,
 
 /* main for a thread on a given device */
 int drava_transport_main(drava_t *drava,
-                      device_global_id_t device_global_id,
-                      thread_t *thread);
+                         device_global_id_t device_global_id,
+                         thread_t *thread);
 
-# endif /* __DRAVA_H__ */
+#endif /* __DRAVA_H__ */

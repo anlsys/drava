@@ -9,15 +9,12 @@
  *****************************************************************************/
 
 #ifndef __DRAVA_C_H__
-# define __DRAVA_C_H__
+#define __DRAVA_C_H__
 
 /**
  * Drava return code
  */
-typedef enum drava_rcode_t {
-    DRAVA_SUCCESS = 0,
-    DRAVA_ERROR = 1
-} drava_rcode_t;
+typedef enum drava_rcode_t { DRAVA_SUCCESS = 0, DRAVA_ERROR = 1 } drava_rcode_t;
 
 /**
  * Drava operations
@@ -60,4 +57,4 @@ int drava_listen(void);
 
 int drava_deinit(void);
 
-# endif /* __DRAVA_C_H__ */
+#endif /* __DRAVA_C_H__ */
