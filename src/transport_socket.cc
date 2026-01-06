@@ -28,7 +28,7 @@ parse_line(
     const std::string & line
 ) {
     // TODO
-    LOGGER_DEBUG("Parsing: %s", line.c_str());
+    // LOGGER_DEBUG("Parsing: %s", line.c_str());
 
     // TODO
     if (drava->routine)

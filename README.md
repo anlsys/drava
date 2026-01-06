@@ -69,6 +69,7 @@ export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python 
 Example applications are located in [examples](examples) directory.
 Each application contains its own README with instructions for running it.
 Available applications:
+- [PtychoNN](examples/ptychonn)
 - [Iris Inferrence](examples/iris_knn)
 - [Dataflow](examples/dataflow)
 

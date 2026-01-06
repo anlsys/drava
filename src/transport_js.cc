@@ -27,7 +27,7 @@ parse_line(
         device_global_id_t device_global_id,
         const std::string &line
 ) {
-    LOGGER_DEBUG("Parsing: %s", line.c_str());
+    // LOGGER_DEBUG("Parsing: %s", line.c_str());
     if (drava->routine)
         drava->routine(line.c_str());
 }
