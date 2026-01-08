@@ -80,12 +80,6 @@ wget https://github.com/libcheck/check/archive/refs/tags/0.15.2.zip
 unzip 0.15.2.zip
 cd check-0.15.2
 module load cmake
-mkdir build && cd build
-cmake ../
-make
-
-cd /home/ashovon/check_src/check-0.15.2
-ls
 mkdir build-gcc && cd build-gcc
 CC=gcc CXX=g++ cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/opt/check-0.15.2
 make -j
@@ -94,10 +88,18 @@ make install
 - Run tests
 ```shell
 export CHECK_ROOT=$HOME/opt/check-0.15.2
-ctest --test-dir /home/ashovon/drava/build/tests --output-on-failure
+ctest --test-dir $HOME/drava/build/tests --output-on-failure
+```
+- Transport specific tests:
+```shell
+# Enable JetStream tests (requires a running NATS server)
+USE_NATS=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
 
-ctest --test-dir /home/ashovon/drava/build/tests --output-on-failure 
-# To test Socket/NATS use USE_NATS=1 USE_SOCKET=1 
+# Enable socket tests (requires socket endpoint to exist)
+USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
+
+# Enable both (requires both NATS server and socket running)
+USE_NATS=1 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
 ```
 ### References
 - [NATS C client](https://github.com/nats-io/nats.c/)
