@@ -155,6 +155,5 @@ target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 # Tests
 ################
 if (USE_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()

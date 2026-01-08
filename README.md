@@ -21,7 +21,6 @@ module load spack/gcc-0.6.1
 module use /home/rpereira/shared/modules
 
 # C/C++ 20 compiler
-module use /soft/modulefiles
 module load llvm/master-nightly
 module load cmake
 module load intel/oneapi/release/2024.1
@@ -73,6 +72,33 @@ Available applications:
 - [Iris Inferrence](examples/iris_knn)
 - [Dataflow](examples/dataflow)
 
+## Tests
+- Dependency: [Check unit testing framework](https://libcheck.github.io/check/index.html)
+- Install `Check` in JLSE:
+```shell
+wget https://github.com/libcheck/check/archive/refs/tags/0.15.2.zip
+unzip 0.15.2.zip
+cd check-0.15.2
+module load cmake
+mkdir build && cd build
+cmake ../
+make
 
+cd /home/ashovon/check_src/check-0.15.2
+ls
+mkdir build-gcc && cd build-gcc
+CC=gcc CXX=g++ cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/opt/check-0.15.2
+make -j
+make install
+```
+- Run tests
+```shell
+export CHECK_ROOT=$HOME/opt/check-0.15.2
+ctest --test-dir /home/ashovon/drava/build/tests --output-on-failure
+
+ctest --test-dir /home/ashovon/drava/build/tests --output-on-failure 
+# To test Socket/NATS use USE_NATS=1 USE_SOCKET=1 
+```
 ### References
 - [NATS C client](https://github.com/nats-io/nats.c/)
+- [Check unit testing framework](https://libcheck.github.io/check/index.html)

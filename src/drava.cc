@@ -68,7 +68,6 @@ int drava_t::init(drava_transport_t transport_type)
 {
     /* Remember which backend to use (socket vs NATS) */
     this->transport_type = transport_type;
-
     this->runtime.init();
     this->routine = NULL;
     return DRAVA_SUCCESS;

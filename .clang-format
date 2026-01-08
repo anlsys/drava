@@ -7,11 +7,9 @@ ContinuationIndentWidth: 8
 ConstructorInitializerIndentWidth: 8
 Cpp11BracedListStyle: true
 
-
 BreakBeforeBraces: Linux
 
 AllowShortLambdasOnASingleLine: false
-
 
 BinPackArguments: true
 BinPackParameters: false
@@ -19,7 +17,6 @@ BinPackParameters: false
 DerivePointerAlignment: false
 PointerAlignment: Right
 BitFieldColonSpacing: Both
-
 
 AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments: false
