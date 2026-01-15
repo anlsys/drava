@@ -27,6 +27,7 @@ START_TEST(test_socket_init_register_deinit)
 
     if (!use_socket || strcmp(use_socket, "1") != 0) {
         /* Transport not enabled for this test run */
+        fprintf(stderr, "SKIP: set USE_SOCKET=1 to run socket check test\n");
         return;
     }
     ck_assert_int_eq(drava_init("socket"), DRAVA_SUCCESS);

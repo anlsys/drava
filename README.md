@@ -73,8 +73,12 @@ Available applications:
 - [Dataflow](examples/dataflow)
 
 ## Tests
-- Dependency: [Check unit testing framework](https://libcheck.github.io/check/index.html)
-- Install `Check` in JLSE:
+### Dependency
+- [Check unit testing framework](https://libcheck.github.io/check/index.html)
+- [Bats-core: Bash automated testing system](https://bats-core.readthedocs.io/en/stable/)
+
+### Setup tests in JLSE
+- Install `Check`:
 ```shell
 wget https://github.com/libcheck/check/archive/refs/tags/0.15.2.zip
 unzip 0.15.2.zip
@@ -85,22 +89,41 @@ CC=gcc CXX=g++ cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/opt/check-0.15.2
 make -j
 make install
 ```
-- Run tests
+- Install `Bats`:
 ```shell
-export CHECK_ROOT=$HOME/opt/check-0.15.2
+git clone https://github.com/bats-core/bats-core.git
+cd bats-core
+git checkout v1.13.0
+./install.sh "$HOME/opt/bats-1.13.0"
+```
+- Set the environment variables:
+```shell
+# Add to .zshrc/.bashrc
+export CHECK_ROOT="$HOME/opt/check-0.15.2"
+export NATS_ROOT="$HOME/opt/nats"
+# Add binaries to PATH
+export PATH="$HOME/nats_binary:$PATH"
+export PATH="$HOME/opt/bats-1.13.0/bin:$PATH"
+```
+- Run all tests
+```shell
 ctest --test-dir $HOME/drava/build/tests --output-on-failure
 ```
-- Transport specific tests:
+- Transport specific tests for Drava C API:
 ```shell
 # Enable JetStream tests (requires a running NATS server)
 USE_NATS=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
-
 # Enable socket tests (requires socket endpoint to exist)
 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
-
 # Enable both (requires both NATS server and socket running)
 USE_NATS=1 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
+```
+- Integration test with verbose:
+```
+ctest --test-dir $HOME/drava/build/tests -R integration_transport_jetstream_python -V
+ctest --test-dir $HOME/drava/build/tests -R integration_transport_socket_python -V
 ```
 ### References
 - [NATS C client](https://github.com/nats-io/nats.c/)
 - [Check unit testing framework](https://libcheck.github.io/check/index.html)
+- [Bats-core: Bash Automated Testing System](https://bats-core.readthedocs.io/en/stable/)

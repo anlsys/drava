@@ -26,6 +26,7 @@ START_TEST(test_nats_init_register_deinit)
     const char *use_nats = getenv("USE_NATS");
 
     if (!use_nats || strcmp(use_nats, "1") != 0) {
+        fprintf(stderr, "SKIP: set USE_NATS=1 to run Jetstream check tests\n");
         return;
     }
     ck_assert_int_eq(drava_init("nats"), DRAVA_SUCCESS);
