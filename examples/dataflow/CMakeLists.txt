@@ -1,4 +1,4 @@
-# CMake Minimum version
+# CMake >= 3.17 for XKRT compatibility
 cmake_minimum_required(VERSION 3.17)
 
 # Project name
