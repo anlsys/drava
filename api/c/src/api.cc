@@ -9,58 +9,68 @@
  *****************************************************************************/
 
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 #include <drava/drava.h>
 
 /* The C api uses a global singleton */
 static drava_t drava;
 
-extern "C" int drava_init_with_transport(drava_transport_t transport_type)
-{
-    /* Forward to the C++ object; drava_t::init stores the choice. */
-    return drava.init(transport_type);
+static const char *env_get(const char *k) {
+    const char *v = getenv(k);
+    return (v && v[0] != '\0') ? v : nullptr;
 }
 
-extern "C" int drava_init(const char *transport_name)
+static int parse_transport_from_env(drava_transport_t *out)
 {
-    /* Default to socket backend for backward compatibility. */
-    return drava_init_from_string(transport_name);
-}
+    if (!out) return DRAVA_EINVAL;
 
-extern "C" int drava_init_from_string(const char *transport_name)
-{
-    if (transport_name == NULL || transport_name[0] == '\0') {
-        /* Default: socket */
-        return drava_init_with_transport(DRAVA_TRANSPORT_SOCKET);
+    const char *t = env_get("DRAVA_TRANSPORT");
+    if (!t || strcmp(t, "auto") == 0) {
+        *out = DRAVA_TRANSPORT_SOCKET;
+        return DRAVA_SUCCESS;
     }
 
-    if (strcmp(transport_name, "socket") == 0) {
-        return drava_init_with_transport(DRAVA_TRANSPORT_SOCKET);
+    if (strcmp(t, "socket") == 0) {
+        *out = DRAVA_TRANSPORT_SOCKET;
+        return DRAVA_SUCCESS;
     }
 
-    if (strcmp(transport_name, "nats") == 0) {
+    if (strcmp(t, "nats") == 0) {
 #ifdef DRAVA_HAS_NATS
-        return drava_init_with_transport(DRAVA_TRANSPORT_NATS);
+        *out = DRAVA_TRANSPORT_NATS;
+        return DRAVA_SUCCESS;
 #else
-        /* NATS requested but not compiled in. */
-        return -2;
+        return DRAVA_ENOTSUP;
 #endif
     }
 
-    /* Unknown device string. */
-    return -1;
+    return DRAVA_EINVAL;
 }
 
-extern "C" int drava_register_routine(drava_routine_t routine)
+int drava_init(int *argc, char **argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    drava_transport_t transport = DRAVA_TRANSPORT_SOCKET;
+    int rc = parse_transport_from_env(&transport);
+    if (rc != DRAVA_SUCCESS) return rc;
+
+    return drava.init(transport);
+}
+
+int drava_register_routine(drava_routine_t routine)
 {
     return drava.register_routine(routine);
 }
 
-extern "C" int drava_listen(void)
+int drava_listen(void)
 {
     return drava.listen();
 }
 
-extern "C" int drava_deinit(void)
+int drava_deinit(void)
 {
     return drava.deinit();
 }

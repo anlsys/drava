@@ -55,6 +55,7 @@ make install
 ### Build Drava (for both NATS Jetstream and Socket)
 ```shell
 # Define NATS_ROOT if Jetstream is used
+export DRAVA_TRANSPORT=nats
 export NATS_ROOT=$HOME/opt/nats
 mkdir build-debug-nats && cd build-debug-nats
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..

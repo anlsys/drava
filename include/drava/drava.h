@@ -11,10 +11,7 @@
 #ifndef __DRAVA_H__
 #define __DRAVA_H__
 
-extern "C" {
 #include <drava/drava_c.h>
-};
-
 #include <xkrt/runtime.h>
 
 XKRT_NAMESPACE_USE;
