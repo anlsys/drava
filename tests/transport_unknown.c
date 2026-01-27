@@ -11,6 +11,8 @@
 #include <check.h>
 #include <drava/drava_c.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 START_TEST(test_init_null_transport)
 {

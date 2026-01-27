@@ -117,8 +117,10 @@ ctest --test-dir $HOME/drava/build/tests --output-on-failure
 ```shell
 # Enable JetStream tests (requires a running NATS server)
 USE_NATS=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
+USE_NATS=1 ctest --test-dir $HOME/drava/build/tests -R transport_nats -V
 # Enable socket tests (requires socket endpoint to exist)
 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
+USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests -R transport_socket -V
 # Enable both (requires both NATS server and socket running)
 USE_NATS=1 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
 ```
