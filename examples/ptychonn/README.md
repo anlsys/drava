@@ -110,7 +110,7 @@ pip install -r requirements.txt
 python publisher_jetstream.py
 ```
 
-- In terminal 3, run the app ensuring it is using `drava.init("nats")`:
+- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=nats"`:
 
 ```shell
 cd examples/ptychonn
@@ -151,7 +151,7 @@ pip install -r requirements.txt
 python publisher_socket.py
 ```
 
-- In terminal 3, run the app ensuring it is using `drava.init("socket")`:
+- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=socket"`:
 
 ```shell
 cd examples/ptychonn

@@ -45,7 +45,7 @@ typedef enum drava_transport_t {
 /** Drava routine type */
 typedef void *(*drava_routine_t)(const char *s);
 
-int drava_init(int *argc, char **argv[]);
+int drava_init(void);
 
 int drava_register_routine(drava_routine_t routine);
 

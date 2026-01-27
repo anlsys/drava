@@ -163,8 +163,9 @@ def func(s: str):
     if got == total:
         finalize_and_report()
 
-drava.init("nats")
-# drava.init("socket")
+# Set the transport using env var variable
+# export DRAVA_TRANSPORT=nats/socket
+drava.init()
 drava.register_routine_py(func)
 drava.listen_py()
 drava.deinit()

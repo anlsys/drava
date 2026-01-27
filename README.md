@@ -52,17 +52,20 @@ make -j
 make install
 ```
 
-### Build Drava (for both NATS Jetstream and Socket)
+### Build Drava
 ```shell
 # Define NATS_ROOT if Jetstream is used
-export DRAVA_TRANSPORT=nats
 export NATS_ROOT=$HOME/opt/nats
 mkdir build-debug-nats && cd build-debug-nats
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
-
+- To use Jetstream/Socket set it with environment variable:
+```shell
+export DRAVA_TRANSPORT=nats
+# export DRAVA_TRANSPORT=socket
+```
 
 ## Applications
 

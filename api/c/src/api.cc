@@ -48,15 +48,11 @@ static int parse_transport_from_env(drava_transport_t *out)
     return DRAVA_EINVAL;
 }
 
-int drava_init(int *argc, char **argv[])
+int drava_init(void)
 {
-    (void)argc;
-    (void)argv;
-
     drava_transport_t transport = DRAVA_TRANSPORT_SOCKET;
     int rc = parse_transport_from_env(&transport);
     if (rc != DRAVA_SUCCESS) return rc;
-
     return drava.init(transport);
 }
 
