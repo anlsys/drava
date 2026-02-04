@@ -16,14 +16,8 @@ Hugging Face.
 
 Input data:
 - X_test.npy  
-  Shape: (N, 64, 64, 1)  
+  Shape: (N, 64, 64, 1)  # N = 3600
   Each entry is a diffraction patch used as input to the network.
-
-Ground truth (optional, for evaluation):
-- Y_I_test.npy  
-  Ground-truth amplitude patches.
-- Y_phi_test.npy  
-  Ground-truth phase patches.
 
 Model selection:
 - wts4/min_epoch.npy  
@@ -75,21 +69,16 @@ JetStream → (pull) → Drava → (push) → app.py
    - Loads `X_test.npy`.
    - Splits it into batches.
    - Encodes each batch as base64 (`float32`, row-major).
-   - Publishes messages to the JetStream subject `frames.raw` with metadata:
-      - `job_id`, `start`, `end`
-      - `rows`, `patch_side`, `n_total`
-      - `dtype`, `order`, `frame_id`
-
+   - Publishes messages to the JetStream subject `frames.raw` with metadata.
 2. Transport Layer (JetStream + Drava runtime):
     - JetStream provides a reliable messaging backend.
     - Drava receives the raw message from the JetStream device.
     - Drava invokes the registered Python callback (`func`) with the message payload.
 
 3. Application (`app.py`):
-   - Loads the PtychoNN `.hdf5` model, the ground truth files (`Y_I_test.npy`, `Y_phi_test.npy`) once at startup.
+   - Loads the PtychoNN `.hdf5` model once at startup.
    - Decodes incoming batches into `(B, 64, 64, 1)` tensors.
-   - Runs prediction, stitching, and MSE
-     once all patches are received.
+   - Runs prediction on each frame.
 
 ### Run using Jetstream
 

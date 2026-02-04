@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+"""
+Frame-by-frame publisher for Drava socket transport (FIFO -> socat -> UNIX socket).
+
+Prereqs (example):
+  mkfifo /tmp/drava_in
+  socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
+
+Drava socket transport:
+  export DRAVA_TRANSPORT=socket
+"""
 import json
 import base64
 import time
@@ -8,58 +17,48 @@ import os
 FIFO_PATH = "/tmp/drava_in"
 
 PATCH_SIDE = 64
-BATCH_SIZE = 32
 DATA_DIR = "PtychoNN_data_partial"
 
 
 def main():
-    # Ensure FIFO exists
     if not os.path.exists(FIFO_PATH):
         raise RuntimeError(
             f"FIFO {FIFO_PATH} does not exist. "
-            f"Start Drava with socket transport first."
+            f"Create it (mkfifo {FIFO_PATH}) and start socat/Drava socket transport first."
         )
 
-    # Load input patches
-    X_test = np.load(f"{DATA_DIR}/X_test.npy").astype("float32")  # (N,64,64,1)
-    n_patches = X_test.shape[0]
+    # Load input frames (N,64,64,1)
+    X_test = np.load(f"{DATA_DIR}/X_test.npy").astype("float32")
+    n_frames = X_test.shape[0]
     print("X_test shape:", X_test.shape)
 
     job_id = int(time.time_ns())
 
     print(f"Opening FIFO {FIFO_PATH} for writing...")
+    # Text mode because Drava expects newline-delimited JSON strings
     with open(FIFO_PATH, "w") as f:
-        for start in range(0, n_patches, BATCH_SIZE):
-            end = min(start + BATCH_SIZE, n_patches)
-            batch = X_test[start:end]  # (B,64,64,1)
-            B = batch.shape[0]
-            if B == 0:
-                break
+        for idx in range(n_frames):
+            frame = X_test[idx]  # (64,64,1)
 
             payload = {
-                "kind": "ptychonn_batch",
+                "kind": "ptychonn_frame",
                 "job_id": job_id,
                 "frame_id": int(time.time_ns()),
-                "start": start,
-                "end": end,
-                "rows": B,
+                "idx": idx,
+                "rows": 1,
                 "patch_side": PATCH_SIDE,
                 "dtype": "float32",
                 "order": "C",
-                "data_b64": base64.b64encode(batch.tobytes(order="C")).decode(),
-                "n_total": n_patches,
+                "data_b64": base64.b64encode(frame.tobytes(order="C")).decode(),
+                "n_total": n_frames,
             }
 
-            msg = json.dumps(payload) + "\n"
-            f.write(msg)
+            f.write(json.dumps(payload) + "\n")
             f.flush()
 
-            print(f"Sent batch [{start}:{end}]")
-
-            # Optional small sleep to make logs readable
-            # time.sleep(0.01)
-
-    print("All batches sent.")
+            if idx % 256 == 0 or idx == n_frames - 1:
+                print(f"Sent frame idx={idx}/{n_frames-1}")
+    print("All frames sent.")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# publisher_jetstream.py
+# Frame by frame publisher
 import asyncio, json, base64, time
 import numpy as np
 from nats.aio.client import Client as NATS
@@ -7,8 +7,6 @@ STREAM = "FRAMES"
 SUBJECT = "frames.raw"
 
 PATCH_SIDE = 64
-BATCH_SIZE = 32
-
 DATA_DIR = "PtychoNN_data_partial"
 
 async def main():
@@ -27,29 +25,27 @@ async def main():
 
     job_id = int(time.time_ns())
 
-    for start in range(0, n_patches, BATCH_SIZE):
-        end = min(start + BATCH_SIZE, n_patches)
-        batch = X_test[start:end]  # (B,64,64,1)
-        B = batch.shape[0]
-        if B == 0:
-            break
+    for idx in range(n_patches):
+        frame = X_test[idx]  # (64,64,1)
 
         payload = {
-            "kind": "ptychonn_batch",
+            "kind": "ptychonn_frame",
             "job_id": job_id,
             "frame_id": int(time.time_ns()),
-            "start": start,
-            "end": end,
-            "rows": B,
+            "idx": idx,                 # single frame index
+            "rows": 1,
             "patch_side": PATCH_SIDE,
             "dtype": "float32",
             "order": "C",
-            "data_b64": base64.b64encode(batch.tobytes(order="C")).decode(),
+            "data_b64": base64.b64encode(frame.tobytes(order="C")).decode(),
             "n_total": n_patches,
         }
 
         ack = await js.publish(SUBJECT, json.dumps(payload).encode())
-        print(f"Published [{start}:{end}] seq={ack.seq}")
+
+        # Optional progress logging
+        if idx % 256 == 0 or idx == n_patches - 1:
+            print(f"Published idx={idx}/{n_patches-1} seq={ack.seq}")
 
     await nc.drain()
 
