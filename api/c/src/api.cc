@@ -8,30 +8,26 @@
  * SPDX-License-Identifier: BSD-3-Clause
  *****************************************************************************/
 
-# include <assert.h>
-# include <drava/drava.h>
+#include <assert.h>
+#include <drava/drava.h>
 
-/* the C api uses an ugly global singleton, whatever */
+/* The C api uses a global singleton */
 static drava_t drava;
 
-extern "C"
-int
-drava_init_with_transport(drava_transport_t transport_type) {
+extern "C" int drava_init_with_transport(drava_transport_t transport_type)
+{
     /* Forward to the C++ object; drava_t::init stores the choice. */
     return drava.init(transport_type);
 }
 
-extern "C"
-int
-drava_init(const char *transport_name) {
+extern "C" int drava_init(const char *transport_name)
+{
     /* Default to socket backend for backward compatibility. */
     return drava_init_from_string(transport_name);
 }
 
-
-extern "C"
-int
-drava_init_from_string(const char *transport_name) {
+extern "C" int drava_init_from_string(const char *transport_name)
+{
     if (transport_name == NULL || transport_name[0] == '\0') {
         /* Default: socket */
         return drava_init_with_transport(DRAVA_TRANSPORT_SOCKET);
@@ -54,20 +50,17 @@ drava_init_from_string(const char *transport_name) {
     return -1;
 }
 
-extern "C"
-int
-drava_register_routine(drava_routine_t routine) {
+extern "C" int drava_register_routine(drava_routine_t routine)
+{
     return drava.register_routine(routine);
 }
 
-extern "C"
-int
-drava_listen(void) {
+extern "C" int drava_listen(void)
+{
     return drava.listen();
 }
 
-extern "C"
-int
-drava_deinit(void) {
+extern "C" int drava_deinit(void)
+{
     return drava.deinit();
 }

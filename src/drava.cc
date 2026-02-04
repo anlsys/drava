@@ -8,70 +8,79 @@
  * SPDX-License-Identifier: BSD-3-Clause
  *****************************************************************************/
 
-# include <drava/drava.h>
-
-int
-drava_t::init(drava_transport_t transport_type) {
-    /* Remember which backend to use (socket vs NATS) */
-    this->transport_type = transport_type;
-
-    this->runtime.init();
-    this->routine = NULL;
-    return DRAVA_SUCCESS;
-}
+#include <drava/drava.h>
+#include <string>
 
 struct drava_args_t {
     drava_t *drava;
     device_global_id_t device_global_id;
 };
 
+void parse_line(drava_t *drava,
+                device_global_id_t device_global_id,
+                const std::string &line)
+{
+    (void)device_global_id;
+    if (drava && drava->routine) {
+        drava->routine(line.c_str());
+    }
+}
 
 /* dispatcher: choose transport at runtime */
-int
-drava_transport_main(drava_t *drava,
-                  device_global_id_t device_global_id,
-                  thread_t *thread)
+int drava_transport_main(drava_t *drava,
+                         device_global_id_t device_global_id,
+                         thread_t *thread)
 {
     switch (drava->transport_type) {
-        case DRAVA_TRANSPORT_SOCKET:
-            LOGGER_DEBUG("Drava transport: Socket");
-            return drava_transport_socket_main(drava, device_global_id, thread);
+    case DRAVA_TRANSPORT_SOCKET:
+        LOGGER_DEBUG("Drava transport: Socket");
+        return drava_transport_socket_main(drava, device_global_id, thread);
 
-        case DRAVA_TRANSPORT_NATS:
+    case DRAVA_TRANSPORT_NATS:
 #ifdef DRAVA_HAS_NATS
-            LOGGER_DEBUG("Drava transport: NATS");
-            return drava_transport_nats_main(drava, device_global_id, thread);
+        LOGGER_DEBUG("Drava transport: NATS");
+        return drava_transport_nats_main(drava, device_global_id, thread);
 #else
-            LOGGER_FATAL("NATS transport selected at runtime but not compiled in");
-            return -1;
+        LOGGER_FATAL("NATS transport selected at runtime but not compiled in");
+        return -1;
 #endif
 
-        default:
-            LOGGER_FATAL("Unknown transport kind %d", (int)drava->transport_type);
-            return -1;
+    default:
+        LOGGER_FATAL("Unknown transport type %d", (int)drava->transport_type);
+        return -1;
     }
 }
 
 /* The routine executed by each thread of each team of each device */
-static void *
-drava_main(team_t *team, thread_t *thread) {
-    drava_args_t *args = (drava_args_t *) team->desc.args;
+static void *drava_main(team_t *team, thread_t *thread)
+{
+    drava_args_t *args = (drava_args_t *)team->desc.args;
     assert(args);
 
-    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid, args->device_global_id);
+    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid,
+                 args->device_global_id);
     drava_transport_main(args->drava, args->device_global_id, thread);
 
     return NULL;
 }
 
-int
-drava_t::register_routine(drava_routine_t routine) {
+int drava_t::init(drava_transport_t transport_type)
+{
+    /* Remember which backend to use (socket vs NATS) */
+    this->transport_type = transport_type;
+    this->runtime.init();
+    this->routine = NULL;
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::register_routine(drava_routine_t routine)
+{
     this->routine = routine;
     return DRAVA_SUCCESS;
 }
 
-int
-drava_t::listen(void) {
+int drava_t::listen(void)
+{
     /* Fork a team of threads for each device */
     drava_args_t args[XKRT_DEVICES_MAX];
 
@@ -107,7 +116,8 @@ drava_t::listen(void) {
         assert(driver);
 
         int err = driver->f_device_cpuset(this->runtime.topology,
-                                          team->desc.binding.places_list, device->driver_id);
+                                          team->desc.binding.places_list,
+                                          device->driver_id);
         if (err)
             LOGGER_FATAL("Fail to retrieve cpuset for device %u", i);
 
@@ -122,8 +132,8 @@ drava_t::listen(void) {
     return DRAVA_SUCCESS;
 }
 
-int
-drava_t::deinit(void) {
+int drava_t::deinit(void)
+{
     this->runtime.deinit();
     return DRAVA_SUCCESS;
 }

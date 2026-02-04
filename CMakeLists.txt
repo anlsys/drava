@@ -1,3 +1,4 @@
+# CMake >= 3.17 required for compatibility with XKRT
 cmake_minimum_required(VERSION 3.17)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
@@ -152,6 +153,8 @@ find_package(XKRT REQUIRED)
 target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 
 ################
-# Sub projects #
+# Tests
 ################
-
+if (USE_TESTS)
+    add_subdirectory(tests)
+endif()
