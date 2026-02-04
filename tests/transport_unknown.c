@@ -11,17 +11,20 @@
 #include <check.h>
 #include <drava/drava_c.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 START_TEST(test_init_null_transport)
 {
-    ck_assert_msg(drava_init(NULL) == DRAVA_SUCCESS,
-                  "drava_init(NULL) should use Socket by default");
+    ck_assert_msg(drava_init() == DRAVA_SUCCESS,
+                  "drava_init() should use Socket by default");
 }
 END_TEST
 
 START_TEST(test_init_invalid_transport_fails)
 {
-    ck_assert_msg(drava_init("this_transport_does_not_exist") != DRAVA_SUCCESS,
+    setenv("DRAVA_TRANSPORT", "this_transport_does_not_exist", 1);
+    ck_assert_msg(drava_init() != DRAVA_SUCCESS,
                   "invalid transport must fail");
 }
 END_TEST

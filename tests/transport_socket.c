@@ -30,7 +30,8 @@ START_TEST(test_socket_init_register_deinit)
         fprintf(stderr, "SKIP: set USE_SOCKET=1 to run socket check test\n");
         return;
     }
-    ck_assert_int_eq(drava_init("socket"), DRAVA_SUCCESS);
+    setenv("DRAVA_TRANSPORT", "socket", 1);
+    ck_assert_int_eq(drava_init(), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_register_routine(handler), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_deinit(), DRAVA_SUCCESS);
 }

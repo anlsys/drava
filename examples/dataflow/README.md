@@ -8,7 +8,7 @@
 mkfifo /tmp/drava_in 2>/dev/null || true
 
 # Start socat to forward everything from the FIFO into the Unix domain socket
-socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
+socat -u OPEN:/tmp/drava_in,rdonly,ignoreeof UNIX-LISTEN:/tmp/accel_2048.sock,fork
 ```
 
 - In terminal 2, run the publisher script

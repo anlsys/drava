@@ -29,7 +29,8 @@ START_TEST(test_nats_init_register_deinit)
         fprintf(stderr, "SKIP: set USE_NATS=1 to run Jetstream check tests\n");
         return;
     }
-    ck_assert_int_eq(drava_init("nats"), DRAVA_SUCCESS);
+    setenv("DRAVA_TRANSPORT", "nats", 1);
+    ck_assert_int_eq(drava_init(), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_register_routine(handler), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_deinit(), DRAVA_SUCCESS);
 }

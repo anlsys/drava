@@ -72,7 +72,7 @@ pip install -r requirements.txt
 python publisher_jetstream.py
 ```
 
-- In terminal 3, run the app ensuring it is using `drava.init("nats")`:
+- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=nats"`:
 
 ```shell
 cd examples/iris_knn
@@ -98,7 +98,7 @@ publisher_socket.py → FIFO (/tmp/drava_in) → socat → /tmp/accel_2048.sock 
 mkfifo /tmp/drava_in 2>/dev/null || true
 
 # Start socat to forward everything from the FIFO into the Unix domain socket
-socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
+socat -u OPEN:/tmp/drava_in,rdonly,ignoreeof UNIX-LISTEN:/tmp/accel_2048.sock,fork
 ```
 
 - In terminal 2, run the publisher script
@@ -111,7 +111,7 @@ pip install -r requirements.txt
 python publisher_socket.py
 ```
 
-- In terminal 3, run the app ensuring it is using `drava.init("socket")`:
+- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=socket"`:
 
 ```shell
 cd examples/iris_knn

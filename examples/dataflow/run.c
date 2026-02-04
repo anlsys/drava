@@ -18,9 +18,9 @@ static void *handler(const char *s)
     return NULL;
 }
 
-int main(void)
+int main()
 {
-    assert(drava_init("nats") == DRAVA_SUCCESS);
+    assert(drava_init() == DRAVA_SUCCESS);
     assert(drava_register_routine(handler) == DRAVA_SUCCESS);
     assert(drava_listen() == DRAVA_SUCCESS);
     assert(drava_deinit() == DRAVA_SUCCESS);
