@@ -28,12 +28,13 @@ module load cuda/12.3.0
 module load hwloc
 
 # XKRT
-module load xkaapi/502226c375a8/Debug-cuda  #  if using A100/H100 nodes
+module load xkaapi/502226c375a8/Debug-cuda  #  if using A40/A100/H100 nodes
 
 # if using swig
-module load swig/4.1.1
+module load swig/4.4.1
 
-module load xkaapi/502226c375a8/Debug-hip   #  if using MI250X nodes
+# if using python 3.14.3, compiled with `--disable-gil`
+module load python/3.14.3-no-gil
 
 ```
 

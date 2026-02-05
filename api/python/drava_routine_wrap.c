@@ -19,7 +19,9 @@ static void *drava_routine_trampoline(const char *s)
     if (!g_routine)
         return NULL;
 
+    #ifndef PY_NO_GIL
     PyGILState_STATE gstate = PyGILState_Ensure();
+    #endif /* PY_NO_GIL */
 
     /* Step 1: Create Python string from C string */
     PyObject *py_arg = PyUnicode_FromString(s);
@@ -34,7 +36,9 @@ static void *drava_routine_trampoline(const char *s)
     /* Step 4: Cleanup */
     Py_DECREF(args);
 
+    # ifndef PY_NO_GIL
     PyGILState_Release(gstate);
+    # endif /* PY_NO_GIL */
 
     return NULL;
 }
