@@ -34,9 +34,8 @@ print(f"Visible GPUs: {tf.config.list_physical_devices('GPU')}")
 
 min_epoch = int(np.load(f"{WT_DIR}/min_epoch.npy"))
 MODEL_PATH = f"{WT_DIR}/weights.{min_epoch:02d}.hdf5"
-drava.log(drava.DRAVA_VERBOSE_INFO, f"Loading model: {MODEL_PATH}")
 model = load_model(MODEL_PATH)
-drava.log(drava.DRAVA_VERBOSE_INFO, "Model loaded")
+drava.log(drava.DRAVA_VERBOSE_INFO, f"Loaded model: {MODEL_PATH}")
 
 
 LOG_EVERY = 256
@@ -63,7 +62,6 @@ def func(s: str):
         _t0 = time.perf_counter()
         print(f"[job] new job_id={job_id} start_t={_t0:.6f}")
 
-    # ---- decode (optional if you only benchmark transport) ----
     patch_side = int(msg["patch_side"])
     dtype = np.dtype(msg["dtype"])
     order = msg.get("order", "C")
@@ -91,8 +89,8 @@ def func(s: str):
                   f"[frame]={_total_infers}/{total_frames} "
                   f"[idx]={idx} "
                   f"step_ms={inf_ms:.2f} "
-                  f"avg_fps={avg_fps:.2f}"
-                  )
+                  f"avg_fps={avg_fps:.2f}")
+
 
 # -----------------------------
 # Drava run loop

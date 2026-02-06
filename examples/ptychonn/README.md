@@ -106,7 +106,6 @@ cd examples/ptychonn
 source venv/bin/activate
 python app.py
 ```
-
 ## Socket Transport
 
 The socket backend provides a lightweight alternative to JetStream using a Unix domain socket.
