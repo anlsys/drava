@@ -70,3 +70,8 @@ int drava_deinit(void)
 {
     return drava.deinit();
 }
+
+int drava_log(const drava_verbose_t verbose_level, const char * msg)
+{
+    return drava.log(verbose_level, msg);
+}

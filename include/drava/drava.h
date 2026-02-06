@@ -56,6 +56,9 @@ struct drava_t {
 
     /* Deinitialize drava */
     int deinit(void);
+
+    /* Log a debug message */
+    int log(const int verbose_level, const char * msg);
 };
 
 void parse_line(drava_t *drava,

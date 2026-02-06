@@ -137,3 +137,9 @@ int drava_t::deinit(void)
     this->runtime.deinit();
     return DRAVA_SUCCESS;
 }
+
+int drava_t::log(const int verbose_level, const char * msg)
+{
+    LOGGER_PRINT(verbose_level, "%s", msg);
+    return DRAVA_SUCCESS;
+}

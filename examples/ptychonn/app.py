@@ -158,7 +158,7 @@ def func(s: str):
     got = int(received_mask.sum())
     total = received_mask.size
     if got % 256 == 0 or got == total:
-        print(f"[accumulator] received {got}/{total}")
+        drava.log(drava.DRAVA_VERBOSE_INFO, f"[accumulator] received {got}/{total}")
 
     if got == total:
         finalize_and_report()

@@ -42,6 +42,18 @@ typedef enum drava_transport_t {
     DRAVA_TRANSPORT_NATS = 1
 } drava_transport_t;
 
+/**
+ * Drava logger levels
+ */
+typedef enum drava_verbose_t {
+    DRAVA_VERBOSE_FATAL = 0, // LOGGER_PRINT_FATAL_ID,
+    DRAVA_VERBOSE_ERROR = 1, // LOGGER_PRINT_ERROR_ID,
+    DRAVA_VERBOSE_WARN  = 2, // LOGGER_PRINT_WARN_ID,
+    DRAVA_VERBOSE_INFO  = 3, // LOGGER_PRINT_INFO_ID,
+    DRAVA_VERBOSE_IMPL  = 4, // LOGGER_PRINT_INFO_ID,
+    DRAVA_VERBOSE_DEBUG = 5  // LOGGER_PRINT_DEBUG_ID
+} drava_verbose_t;
+
 /** Drava routine type */
 typedef void *(*drava_routine_t)(const char *s);
 
@@ -52,6 +64,8 @@ int drava_register_routine(drava_routine_t routine);
 int drava_listen(void);
 
 int drava_deinit(void);
+
+int drava_log(const drava_verbose_t verbose_level, const char * msg);
 
 #ifdef __cplusplus
 }
