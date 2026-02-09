@@ -13,13 +13,13 @@ from keras.models import load_model
 # -----------------------------
 def configure_gpu_memory_growth():
     gpus = tf.config.experimental.list_physical_devices("GPU")
-    print(f"Total GPUs: {len(gpus)}")
+    drava.log(drava.DRAVA_VERBOSE_INFO, f"Visible GPUs: {len(gpus)}, {gpus}")
     if gpus:
         try:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
         except RuntimeError as e:
-            print(e)
+            drava.log(drava.DRAVA_VERBOSE_ERROR, f"Error in configuring gpu: {str(e)}")
 
 
 # -----------------------------
@@ -29,8 +29,7 @@ DATA_DIR = "PtychoNN_data_partial"
 WT_DIR = f"{DATA_DIR}/wts4"
 
 configure_gpu_memory_growth()
-print(f"Built with CUDA: {tf.test.is_built_with_cuda()}")
-print(f"Visible GPUs: {tf.config.list_physical_devices('GPU')}")
+drava.log(drava.DRAVA_VERBOSE_INFO, f"Built with CUDA: {tf.test.is_built_with_cuda()}")
 
 min_epoch = int(np.load(f"{WT_DIR}/min_epoch.npy"))
 MODEL_PATH = f"{WT_DIR}/weights.{min_epoch:02d}.hdf5"
@@ -60,6 +59,7 @@ def func(s: str):
         current_job_id = job_id
         _total_infers = 0
         _t0 = time.perf_counter()
+        drava.log(drava.DRAVA_VERBOSE_INFO, f"Loaded model: {MODEL_PATH}")
         print(f"[job] new job_id={job_id} start_t={_t0:.6f}")
 
     patch_side = int(msg["patch_side"])

@@ -69,6 +69,7 @@ endif()
 # Always compile socket backend
 set(SOURCE_FILES
         ${CMAKE_SOURCE_DIR}/src/drava.cc
+        ${CMAKE_SOURCE_DIR}/src/drava_internal.cc
         ${CMAKE_SOURCE_DIR}/src/transport_socket.cc
 )
 

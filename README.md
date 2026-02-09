@@ -66,6 +66,10 @@ export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python 
 export DRAVA_TRANSPORT=nats
 # export DRAVA_TRANSPORT=socket
 ```
+- Set number of threads for XKRT with environment variable (default = 4):
+```shell
+export DRAVA_THREADS=20
+```
 
 ## Applications
 
