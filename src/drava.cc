@@ -48,7 +48,7 @@ static void *drava_main(team_t *team, thread_t *thread)
     drava_args_t *args = (drava_args_t *)team->desc.args;
     assert(args);
 
-    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid,
+    LOGGER_INFO("Starting thread %u on device %d", thread->tid,
                  args->device_global_id);
     drava_transport_main(args->drava, args->device_global_id, thread);
 
@@ -92,6 +92,8 @@ int drava_t::listen(void)
         team->desc.routine = drava_main;
         team->desc.args = arg;
         team->desc.nthreads = drava_env_get_int_default("DRAVA_THREADS", 4);
+        LOGGER_INFO("team->desc.nthreads: %d", team->desc.nthreads);
+
         team->desc.master_is_member = false;
         team->desc.binding.mode = XKRT_TEAM_BINDING_MODE_COMPACT;
         team->desc.binding.places = XKRT_TEAM_BINDING_PLACES_EXPLICIT;

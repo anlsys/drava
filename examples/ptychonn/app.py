@@ -59,8 +59,7 @@ def func(s: str):
         current_job_id = job_id
         _total_infers = 0
         _t0 = time.perf_counter()
-        drava.log(drava.DRAVA_VERBOSE_INFO, f"Loaded model: {MODEL_PATH}")
-        print(f"[job] new job_id={job_id} start_t={_t0:.6f}")
+        drava.log(drava.DRAVA_VERBOSE_INFO, f"[job] new job_id={job_id} start_t={_t0:.6f}")
 
     patch_side = int(msg["patch_side"])
     dtype = np.dtype(msg["dtype"])
@@ -83,6 +82,10 @@ def func(s: str):
     elapsed = t_inf1 - _t0
     avg_fps = (_total_infers / elapsed) if elapsed > 0 else float("inf")
     inf_ms = (t_inf1 - t_inf0) * 1000.0
+    # drava.log(drava.DRAVA_VERBOSE_INFO,
+    #           f"Infer: [frame]={_total_infers}/{total_frames} "
+    #           f"[idx]={idx} "
+    #           f"step_ms={inf_ms:.2f}")
 
     if _total_infers % LOG_EVERY == 0 or idx == total_frames - 1:
         drava.log(drava.DRAVA_VERBOSE_INFO,
