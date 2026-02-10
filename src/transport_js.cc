@@ -122,7 +122,7 @@ int drava_transport_nats_main(drava_t *drava,
 
                 // Spawn a task per message (same pattern as socket lines)
                 drava->runtime.team_task_spawn(team, [=](task_t *task) {
-                    parse_line(drava, device_global_id, line);
+                    drava_parse_line(drava, device_global_id, line);
                 });
 
                 // Ack after enqueue to achieve at-least-once semantics

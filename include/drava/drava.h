@@ -58,12 +58,16 @@ struct drava_t {
     int deinit(void);
 
     /* Log a debug message */
-    int log(const int verbose_level, const char * msg);
+    int log(const int verbose_level, const char *msg);
 };
 
-void parse_line(drava_t *drava,
-                device_global_id_t device_global_id,
-                const std::string &line);
+int drava_parse_transport_from_env(drava_transport_t *out);
+
+int drava_env_get_int_default(const char *key, int default_value);
+
+void drava_parse_line(drava_t *drava,
+                      device_global_id_t device_global_id,
+                      const std::string &line);
 
 /* Transport-specific entry points (implemented in transport_*.cc) */
 int drava_transport_socket_main(drava_t *drava,

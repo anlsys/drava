@@ -87,7 +87,7 @@ int drava_transport_socket_main(drava_t *drava,
 
             /* spawn a task for each line */
             drava->runtime.team_task_spawn(team, [=](task_t *task) {
-                parse_line(drava, device_global_id, line);
+                drava_parse_line(drava, device_global_id, line);
             });
         }
         close(sockfd);

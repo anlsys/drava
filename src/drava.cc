@@ -16,15 +16,6 @@ struct drava_args_t {
     device_global_id_t device_global_id;
 };
 
-void parse_line(drava_t *drava,
-                device_global_id_t device_global_id,
-                const std::string &line)
-{
-    (void)device_global_id;
-    if (drava && drava->routine) {
-        drava->routine(line.c_str());
-    }
-}
 
 /* dispatcher: choose transport at runtime */
 int drava_transport_main(drava_t *drava,
@@ -57,7 +48,7 @@ static void *drava_main(team_t *team, thread_t *thread)
     drava_args_t *args = (drava_args_t *)team->desc.args;
     assert(args);
 
-    LOGGER_DEBUG("Starting thread %u on device %d", thread->tid,
+    LOGGER_INFO("Starting thread %u on device %d", thread->tid,
                  args->device_global_id);
     drava_transport_main(args->drava, args->device_global_id, thread);
 
@@ -100,7 +91,9 @@ int drava_t::listen(void)
         team_t *team = &drava_device->team;
         team->desc.routine = drava_main;
         team->desc.args = arg;
-        team->desc.nthreads = 4;
+        team->desc.nthreads = drava_env_get_int_default("DRAVA_THREADS", 4);
+        LOGGER_INFO("team->desc.nthreads: %d", team->desc.nthreads);
+
         team->desc.master_is_member = false;
         team->desc.binding.mode = XKRT_TEAM_BINDING_MODE_COMPACT;
         team->desc.binding.places = XKRT_TEAM_BINDING_PLACES_EXPLICIT;

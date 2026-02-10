@@ -35,7 +35,6 @@ module load swig/4.4.1
 
 # if using python 3.14.3, compiled with `--disable-gil`
 module load python/3.14.3-no-gil
-
 ```
 
 ### (Optional) NATS requirements
@@ -59,13 +58,17 @@ make install
 export NATS_ROOT=$HOME/opt/nats
 mkdir build-debug-nats && cd build-debug-nats
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
-make
+make -j
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
 - To use Jetstream/Socket set it with environment variable:
 ```shell
 export DRAVA_TRANSPORT=nats
 # export DRAVA_TRANSPORT=socket
+```
+- Set number of threads for XKRT with environment variable (default = 4):
+```shell
+export DRAVA_THREADS=20
 ```
 
 ## Applications
