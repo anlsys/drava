@@ -17,13 +17,14 @@ int drava_init(void)
 {
     drava_transport_t transport = DRAVA_TRANSPORT_SOCKET;
     int rc = drava_parse_transport_from_env(&transport);
-    if (rc != DRAVA_SUCCESS) return rc;
+    if (rc != DRAVA_SUCCESS)
+        return rc;
     return drava.init(transport);
 }
 
-int drava_register_routine(drava_routine_t routine)
+int drava_register_frame_routine(drava_frame_routine_t routine, void *user_data)
 {
-    return drava.register_routine(routine);
+    return drava.register_frame_routine(routine, user_data);
 }
 
 int drava_listen(void)
@@ -36,7 +37,7 @@ int drava_deinit(void)
     return drava.deinit();
 }
 
-int drava_log(const drava_verbose_t verbose_level, const char * msg)
+int drava_log(const drava_verbose_t verbose_level, const char *msg)
 {
     return drava.log(verbose_level, msg);
 }

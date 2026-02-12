@@ -11,7 +11,10 @@
 #ifndef __DRAVA_H__
 #define __DRAVA_H__
 
+#include <atomic>
 #include <drava/drava_c.h>
+#include <string>
+#include <vector>
 #include <xkrt/runtime.h>
 
 XKRT_NAMESPACE_USE;
@@ -35,8 +38,9 @@ struct drava_t {
     /* devices */
     drava_device_t devices[XKRT_DEVICES_MAX];
 
-    /* the routine to run */
-    drava_routine_t routine;
+    /* Batch-aware routine */
+    drava_frame_routine_t frame_routine;
+    void *frame_routine_user_data;
 
     /* which transport backend to use (socket or NATS) */
     drava_transport_t transport_type;
@@ -48,8 +52,8 @@ struct drava_t {
     /* Initialize drava */
     int init(drava_transport_t transport_type);
 
-    /* Register a routine (TODO: add an event associated with it?) */
-    int register_routine(drava_routine_t routine);
+    /* Register a batch-aware routine */
+    int register_frame_routine(drava_frame_routine_t routine, void *user_data);
 
     /* Read until the socket is closed */
     int listen(void);
@@ -63,11 +67,17 @@ struct drava_t {
 
 int drava_parse_transport_from_env(drava_transport_t *out);
 
+const char *drava_env_get_str_default(const char *key, const char *default_value);
+
 int drava_env_get_int_default(const char *key, int default_value);
 
 void drava_parse_line(drava_t *drava,
                       device_global_id_t device_global_id,
                       const std::string &line);
+
+void drava_dispatch_payload_batch(drava_t *drava,
+                                  device_global_id_t device_global_id,
+                                  const std::vector<std::string> &payloads);
 
 /* Transport-specific entry points (implemented in transport_*.cc) */
 int drava_transport_socket_main(drava_t *drava,

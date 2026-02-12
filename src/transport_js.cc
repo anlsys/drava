@@ -13,14 +13,9 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <nats/nats.h> // Core + JetStream API (libnats 3.12.x)
-
-static inline const char *ENV(const char *k, const char *defv)
-{
-    const char *v = std::getenv(k);
-    return v ? v : defv;
-}
 
 int drava_transport_nats_main(drava_t *drava,
                               device_global_id_t device_global_id,
@@ -32,10 +27,14 @@ int drava_transport_nats_main(drava_t *drava,
     /* thread 0: subscribe + fetch from JetStream, spawn a task per message */
     if (thread->tid == 0) {
         LOGGER_INFO("JetStream trying to connect");
-        const char *NATS_URL = ENV("NATS_URL", "nats://127.0.0.1:4222");
-        const char *STREAM = ENV("DRAVA_STREAM", "FRAMES");
-        const char *SUBJECT = ENV("DRAVA_SUBJECT", "frames.raw");
-        const char *DURABLE = ENV("DRAVA_DURABLE", "drava_consumer");
+        const char *NATS_URL =
+                drava_env_get_str_default("NATS_URL", "nats://127.0.0.1:4222");
+        const char *STREAM =
+                drava_env_get_str_default("DRAVA_STREAM", "FRAMES");
+        const char *SUBJECT =
+                drava_env_get_str_default("DRAVA_SUBJECT", "frames.raw");
+        const char *DURABLE =
+                drava_env_get_str_default("DRAVA_DURABLE", "drava_consumer");
 
         natsStatus s;
         natsConnection *nc = nullptr;
@@ -91,11 +90,29 @@ int drava_transport_nats_main(drava_t *drava,
                     NATS_URL, STREAM, SUBJECT, DURABLE);
 
         // Fetch loop — pull batches and spawn Drava tasks
+        std::vector<std::string> pending;
+        pending.reserve(drava->callback_batch_size);
+
         while (true) {
             natsMsgList list = {0};
             s = natsSubscription_Fetch(&list, sub, /*batch*/ 8,
                                        /*timeout ms*/ 1000, /*err*/ nullptr);
             if (s == NATS_TIMEOUT) {
+                if (!pending.empty()) {
+                    std::vector<std::string> batch_payloads =
+                            std::move(pending);
+                    pending.clear();
+                    pending.reserve(drava->callback_batch_size);
+                    drava->runtime.team_task_spawn(
+                            team, [drava, device_global_id,
+                                   batch_payloads = std::move(batch_payloads)](
+                                          task_t *task) {
+                                (void)task;
+                                drava_dispatch_payload_batch(drava,
+                                                             device_global_id,
+                                                             batch_payloads);
+                            });
+                }
                 // idle; allow other threads to progress
                 continue;
             }
@@ -116,14 +133,27 @@ int drava_transport_nats_main(drava_t *drava,
                     jsMsgMetaData_Destroy(md);
                 }
 
-                // Extract payload into std::string (publisher sends JSON)
+                // Extract payload bytes
                 std::string line(natsMsg_GetData(msg),
                                  (size_t)natsMsg_GetDataLength(msg));
+                pending.push_back(std::move(line));
 
-                // Spawn a task per message (same pattern as socket lines)
-                drava->runtime.team_task_spawn(team, [=](task_t *task) {
-                    drava_parse_line(drava, device_global_id, line);
-                });
+                if (pending.size() >= drava->callback_batch_size) {
+                    std::vector<std::string> batch_payloads =
+                            std::move(pending);
+                    pending.clear();
+                    pending.reserve(drava->callback_batch_size);
+
+                    drava->runtime.team_task_spawn(
+                            team, [drava, device_global_id,
+                                   batch_payloads = std::move(batch_payloads)](
+                                          task_t *task) {
+                                (void)task;
+                                drava_dispatch_payload_batch(drava,
+                                                             device_global_id,
+                                                             batch_payloads);
+                            });
+                }
 
                 // Ack after enqueue to achieve at-least-once semantics
                 natsStatus as = natsMsg_Ack(msg, /*opts*/ nullptr);

@@ -50,16 +50,38 @@ typedef enum drava_verbose_t {
     DRAVA_VERBOSE_ERROR = 1, // LOGGER_PRINT_ERROR_ID,
     DRAVA_VERBOSE_WARN = 2, // LOGGER_PRINT_WARN_ID,
     DRAVA_VERBOSE_INFO = 3, // LOGGER_PRINT_INFO_ID,
-    DRAVA_VERBOSE_IMPL = 4, // LOGGER_PRINT_INFO_ID,
+    DRAVA_VERBOSE_IMPL = 4, // LOGGER_PRINT_IMPL_ID,
     DRAVA_VERBOSE_DEBUG = 5 // LOGGER_PRINT_DEBUG_ID
 } drava_verbose_t;
 
-/** Drava routine type */
-typedef void *(*drava_routine_t)(const char *s);
+/**
+ * Data model for single frame
+ */
+typedef struct drava_frame_t {
+    uint64_t frame_id;
+    /* Receive timestamp at Drava ingress */
+    uint64_t recv_ts_ns;
+    const void *data;
+    size_t data_len;
+} drava_frame_t;
+
+/**
+ * Data model for batch of frames
+ */
+typedef struct drava_frame_batch_t {
+    uint64_t batch_id;
+    uint32_t count;
+    const drava_frame_t *frames;
+} drava_frame_batch_t;
+
+/** Batch routine type */
+typedef void *(*drava_frame_routine_t)(const drava_frame_batch_t *batch,
+                                       void *user_data);
+
+int drava_register_frame_routine(drava_frame_routine_t routine,
+                                 void *user_data);
 
 int drava_init(void);
-
-int drava_register_routine(drava_routine_t routine);
 
 int drava_listen(void);
 

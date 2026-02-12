@@ -16,7 +16,6 @@ struct drava_args_t {
     device_global_id_t device_global_id;
 };
 
-
 /* dispatcher: choose transport at runtime */
 int drava_transport_main(drava_t *drava,
                          device_global_id_t device_global_id,
@@ -49,7 +48,7 @@ static void *drava_main(team_t *team, thread_t *thread)
     assert(args);
 
     LOGGER_INFO("Starting thread %u on device %d", thread->tid,
-                 args->device_global_id);
+                args->device_global_id);
     drava_transport_main(args->drava, args->device_global_id, thread);
 
     return NULL;
@@ -60,13 +59,19 @@ int drava_t::init(drava_transport_t transport_type)
     /* Remember which backend to use (socket vs NATS) */
     this->transport_type = transport_type;
     this->runtime.init();
-    this->routine = NULL;
+    this->frame_routine = NULL;
+    this->frame_routine_user_data = NULL;
+    this->callback_batch_size = 128;
+    this->next_batch_id.store(1);
+    this->next_frame_id.store(1);
     return DRAVA_SUCCESS;
 }
 
-int drava_t::register_routine(drava_routine_t routine)
+int drava_t::register_frame_routine(drava_frame_routine_t routine,
+                                    void *user_data)
 {
-    this->routine = routine;
+    this->frame_routine = routine;
+    this->frame_routine_user_data = user_data;
     return DRAVA_SUCCESS;
 }
 
@@ -131,7 +136,7 @@ int drava_t::deinit(void)
     return DRAVA_SUCCESS;
 }
 
-int drava_t::log(const int verbose_level, const char * msg)
+int drava_t::log(const int verbose_level, const char *msg)
 {
     LOGGER_PRINT(verbose_level, "%s", msg);
     return DRAVA_SUCCESS;

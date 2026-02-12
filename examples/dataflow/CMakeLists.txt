@@ -6,5 +6,5 @@ project(example)
 
 set(CMAKE_BUILD_TYPE Debug)
 
-add_executable(example run.c)
+add_executable(example app.c)
 target_link_libraries(example PRIVATE ${DRAVA_NAME} XKRT::xkrt)

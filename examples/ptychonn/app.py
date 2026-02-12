@@ -1,8 +1,7 @@
-# Single-frame inference (with avg inference rate)
+# Batch inference with a single callback.
 
 import time
 import drava
-import json, base64
 import numpy as np
 import tensorflow as tf
 from keras.models import load_model
@@ -38,61 +37,49 @@ drava.log(drava.DRAVA_VERBOSE_INFO, f"Loaded model: {MODEL_PATH}")
 
 
 LOG_EVERY = 256
+PATCH_SIDE = 64
+FRAME_DTYPE = np.float32
+FRAME_BYTES = PATCH_SIDE * PATCH_SIDE * 1 * np.dtype(FRAME_DTYPE).itemsize
 
 _total_infers = 0
 _t0 = None
-current_job_id = None
+_next_log = LOG_EVERY
+def func(frames):
+    global _total_infers, _t0, _next_log
+    batch_raw = []
+    for raw in frames:
+        if len(raw) != FRAME_BYTES:
+            raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
+        batch_raw.append(raw)
 
-def func(s: str):
-    global _total_infers, _t0, current_job_id
+    if not batch_raw:
+        return None
 
-    msg = json.loads(s)
-    if msg.get("kind") != "ptychonn_frame":
-        return
+    stacked = b"".join(batch_raw)
+    tensor = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
+        (len(batch_raw), PATCH_SIDE, PATCH_SIDE, 1), order="C"
+    )
 
-    job_id = int(msg.get("job_id", -1))
-    idx = int(msg.get("idx", -1))
-    total_frames = int(msg.get("n_total", 0))
-
-    # Reset stats when a new publisher run (new job_id) starts
-    if current_job_id != job_id:
-        current_job_id = job_id
-        _total_infers = 0
+    if _t0 is None:
         _t0 = time.perf_counter()
-        drava.log(drava.DRAVA_VERBOSE_INFO, f"[job] new job_id={job_id} start_t={_t0:.6f}")
 
-    patch_side = int(msg["patch_side"])
-    dtype = np.dtype(msg["dtype"])
-    order = msg.get("order", "C")
-
-    raw = base64.b64decode(msg["data_b64"])
-    expected = patch_side * patch_side * 1 * dtype.itemsize
-    if len(raw) != expected:
-        raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {expected}")
-
-    frame = np.frombuffer(raw, dtype=dtype).reshape((1, patch_side, patch_side, 1), order=order)
-
-    # ---- inference ----
     t_inf0 = time.perf_counter()
-    pred_amp, pred_phi = model.predict(frame, verbose=0)
+    pred_amp, pred_phi = model.predict(tensor, verbose=0)
     t_inf1 = time.perf_counter()
 
-    _total_infers += 1
-
+    _total_infers += tensor.shape[0]
     elapsed = t_inf1 - _t0
     avg_fps = (_total_infers / elapsed) if elapsed > 0 else float("inf")
-    inf_ms = (t_inf1 - t_inf0) * 1000.0
-    # drava.log(drava.DRAVA_VERBOSE_INFO,
-    #           f"Infer: [frame]={_total_infers}/{total_frames} "
-    #           f"[idx]={idx} "
-    #           f"step_ms={inf_ms:.2f}")
+    step_ms = (t_inf1 - t_inf0) * 1000.0
 
-    if _total_infers % LOG_EVERY == 0 or idx == total_frames - 1:
-        drava.log(drava.DRAVA_VERBOSE_INFO,
-                  f"[frame]={_total_infers}/{total_frames} "
-                  f"[idx]={idx} "
-                  f"step_ms={inf_ms:.2f} "
-                  f"avg_fps={avg_fps:.2f}")
+    if _total_infers >= _next_log:
+        drava.log(
+            drava.DRAVA_VERBOSE_INFO,
+            f"[frames]={_total_infers} batch={tensor.shape[0]} step_ms={step_ms:.2f} avg_fps={avg_fps:.2f}",
+        )
+        _next_log += LOG_EVERY
+
+    return None
 
 
 # -----------------------------
