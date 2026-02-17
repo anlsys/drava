@@ -45,6 +45,11 @@ struct drava_t {
     /* which transport backend to use (socket or NATS) */
     drava_transport_t transport_type;
 
+    /* Batching and id allocation for callback dispatch */
+    size_t callback_batch_size;
+    std::atomic<uint64_t> next_batch_id;
+    std::atomic<uint64_t> next_frame_id;
+
     /***********/
     /* Methods */
     /***********/
@@ -71,9 +76,9 @@ const char *drava_env_get_str_default(const char *key, const char *default_value
 
 int drava_env_get_int_default(const char *key, int default_value);
 
-void drava_parse_line(drava_t *drava,
-                      device_global_id_t device_global_id,
-                      const std::string &line);
+//void drava_parse_line(drava_t *drava,
+//                      device_global_id_t device_global_id,
+//                      const std::string &line);
 
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,

@@ -65,7 +65,7 @@ void drava_register_routine_py(PyObject *cb)
     Py_XINCREF(cb);
     Py_XDECREF(g_routine);
     g_routine = cb;
-    drava_register_frame_routine(drava_frame_routine_trampoline, NULL)
+    drava_register_frame_routine(drava_frame_routine_trampoline, NULL);
 }
 
 /* Listen from python */

@@ -57,11 +57,12 @@ static void *drava_main(team_t *team, thread_t *thread)
 int drava_t::init(drava_transport_t transport_type)
 {
     /* Remember which backend to use (socket vs NATS) */
+    int cb = drava_env_get_int_default("DRAVA_INFER_BATCH", 128);
     this->transport_type = transport_type;
     this->runtime.init();
     this->frame_routine = NULL;
     this->frame_routine_user_data = NULL;
-    this->callback_batch_size = 128;
+    this->callback_batch_size = (size_t)cb;
     this->next_batch_id.store(1);
     this->next_frame_id.store(1);
     return DRAVA_SUCCESS;
@@ -126,7 +127,8 @@ int drava_t::listen(void)
     /* Wait for all teams completion */
     for (device_global_id_t i = 0; i < this->runtime.get_ndevices(); ++i)
         this->runtime.team_join(&this->devices[i].team);
-
+    LOGGER_INFO("drava.listen: enter, ndevices=%u",
+                (unsigned)this->runtime.get_ndevices());
     return DRAVA_SUCCESS;
 }
 

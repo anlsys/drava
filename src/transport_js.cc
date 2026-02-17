@@ -21,6 +21,8 @@ int drava_transport_nats_main(drava_t *drava,
                               device_global_id_t device_global_id,
                               thread_t *thread)
 {
+    LOGGER_INFO("drava_transport_nats_main: device=%d tid=%u",
+                (int)device_global_id, (unsigned)thread->tid);
     drava_device_t *drava_device = drava->devices + device_global_id;
     team_t *team = &drava_device->team;
 
@@ -35,6 +37,14 @@ int drava_transport_nats_main(drava_t *drava,
                 drava_env_get_str_default("DRAVA_SUBJECT", "frames.raw");
         const char *DURABLE =
                 drava_env_get_str_default("DRAVA_DURABLE", "drava_consumer");
+        int fetch_batch = drava_env_get_int_default("DRAVA_JS_FETCH_BATCH", 8);
+        int fetch_timeout_ms =
+                drava_env_get_int_default("DRAVA_JS_FETCH_TIMEOUT_MS", 1000);
+
+        LOGGER_INFO(
+                "JetStream fetch config: batch=%d timeout_ms=%d callback_batch=%zu",
+                fetch_batch, fetch_timeout_ms,
+                (size_t)drava->callback_batch_size);
 
         natsStatus s;
         natsConnection *nc = nullptr;
@@ -95,8 +105,9 @@ int drava_transport_nats_main(drava_t *drava,
 
         while (true) {
             natsMsgList list = {0};
-            s = natsSubscription_Fetch(&list, sub, /*batch*/ 8,
-                                       /*timeout ms*/ 1000, /*err*/ nullptr);
+            s = natsSubscription_Fetch(&list, sub, /*batch*/ fetch_batch,
+                                       /*timeout ms*/ fetch_timeout_ms,
+                                       /*err*/ nullptr);
             if (s == NATS_TIMEOUT) {
                 if (!pending.empty()) {
                     std::vector<std::string> batch_payloads =

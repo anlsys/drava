@@ -1,12 +1,12 @@
 /*******************************************************************************
- * Copyright 2025 UChicago Argonne, LLC.
- * (c.f. AUTHORS, LICENSE)
- *
- * This file is part of the drava project.
- * For more info, see https://github.com/anlsys/drava
- *
- * SPDX-License-Identifier: BSD-3-Clause
- *****************************************************************************/
+* Copyright 2025 UChicago Argonne, LLC.
+* (c.f. AUTHORS, LICENSE)
+*
+* This file is part of the drava project.
+* For more info, see https://github.com/anlsys/drava
+*
+* SPDX-License-Identifier: BSD-3-Clause
+*****************************************************************************/
 
 #include <cerrno>
 #include <chrono>
@@ -69,16 +69,6 @@ const char *drava_env_get_str_default(const char *key,
 {
     const char *s = env_get(key);
     return s ? s : default_value;
-}
-
-void drava_parse_line(drava_t *drava,
-                      device_global_id_t device_global_id,
-                      const std::string &line)
-{
-    (void)device_global_id;
-    if (drava && drava->routine) {
-        drava->routine(line.c_str());
-    }
 }
 
 static uint64_t ns_since_epoch()

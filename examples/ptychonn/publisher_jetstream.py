@@ -67,11 +67,12 @@ async def main():
             next_t += period
 
     await nc.drain()
-
-    total_dt = time.perf_counter() - t0
+    t_end = time.perf_counter()
+    total_dt = t_end - t0
     print(
         f"Done: published {total_frames} frames in {total_dt:.3f}s "
-        f"(avg_fps={total_frames/total_dt:.2f})"
+        f"(avg_fps={total_frames/total_dt:.2f}) "
+        f"Last frame sent at: {t_end}"
     )
 
 if __name__ == "__main__":
