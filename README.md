@@ -61,7 +61,7 @@ CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
-- To use Jetstream/Socket set it with environment variable:
+- Set the environment variables:
 ```shell
 export DRAVA_TRANSPORT=nats
 export DRAVA_INFER_BATCH=128

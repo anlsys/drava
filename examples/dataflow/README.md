@@ -25,7 +25,7 @@ python publisher_socket.py
 
 ```shell
 cd examples/dataflow
-python run.py
+python app.py
 ```
 
 
@@ -39,9 +39,9 @@ cd ~/nats_binary
 ```
 - In terminal 2 run the Python file with `"export DRAVA_TRANSPORT=nats"`:
 ```
-python run.py
+python app.py
 ```
-- In terminal 3, publish dummy JSON:
+- In terminal 3, run the the publisher script:
 ```shell
 cd examples/dataflow
 pip install -r requirements.txt
