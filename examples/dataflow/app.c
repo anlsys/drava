@@ -12,16 +12,24 @@
 #include <drava/drava_c.h>
 #include <stdio.h>
 
-static void *handler(const char *s)
+static void *handler(const drava_frame_batch_t *batch, void *user_data)
 {
-    printf("C app: Received %s\n", s);
+    (void)user_data;
+    if (!batch)
+        return NULL;
+
+    printf("C app: count=%u\n", batch->count);
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const drava_frame_t *f = &batch->frames[i];
+        printf("  bytes=%zu\n", f->data_len);
+    }
     return NULL;
 }
 
 int main()
 {
     assert(drava_init() == DRAVA_SUCCESS);
-    assert(drava_register_routine(handler) == DRAVA_SUCCESS);
+    assert(drava_register_frame_routine(handler, NULL) == DRAVA_SUCCESS);
     assert(drava_listen() == DRAVA_SUCCESS);
     assert(drava_deinit() == DRAVA_SUCCESS);
     return 0;
