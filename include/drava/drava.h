@@ -76,10 +76,6 @@ const char *drava_env_get_str_default(const char *key, const char *default_value
 
 int drava_env_get_int_default(const char *key, int default_value);
 
-//void drava_parse_line(drava_t *drava,
-//                      device_global_id_t device_global_id,
-//                      const std::string &line);
-
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,
                                   const std::vector<std::string> &payloads);
