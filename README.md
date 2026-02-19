@@ -64,10 +64,12 @@ export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python 
 - To use Jetstream/Socket set it with environment variable:
 ```shell
 export DRAVA_TRANSPORT=nats
-# export DRAVA_TRANSPORT=socket
 export DRAVA_INFER_BATCH=128
 export DRAVA_JS_FETCH_BATCH=8
 export DRAVA_JS_FETCH_TIMEOUT_MS=1000
+export DRAVA_PUBLISH_RATE_HZ=1000 # 0 for max
+export XKAAPI_VERBOSE=4
+# export DRAVA_TRANSPORT=socket
 ```
 - Set number of threads for XKRT with environment variable (default = 4):
 ```shell

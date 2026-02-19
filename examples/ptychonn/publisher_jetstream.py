@@ -1,4 +1,4 @@
-import asyncio, time
+import asyncio, time, os
 import numpy as np
 from nats.aio.client import Client as NATS
 
@@ -7,7 +7,10 @@ SUBJECT = "frames.raw"
 DATA_DIR = "PtychoNN_data_partial"
 
 # target framerate: set to None or 0 for max speed
-RATE_HZ = 1000.0
+# target framerate from env:
+#   unset or <= 0 => max speed (no pacing)
+#   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
+RATE_HZ = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
 LOG_EVERY = 256
 
 async def main():
