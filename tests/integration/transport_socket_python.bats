@@ -16,26 +16,26 @@ setup() {
   # Make 'import drava' resolve from build tree
   export PYTHONPATH="${ABS_TOP_BUILDDIR}:${PYTHONPATH:-}"
 
-  RUNPY="${ABS_TOP_SRCDIR}/examples/dataflow/run.py"
+  RUNPY="${ABS_TOP_SRCDIR}/examples/dataflow/app.py"
   PUB="${ABS_TOP_SRCDIR}/examples/dataflow/publisher_socket.py"
   REQ="${ABS_TOP_SRCDIR}/examples/dataflow/requirements.txt"
   [[ -f "$RUNPY" ]] || skip "missing $RUNPY"
   [[ -f "$PUB"  ]] || skip "missing $PUB"
   [[ -f "$REQ" ]] || skip "missing $REQ"
 
-  export PYTHONPATH="$TDIR/pylibs:${PYTHONPATH:-}"
-  python3 -m pip install -q --no-input --disable-pip-version-check \
-    --target "$TDIR/pylibs" -r "$REQ" || skip "pip install failed"
-
   # Paths used by your publisher + drava socket transport
   export DRAVA_FIFO_PATH="${DRAVA_FIFO_PATH:-/tmp/drava_in}"
   export DRAVA_SOCKET_PATH="${DRAVA_SOCKET_PATH:-/tmp/accel_2048.sock}"
 
-  rm -f "$DRAVA_FIFO_PATH" "$DRAVA_SOCKET_PATH"
-  mkfifo "$DRAVA_FIFO_PATH"
-
   TDIR="${BATS_TEST_TMPDIR}/drava_sock"
   mkdir -p "$TDIR"
+
+  export PYTHONPATH="$TDIR/pylibs:${PYTHONPATH:-}"
+  python3 -m pip install -q --no-input --disable-pip-version-check \
+    --target "$TDIR/pylibs" -r "$REQ" || skip "pip install failed"
+
+  rm -f "$DRAVA_FIFO_PATH" "$DRAVA_SOCKET_PATH"
+  mkfifo "$DRAVA_FIFO_PATH"
 
   export SOCAT_OUT="$TDIR/socat.out"
   export SOCAT_ERR="$TDIR/socat.err"
@@ -96,7 +96,7 @@ die() {
   # Deterministic publish once
   SEND_ONCE=1 python3 "$PUB" >"$PUBLISHER_LOG" 2>&1
 
-  if ! wait_for_log "$CONSUMER_LOG" "Python app received:" 10; then
+  if ! wait_for_log "$CONSUMER_LOG" "Python app received raw frame:" 10; then
     echo "---- consumer ----" >&2
     sed -n '1,250p' "$CONSUMER_LOG" >&2
     echo "---- publisher ----" >&2
