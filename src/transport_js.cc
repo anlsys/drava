@@ -39,7 +39,7 @@ int drava_transport_nats_main(drava_t *drava,
                 drava_env_get_str_default("DRAVA_DURABLE", "drava_consumer");
         int fetch_batch = drava_env_get_int_default("DRAVA_JS_FETCH_BATCH", 8);
         int fetch_timeout_ms =
-                drava_env_get_int_default("DRAVA_JS_FETCH_TIMEOUT_MS", 1000);
+                drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
 
         LOGGER_INFO(
                 "JetStream fetch config: batch=%d timeout_ms=%d callback_batch=%zu",

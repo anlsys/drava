@@ -1,5 +1,6 @@
 """
 Frame-by-frame publisher for Drava socket transport (FIFO -> socat -> UNIX socket).
+Wire format per frame: [4-byte big-endian payload length][raw frame bytes].
 
 Prereqs (example):
   mkfifo /tmp/drava_in
@@ -8,19 +9,19 @@ Prereqs (example):
 Drava socket transport:
   export DRAVA_TRANSPORT=socket
 """
-import json
-import base64
 import time
 import numpy as np
 import os
+import struct
 
 FIFO_PATH = "/tmp/drava_in"
 
-PATCH_SIDE = 64
 DATA_DIR = "PtychoNN_data_partial"
 
-# target framerate: set to None or 0 for max speed
-RATE_HZ = 1000.0
+# target framerate from env:
+#   unset or <= 0 => max speed (no pacing)
+#   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
+RATE_HZ = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
 LOG_EVERY = 256
 
 
@@ -35,8 +36,6 @@ def main():
     n_frames = X_test.shape[0]
     print("X_test shape:", X_test.shape)
 
-    job_id = int(time.time_ns())
-
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
 
@@ -47,27 +46,17 @@ def main():
     next_t = (t0 + period) if pacing else None
 
     print(f"Opening FIFO {FIFO_PATH} for writing...")
-    with open(FIFO_PATH, "w") as f:
+    with open(FIFO_PATH, "wb") as f:
         for idx in range(n_frames):
             frame = X_test[idx]  # (64,64,1)
-
-            payload = {
-                "kind": "ptychonn_frame",
-                "job_id": job_id,
-                "frame_id": int(time.time_ns()),
-                "idx": idx,
-                "rows": 1,
-                "patch_side": PATCH_SIDE,
-                "dtype": "float32",
-                "order": "C",
-                "data_b64": base64.b64encode(frame.tobytes(order="C")).decode(),
-                "n_total": n_frames,
-            }
-
-            f.write(json.dumps(payload) + "\n")
+            payload = frame.tobytes(order="C")
+            f.write(struct.pack("!I", len(payload)))
+            f.write(payload)
             f.flush()
 
             win_count += 1
+            if idx == 0:
+                print(f"First frame sent at:{t0}")
 
             if (idx + 1) % LOG_EVERY == 0 or idx == n_frames - 1:
                 now = time.perf_counter()
@@ -78,7 +67,7 @@ def main():
                 win_fps = win_count / dt_win if dt_win > 0 else float("inf")
 
                 print(
-                    f"Sent idx={idx}/{n_frames-1} "
+                    f"Published idx={idx}/{n_frames} "
                     f"win_fps={win_fps:.2f} avg_fps={avg_fps:.2f}"
                 )
 
@@ -92,10 +81,12 @@ def main():
                     time.sleep(sleep_s)
                 next_t += period
 
-    total_dt = time.perf_counter() - t0
+    t_end = time.perf_counter()
+    total_dt = t_end - t0
     print(
-        f"Done: sent {n_frames} frames in {total_dt:.3f}s "
-        f"(avg_fps={n_frames/total_dt:.2f})"
+        f"Done: published {n_frames} frames in {total_dt:.3f}s "
+        f"(avg_fps={n_frames/total_dt:.2f}) "
+        f"Last frame sent at: {t_end}"
     )
 
 
