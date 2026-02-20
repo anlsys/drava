@@ -1,8 +1,9 @@
-# Single-frame inference (with avg inference rate)
+# Batch inference with a single callback.
 
 import time
+import os
+import threading
 import drava
-import json, base64
 import numpy as np
 import tensorflow as tf
 from keras.models import load_model
@@ -37,62 +38,94 @@ model = load_model(MODEL_PATH)
 drava.log(drava.DRAVA_VERBOSE_INFO, f"Loaded model: {MODEL_PATH}")
 
 
-LOG_EVERY = 256
+TOTAL_FRAMES = 3600
+DRAVA_INFER_BATCH = int(os.getenv("DRAVA_INFER_BATCH", "128"))
+LOG_EVERY = DRAVA_INFER_BATCH
+PATCH_SIDE = 64
+FRAME_DTYPE = np.float32
+FRAME_BYTES = PATCH_SIDE * PATCH_SIDE * 1 * np.dtype(FRAME_DTYPE).itemsize
 
 _total_infers = 0
 _t0 = None
-current_job_id = None
+_next_log = LOG_EVERY
+_first_arrival_s = None
+_last_done_s = None
+_state_lock = threading.Lock()
+_final_logged = False
 
-def func(s: str):
-    global _total_infers, _t0, current_job_id
 
-    msg = json.loads(s)
-    if msg.get("kind") != "ptychonn_frame":
-        return
+def warmup_model(runs=2, batch_size=DRAVA_INFER_BATCH):
+    dummy = np.zeros((batch_size, PATCH_SIDE, PATCH_SIDE, 1), dtype=FRAME_DTYPE)
+    for _ in range(runs):
+        model.predict(dummy, verbose=0)
+    drava.log(drava.DRAVA_VERBOSE_INFO, f"Warmup done: runs={runs}, batch={batch_size}")
 
-    job_id = int(msg.get("job_id", -1))
-    idx = int(msg.get("idx", -1))
-    total_frames = int(msg.get("n_total", 0))
 
-    # Reset stats when a new publisher run (new job_id) starts
-    if current_job_id != job_id:
-        current_job_id = job_id
-        _total_infers = 0
-        _t0 = time.perf_counter()
-        drava.log(drava.DRAVA_VERBOSE_INFO, f"[job] new job_id={job_id} start_t={_t0:.6f}")
+def func(frames):
+    global _total_infers, _t0, _next_log
+    global _first_arrival_s, _last_done_s
+    global _final_logged
 
-    patch_side = int(msg["patch_side"])
-    dtype = np.dtype(msg["dtype"])
-    order = msg.get("order", "C")
+    arrival_s = time.perf_counter()
+    batch_raw = []
+    for raw in frames:
+        if len(raw) != FRAME_BYTES:
+            raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
+        batch_raw.append(raw)
 
-    raw = base64.b64decode(msg["data_b64"])
-    expected = patch_side * patch_side * 1 * dtype.itemsize
-    if len(raw) != expected:
-        raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {expected}")
+    if not batch_raw:
+        return None
 
-    frame = np.frombuffer(raw, dtype=dtype).reshape((1, patch_side, patch_side, 1), order=order)
+    stacked = b"".join(batch_raw)
+    tensor = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
+        (len(batch_raw), PATCH_SIDE, PATCH_SIDE, 1), order="C"
+    )
 
-    # ---- inference ----
     t_inf0 = time.perf_counter()
-    pred_amp, pred_phi = model.predict(frame, verbose=0)
+    pred_amp, pred_phi = model.predict(tensor, verbose=0)
     t_inf1 = time.perf_counter()
+    done_s = t_inf1
+    step_s = (t_inf1 - t_inf0)
+    step_ms = step_s * 1000.0
 
-    _total_infers += 1
+    log_line = None
+    final_line = None
+    with _state_lock:
+        if _t0 is None:
+            _t0 = t_inf0
+            _first_arrival_s = arrival_s
+        _last_done_s = done_s
 
-    elapsed = t_inf1 - _t0
-    avg_fps = (_total_infers / elapsed) if elapsed > 0 else float("inf")
-    inf_ms = (t_inf1 - t_inf0) * 1000.0
-    # drava.log(drava.DRAVA_VERBOSE_INFO,
-    #           f"Infer: [frame]={_total_infers}/{total_frames} "
-    #           f"[idx]={idx} "
-    #           f"step_ms={inf_ms:.2f}")
+        _total_infers += tensor.shape[0]
+        wall_s = (t_inf1 - _t0)
+        wall_avg_fps = (_total_infers / wall_s) if wall_s > 0 else float("inf")
+        app_e2e_s = ((_last_done_s - _first_arrival_s)
+                     if _first_arrival_s is not None else 0.0)
 
-    if _total_infers % LOG_EVERY == 0 or idx == total_frames - 1:
-        drava.log(drava.DRAVA_VERBOSE_INFO,
-                  f"[frame]={_total_infers}/{total_frames} "
-                  f"[idx]={idx} "
-                  f"step_ms={inf_ms:.2f} "
-                  f"avg_fps={avg_fps:.2f}")
+        if _total_infers >= _next_log:
+            log_line = (
+                f"[frames]={_total_infers} batch={tensor.shape[0]} step_ms={step_ms:.2f} "
+                f"wall_avg_fps={wall_avg_fps:.2f}"
+            )
+            _next_log += LOG_EVERY
+
+        if (not _final_logged) and (_total_infers >= TOTAL_FRAMES):
+            final_wall_avg_fps = (_total_infers / app_e2e_s) if app_e2e_s > 0 else float("inf")
+            final_line = (
+                f"[final] frames={_total_infers} "
+                f"frame0_arrival_s={_first_arrival_s:.6f} "
+                f"frame3600_done_s={_last_done_s:.6f} "
+                f"end_to_end_latency_s={app_e2e_s:.6f} "
+                f"final_wall_avg_fps={final_wall_avg_fps:.2f}"
+            )
+            _final_logged = True
+
+    if log_line is not None:
+        drava.log(drava.DRAVA_VERBOSE_INFO, log_line)
+    if final_line is not None:
+        drava.log(drava.DRAVA_VERBOSE_INFO, final_line)
+
+    return None
 
 
 # -----------------------------
@@ -100,7 +133,21 @@ def func(s: str):
 # -----------------------------
 # Set transport via env var:
 #   export DRAVA_TRANSPORT=nats   (or socket)
-drava.init()
+warmup_model()
+
+rc = drava.init()
+if rc != drava.DRAVA_SUCCESS:
+    raise RuntimeError(
+        f"drava.init() failed with rc={rc}. "
+        "If DRAVA_TRANSPORT=nats, rebuild Drava with NATS enabled."
+    )
+
 drava.register_routine_py(func)
-drava.listen_py()
-drava.deinit()
+
+rc = drava.listen_py()
+if rc != drava.DRAVA_SUCCESS:
+    raise RuntimeError(f"drava.listen_py() failed with rc={rc}")
+
+rc = drava.deinit()
+if rc != drava.DRAVA_SUCCESS:
+    raise RuntimeError(f"drava.deinit() failed with rc={rc}")

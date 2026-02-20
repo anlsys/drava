@@ -24,8 +24,7 @@ END_TEST
 START_TEST(test_init_invalid_transport_fails)
 {
     setenv("DRAVA_TRANSPORT", "this_transport_does_not_exist", 1);
-    ck_assert_msg(drava_init() != DRAVA_SUCCESS,
-                  "invalid transport must fail");
+    ck_assert_msg(drava_init() != DRAVA_SUCCESS, "invalid transport must fail");
 }
 END_TEST
 

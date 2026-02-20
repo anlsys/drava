@@ -2,7 +2,7 @@
 
 This example demonstrates an end-to-end inference workflow for PtychoNN (TF v2) using Drava as the runtime.
 Diffraction patches are sent from a publisher in batches, transported through Drava using either
-JetStream or a Unix domain socket, and consumed by the application. 
+JetStream or a Unix domain socket, and consumed by the application.
 
 The application accumulates all
 incoming patches and runs inference once on the complete dataset, followed by stitching and MSE
@@ -26,8 +26,8 @@ Model selection:
 Model file:
 - wts4/weights.<min_epoch>.hdf5  
   This is the actual Keras model file. The network has two outputs:
-   - predicted amplitude
-   - predicted phase
+    - predicted amplitude
+    - predicted phase
 
 ### Downloading required data and files
 Before running the example, download the required files using the Hugging Face Hub API.
@@ -59,26 +59,25 @@ Supported transport layers:
 - JetStream (NATS JetStream)
 - Socket (Unix domain socket)
 
-Both ultimately deliver a JSON payload to `app.py`.
+Both ultimately deliver raw frame bytes to `app.py` (no JSON/base64).
 
 ## JetStream Transport
 
 JetStream → (pull) → Drava → (push) → app.py
 
 1. Publisher [publisher_jetstream.py](publisher_jetstream.py):
-   - Loads `X_test.npy`.
-   - Splits it into batches.
-   - Encodes each batch as base64 (`float32`, row-major).
-   - Publishes messages to the JetStream subject `frames.raw` with metadata.
+    - Loads `X_test.npy`.
+    - Publishes each frame as raw `float32` bytes (`64x64x1`, row-major) to `frames.raw`.
 2. Transport Layer (JetStream + Drava runtime):
     - JetStream provides a reliable messaging backend.
     - Drava receives the raw message from the JetStream device.
-    - Drava invokes the registered Python callback (`func`) with the message payload.
+    - Drava groups incoming frames into internal batches (fixed at 128) and invokes the Python callback.
 
 3. Application (`app.py`):
-   - Loads the PtychoNN `.hdf5` model once at startup.
-   - Decodes incoming batches into `(B, 64, 64, 1)` tensors.
-   - Runs prediction on each frame.
+    - Loads the PtychoNN `.hdf5` model once at startup.
+    - Callback decodes incoming batches into `(B, 64, 64, 1)` tensors.
+    - Callback runs inference on each batch.
+    - Registers callback with `drava.register_routine_py(func)`.
 
 ### Run using Jetstream
 
@@ -114,6 +113,9 @@ The data flow is:
 ```shell
 publisher_socket.py → FIFO (/tmp/drava_in) → socat → /tmp/accel_2048.sock → Drava → app.py
 ```
+
+For socket mode, each frame is written as:
+`[4-byte big-endian length][raw frame bytes]`.
 
 ### Run using Socket
 

@@ -12,6 +12,7 @@
 
 /* Python-specific wrapper functions */
 %inline %{
+/*ToDo: keep one function*/
 void drava_register_routine_py(PyObject * cb);
 void drava_listen_py(void);
 %}

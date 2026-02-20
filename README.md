@@ -61,9 +61,14 @@ CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
-- To use Jetstream/Socket set it with environment variable:
+- Set the environment variables:
 ```shell
 export DRAVA_TRANSPORT=nats
+export DRAVA_INFER_BATCH=128
+export DRAVA_JS_FETCH_BATCH=8
+export DRAVA_FETCH_TIMEOUT_MS=1000
+export DRAVA_PUBLISH_RATE_HZ=1000 # 0 for max
+export XKAAPI_VERBOSE=4
 # export DRAVA_TRANSPORT=socket
 ```
 - Set number of threads for XKRT with environment variable (default = 4):

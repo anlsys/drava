@@ -77,7 +77,7 @@ if (BATS_EXECUTABLE)
     # -----------------------
     # Common paths
     # -----------------------
-    set(DRAVA_RUN_PY "${DRAVA_REPO_ROOT}/examples/dataflow/run.py")
+    set(DRAVA_RUN_PY "${DRAVA_REPO_ROOT}/examples/dataflow/app.py")
     set(DRAVA_REQUIREMENTS "${DRAVA_REPO_ROOT}/examples/dataflow/requirements.txt")
 
     # -----------------------

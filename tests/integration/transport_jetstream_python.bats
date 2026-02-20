@@ -19,7 +19,7 @@ setup() {
   # Make 'import drava' resolve from build tree
   export PYTHONPATH="${ABS_TOP_BUILDDIR}:${PYTHONPATH:-}"
 
-  RUNPY="${ABS_TOP_SRCDIR}/examples/dataflow/run.py"
+  RUNPY="${ABS_TOP_SRCDIR}/examples/dataflow/app.py"
   PUB="${ABS_TOP_SRCDIR}/examples/dataflow/publisher_jetstream.py"
   REQ="${ABS_TOP_SRCDIR}/examples/dataflow/requirements.txt"
 
@@ -93,7 +93,7 @@ die() {
   ( cd "$(dirname "$PUB")" && python3 "$PUB" ) >"$PUBLISHER_LOG" 2>&1
 
   # Assert receive
-  if ! wait_for_log "$CONSUMER_LOG" "Python app received:" 15; then
+  if ! wait_for_log "$CONSUMER_LOG" "Python app received raw frame:" 15; then
     echo "---- consumer ----" >&2
     sed -n '1,250p' "$CONSUMER_LOG" >&2
     echo "---- publisher ----" >&2

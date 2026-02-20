@@ -1,14 +1,16 @@
-import asyncio, json, base64, time
+import asyncio, time, os
 import numpy as np
 from nats.aio.client import Client as NATS
 
 STREAM = "FRAMES"
 SUBJECT = "frames.raw"
-PATCH_SIDE = 64
 DATA_DIR = "PtychoNN_data_partial"
 
 # target framerate: set to None or 0 for max speed
-RATE_HZ = 1000.0
+# target framerate from env:
+#   unset or <= 0 => max speed (no pacing)
+#   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
+RATE_HZ = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
 LOG_EVERY = 256
 
 async def main():
@@ -25,8 +27,6 @@ async def main():
     total_frames = X_test.shape[0]
     print("X_test shape:", X_test.shape)
 
-    job_id = int(time.time_ns())
-
     # Pacing setup
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
@@ -39,21 +39,8 @@ async def main():
 
     for idx in range(total_frames):
         frame = X_test[idx]
-
-        payload = {
-            "kind": "ptychonn_frame",
-            "job_id": job_id,
-            "frame_id": int(time.time_ns()),
-            "idx": idx,
-            "rows": 1,
-            "patch_side": PATCH_SIDE,
-            "dtype": "float32",
-            "order": "C",
-            "data_b64": base64.b64encode(frame.tobytes(order="C")).decode(),
-            "n_total": total_frames,
-        }
-
-        ack = await js.publish(SUBJECT, json.dumps(payload).encode())
+        payload = frame.tobytes(order="C")
+        ack = await js.publish(SUBJECT, payload)
         win_count += 1
         if idx == 0:
             print(f"First frame sent at:{t0}")
@@ -83,11 +70,12 @@ async def main():
             next_t += period
 
     await nc.drain()
-
-    total_dt = time.perf_counter() - t0
+    t_end = time.perf_counter()
+    total_dt = t_end - t0
     print(
         f"Done: published {total_frames} frames in {total_dt:.3f}s "
-        f"(avg_fps={total_frames/total_dt:.2f})"
+        f"(avg_fps={total_frames/total_dt:.2f}) "
+        f"Last frame sent at: {t_end}"
     )
 
 if __name__ == "__main__":

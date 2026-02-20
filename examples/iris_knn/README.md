@@ -2,7 +2,7 @@
 
 This example demonstrates an end-to-end publisher (Jetstream) → Drava (consumer) → app inference
 workflow using a pre-trained KNN model. A one-row Iris feature vector is published through JetStream,
-delivered by Drava, decoded by the app which then classify it using a pre-trained KNN model.
+delivered by Drava as raw bytes, and consumed by the app for KNN inference.
 
 ### Dataset and model
 
@@ -29,29 +29,27 @@ Supported transport layers:
 - JetStream (NATS JetStream)
 - Socket (Unix domain socket)
 
-Both ultimately deliver a JSON payload to `app.py`.
+Both ultimately deliver raw frame bytes to `app.py` (no JSON/base64).
 
 ## JetStream Transport
 
 JetStream → (pull) → Drava → (push) → app.py
 
 1. Publisher [publisher_jetstream.py](publisher_jetstream.py):
-    - Creates a single-row Iris sample using NumPy/Pandas.
-    - Encodes the feature matrix into base64 for transport.
-    - Packages metadata (rows, cols, dtype, frame_id, feature names).
-    - Publishes the message to a JetStream subject (`frames.raw`).
+   - Creates one Iris sample using NumPy (`float32[4]`).
+   - Publishes the raw bytes to JetStream subject (`frames.raw`).
 
 2. Transport Layer (JetStream + Drava runtime):
-    - JetStream provides a reliable messaging backend.
-    - Drava receives the raw message from the JetStream device.
-    - Drava invokes the registered Python callback (`func`) with the message payload.
+   - JetStream provides a reliable messaging backend.
+   - Drava receives the raw message from the JetStream device.
+   - Drava invokes the registered Python callback (`func`) with the message payload.
 
 3. Application (`app.py`):
-    - Drava passes the JSON payload to the application.
-    - Application reconstructs the NumPy array and DataFrame.
-    - A KNN model (`iris_knn_model.pkl`) is loaded once at startup.
-    - The model predicts the Iris species.
-    - Application prints the prediction with its associated `frame_id`.
+   - Drava passes raw bytes to the application callback.
+   - Application reconstructs a NumPy row vector (`1x4`, float32).
+   - A KNN model (`iris_knn_model.pkl`) is loaded once at startup.
+   - The model predicts the Iris species.
+   - Application prints the predicted class.
 
 ### Run using Jetstream
 

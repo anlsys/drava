@@ -10,43 +10,31 @@
 
 #include <drava/drava.h>
 
+#include <arpa/inet.h>
+#include <cerrno>
 #include <filesystem>
-#include <streambuf>
 #include <string>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <vector>
 
 /* TODO: env variable or something, socket path */
 static char const *SOCK_PATH = "/tmp/accel_2048.sock";
 
-/* custom socketbuf to readline on the socket */
-class socketbuf : public std::streambuf
+static bool read_exact(int fd, void *buf, size_t len)
 {
-    static constexpr size_t buf_size = 1024;
-
-  private:
-    char buffer[buf_size];
-    int sockfd;
-
-  protected:
-    /* refill buffer when empty */
-    int underflow(void) override
-    {
-        ssize_t n = read(sockfd, buffer, buf_size);
+    char *p = static_cast<char *>(buf);
+    size_t done = 0;
+    while (done < len) {
+        ssize_t n = read(fd, p + done, len - done);
         if (n <= 0)
-            return traits_type::eof();
-        setg(buffer, buffer, buffer + n);
-        return traits_type::to_int_type(*gptr());
+            return false;
+        done += (size_t)n;
     }
-
-  public:
-    explicit socketbuf(int fd)
-            : sockfd(fd)
-    {
-        setg(buffer, buffer, buffer);
-    }
-};
+    return true;
+}
 
 int drava_transport_socket_main(drava_t *drava,
                                 device_global_id_t device_global_id,
@@ -75,21 +63,77 @@ int drava_transport_socket_main(drava_t *drava,
             LOGGER_FATAL("Could not connect socket %s: %s", SOCK_PATH,
                          strerror(errno));
 
-        LOGGER_INFO("Connected to socket %s, reading lines...", SOCK_PATH);
+        LOGGER_INFO("Connected to socket %s, reading framed binary payloads...",
+                    SOCK_PATH);
 
-        socketbuf sb(sockfd);
-        std::istream sockstream(&sb);
-        std::string line;
+        int flush_timeout_ms =
+                drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
+        LOGGER_INFO(
+                "Socket fetch config: flush_timeout_ms=%d callback_batch=%zu",
+                flush_timeout_ms, drava->callback_batch_size);
 
-        /* read lines from the socket */
-        while (std::getline(sockstream, line)) {
-            //            LOGGER_DEBUG("Got: %s", line.c_str());
+        std::vector<std::string> pending;
+        pending.reserve(drava->callback_batch_size);
 
-            /* spawn a task for each line */
-            drava->runtime.team_task_spawn(team, [=](task_t *task) {
-                drava_parse_line(drava, device_global_id, line);
-            });
+        auto flush_pending = [&]() {
+            if (pending.empty())
+                return;
+            std::vector<std::string> batch_payloads = std::move(pending);
+            pending.clear();
+            pending.reserve(drava->callback_batch_size);
+
+            drava->runtime.team_task_spawn(
+                    team,
+                    [drava, device_global_id,
+                     batch_payloads = std::move(batch_payloads)](task_t *task) {
+                        (void)task;
+                        drava_dispatch_payload_batch(drava, device_global_id,
+                                                     batch_payloads);
+                    });
+        };
+
+        /* each frame is: [4-byte big-endian length][payload bytes] */
+        while (true) {
+            if (!pending.empty()) {
+                fd_set rfds;
+                FD_ZERO(&rfds);
+                FD_SET(sockfd, &rfds);
+                struct timeval tv;
+                tv.tv_sec = flush_timeout_ms / 1000;
+                tv.tv_usec = (flush_timeout_ms % 1000) * 1000;
+                int sel = select(sockfd + 1, &rfds, nullptr, nullptr, &tv);
+                if (sel == 0) {
+                    flush_pending();
+                    continue;
+                }
+                if (sel < 0) {
+                    if (errno == EINTR)
+                        continue;
+                    break;
+                }
+            }
+
+            uint32_t be_len = 0;
+            if (!read_exact(sockfd, &be_len, sizeof(be_len)))
+                break;
+
+            const uint32_t payload_len = ntohl(be_len);
+            if (payload_len == 0)
+                continue;
+
+            std::string payload((size_t)payload_len, '\0');
+            if (!read_exact(sockfd, payload.data(), payload.size()))
+                break;
+
+            pending.push_back(std::move(payload));
+
+            if (pending.size() < drava->callback_batch_size)
+                continue;
+
+            flush_pending();
         }
+
+        flush_pending();
         close(sockfd);
     }
 
