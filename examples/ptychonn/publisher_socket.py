@@ -21,6 +21,7 @@ FIFO_PATH = "/tmp/drava_in"
 #   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
 RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
 LOG_EVERY = 256
+EOS_PREFIX = b"DRAVA_EOS:"
 
 
 def main():
@@ -81,6 +82,12 @@ def main():
                 if sleep_s > 0:
                     time.sleep(sleep_s)
                 next_t += period
+
+        # End-of-stream marker with sent frame count
+        eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+        f.write(struct.pack("!I", len(eos_payload)))
+        f.write(eos_payload)
+        f.flush()
 
     t_end = time.perf_counter()
     total_dt = t_end - t0

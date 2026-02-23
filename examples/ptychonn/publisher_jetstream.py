@@ -4,6 +4,7 @@ from publisher_util import load_publish_config, make_payload_generator
 
 STREAM = "FRAMES"
 SUBJECT = "frames.raw"
+EOS_PREFIX = b"DRAVA_EOS:"
 RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
 LOG_EVERY = 256
 
@@ -67,13 +68,16 @@ async def main():
                 await asyncio.sleep(sleep_s)
             next_t += period
 
+    # End-of-stream marker with sent frame count
+    eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+    eos_ack = await js.publish(SUBJECT, eos_payload)
     await nc.drain()
     t_end = time.perf_counter()
     total_dt = t_end - t0
     final_seq = last_ack.seq if last_ack is not None else "n/a"
     print(
         f"Done: published {sent_count} frames in {total_dt:.3f}s "
-        f"(avg_fps={sent_count / total_dt:.2f}) seq={final_seq} "
+        f"(avg_fps={sent_count / total_dt:.2f}) seq={final_seq} eos_seq={eos_ack.seq} "
         f"Last frame sent at: {t_end}"
     )
 

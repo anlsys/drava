@@ -11,7 +11,9 @@ def load_publish_config():
     rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
     synthetic_mode = os.getenv("DRAVA_PUBLISH_SYNTHETIC", "0") == "1"
     run_seconds = float(os.getenv("DRAVA_PUBLISH_DURATION_S", "30"))
-
+    print(f"DRAVA_PUBLISH_RATE_HZ: {rate_hz},"
+          f"DRAVA_PUBLISH_SYNTHETIC: {synthetic_mode},"
+          f"DRAVA_PUBLISH_DURATION_S: {run_seconds}")
     return rate_hz, synthetic_mode, run_seconds
 
 

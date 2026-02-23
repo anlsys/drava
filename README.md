@@ -64,10 +64,12 @@ export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python 
 - Set the environment variables:
 ```shell
 export DRAVA_TRANSPORT=nats
-export DRAVA_INFER_BATCH=128
-export DRAVA_JS_FETCH_BATCH=8
-export DRAVA_FETCH_TIMEOUT_MS=1000
-export DRAVA_PUBLISH_RATE_HZ=1000 # 0 for max
+export DRAVA_INFER_BATCH=256
+export DRAVA_JS_FETCH_BATCH=256
+export DRAVA_FETCH_TIMEOUT_MS=500
+export DRAVA_PUBLISH_RATE_HZ=0
+export DRAVA_PUBLISH_SYNTHETIC=1
+export DRAVA_PUBLISH_DURATION_S=50
 export XKAAPI_VERBOSE=4
 # export DRAVA_TRANSPORT=socket
 ```
