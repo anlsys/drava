@@ -20,7 +20,65 @@
 
 - Random
 ```shell
+# together
+export DRAVA_THREADS=20
+export DRAVA_INFER_BATCH=512
+export DRAVA_JS_FETCH_BATCH=512
+export DRAVA_FETCH_TIMEOUT_MS=250
+export DRAVA_PUBLISH_RATE_HZ=0
+export DRAVA_PUBLISH_SYNTHETIC=1
+export DRAVA_PUBLISH_DURATION_S=30
 
+Published count=94208 seq=2137065 win_fps=6172.72 avg_fps=3194.48
+Published count=94464 seq=2137321 win_fps=2296.72 avg_fps=3191.10
+Published count=94720 seq=2137577 win_fps=6154.71 avg_fps=3195.25
+Published count=94976 seq=2137833 win_fps=2267.27 avg_fps=3191.73
+Published count=95232 seq=2138089 win_fps=5986.09 avg_fps=3195.74
+Published count=95488 seq=2138345 win_fps=2266.76 avg_fps=3192.24
+Published count=95744 seq=2138601 win_fps=6082.47 avg_fps=3196.30
+Done: published 95880 frames in 30.045s (avg_fps=3191.17) seq=2138737 eos_seq=2138738 Last frame sent at: 265402.833048442
+
+[62.715094] [TID=43561] [LOGGER] [INFO] [frames]=91421 batch=512 step_ms=105.23 wall_avg_fps=3194.58
+[62.866393] [TID=43574] [LOGGER] [INFO] [frames]=91933 batch=512 step_ms=101.68 wall_avg_fps=3195.58
+[63.019415] [TID=43559] [LOGGER] [INFO] [frames]=92445 batch=512 step_ms=101.94 wall_avg_fps=3196.37
+[63.377777] [TID=43577] [LOGGER] [INFO] [frames]=92957 batch=512 step_ms=303.20 wall_avg_fps=3174.74
+[63.378328] [TID=43575] [LOGGER] [INFO] [frames]=93469 batch=512 step_ms=147.70 wall_avg_fps=3192.17
+[63.484496] [TID=43573] [LOGGER] [INFO] [frames]=93981 batch=512 step_ms=100.79 wall_avg_fps=3198.06
+[63.635704] [TID=43562] [LOGGER] [INFO] [frames]=94493 batch=512 step_ms=99.49 wall_avg_fps=3199.02
+[63.788635] [TID=43567] [LOGGER] [INFO] [frames]=95005 batch=512 step_ms=99.05 wall_avg_fps=3199.79
+[63.946723] [TID=43563] [LOGGER] [INFO] [frames]=95517 batch=512 step_ms=100.69 wall_avg_fps=3199.99
+[64.962891] [TID=43566] [LOGGER] [INFO] EOS received: expected_frames=95880
+[64.962920] [TID=43566] [LOGGER] [INFO] [frames]=95880 batch=363 step_ms=750.30 wall_avg_fps=3106.40
+[64.962928] [TID=43566] [LOGGER] [INFO] [final] frames=95880 expected_frames=95880 frame0_arrival_s=265372.961375 frame95880_done_s=265403.828244 end_to_end_latency_s=30.866869 final_wall_avg_fps=3106.24
+
+# GPU ~18%
+
+# after
+
+export DRAVA_THREADS=20
+export DRAVA_INFER_BATCH=512
+export DRAVA_JS_FETCH_BATCH=512
+export DRAVA_FETCH_TIMEOUT_MS=250
+export DRAVA_PUBLISH_RATE_HZ=0
+export DRAVA_PUBLISH_SYNTHETIC=1
+export DRAVA_PUBLISH_DURATION_S=30
+Published count=99328 seq=2238066 win_fps=6290.12 avg_fps=3337.72
+Published count=99584 seq=2238322 win_fps=2302.26 avg_fps=3333.87
+Published count=99840 seq=2238578 win_fps=6221.38 avg_fps=3337.84
+Done: published 99965 frames in 30.001s (avg_fps=3332.10) seq=2238703 eos_seq=2238704 Last frame sent at: 265663.889583642
+
+[11.810099] [TID=7918] [LOGGER] [INFO] [frames]=97405 batch=512 step_ms=524.14 wall_avg_fps=10773.42
+[11.810507] [TID=7919] [LOGGER] [INFO] [frames]=97917 batch=512 step_ms=506.03 wall_avg_fps=10829.56
+[11.811707] [TID=7933] [LOGGER] [INFO] [frames]=98429 batch=512 step_ms=517.73 wall_avg_fps=10884.75
+[11.811932] [TID=7931] [LOGGER] [INFO] [frames]=98941 batch=512 step_ms=504.41 wall_avg_fps=10941.10
+[11.812121] [TID=7922] [LOGGER] [INFO] [frames]=99453 batch=512 step_ms=540.08 wall_avg_fps=10997.46
+[11.812511] [TID=7928] [LOGGER] [INFO] [frames]=99965 batch=512 step_ms=342.08 wall_avg_fps=11053.63
+[11.812544] [TID=7928] [LOGGER] [INFO] [final] frames=99965 expected_frames=99965 frame0_arrival_s=265733.372232 frame99965_done_s=265742.417675 end_to_end_latency_s=9.045443 final_wall_avg_fps=11051.42
+
+# GPU 97%
+
+---
+export DRAVA_THREADS=4
 export DRAVA_INFER_BATCH=128
 export DRAVA_JS_FETCH_BATCH=128
 export DRAVA_FETCH_TIMEOUT_MS=500
