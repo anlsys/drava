@@ -12,7 +12,6 @@ import threading
 import time
 from pathlib import Path
 
-
 APP_FINAL_RE = re.compile(
     r"\[final\]\s+frames=(?P<frames>\d+)\s+expected_frames=(?P<expected>\d+)\s+"
     r"frame0_arrival_s=(?P<arrival>[0-9.]+)\s+frame(?P<done_n>\d+)_done_s=(?P<done>[0-9.]+)\s+"
@@ -110,7 +109,7 @@ def gpu_sampler(stop_evt: threading.Event, out_list):
                     except ValueError:
                         pass
                 if vals:
-                    out_list.append(sum(vals) / len(vals))
+                    out_list.append((time.monotonic(), sum(vals) / len(vals)))
         except Exception:
             pass
         stop_evt.wait(1.0)
@@ -134,6 +133,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     row = {
         "batch": batch_size,
         "run": run_idx,
+        "threads": args.threads,
         "timeout_ms": args.timeout_ms,
         "total_frames": None,
         "publisher_frames": None,
@@ -162,13 +162,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     app_final = {}
     app_ready = threading.Event()
+    timing_marks = {"infer_start_monotonic": None, "final_monotonic": None}
 
     def on_app_line(line: str):
         if "JetStream ready:" in line:
             app_ready.set()
+        if timing_marks["infer_start_monotonic"] is None and "[frames]=" in line:
+            timing_marks["infer_start_monotonic"] = time.monotonic()
         m = APP_FINAL_RE.search(line)
         if m:
             app_final.update(m.groupdict())
+            timing_marks["final_monotonic"] = time.monotonic()
 
     print(f"[batch={batch_size} run={run_idx}] starting app.py")
     app_proc = subprocess.Popen(
@@ -275,7 +279,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         )
 
     if gpu_samples:
-        row["gpu_avg_pct"] = sum(gpu_samples) / len(gpu_samples)
+        t0 = timing_marks["infer_start_monotonic"]
+        t1 = timing_marks["final_monotonic"]
+        if t0 is not None and t1 is not None and t1 >= t0:
+            window = [v for (t, v) in gpu_samples if t0 <= t <= t1]
+            if window:
+                row["gpu_avg_pct"] = sum(window) / len(window)
+            else:
+                row["gpu_avg_pct"] = sum(v for (_, v) in gpu_samples) / len(gpu_samples)
+        else:
+            row["gpu_avg_pct"] = sum(v for (_, v) in gpu_samples) / len(gpu_samples)
 
     return row
 
@@ -290,11 +303,12 @@ def fmt(x, f="{:.2f}"):
 
 def print_table(rows):
     print("")
-    print("| Batch | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |")
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print(
+        "| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
-            f"| {r['batch']} | {r['timeout_ms']} | "
+            f"| {r['batch']} | {r['threads']} | {r['timeout_ms']} | "
             f"{fmt(r['total_frames'], '{:.0f}')} | {fmt(r['publisher_avg_fps'])} | "
             f"{fmt(r['drava_avg_fps'])} | {fmt(r['publisher_time_s'])} | "
             f"{fmt(r['drava_e2e_s'])} | {fmt(r['gpu_avg_pct'])} |"
@@ -350,10 +364,11 @@ def main():
     print_table(rows)
     out_csv = run_dir / "summary.csv"
     with open(out_csv, "w", encoding="utf-8") as f:
-        f.write("batch,timeout_ms,total_frames,publisher_avg_fps,drava_avg_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
+        f.write(
+            "batch,threads,timeout_ms,total_frames,publisher_avg_fps,drava_avg_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
         for r in rows:
             f.write(
-                f"{r['batch']},{r['timeout_ms']},{r['total_frames']},"
+                f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
                 f"{r['publisher_avg_fps']},{r['drava_avg_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
                 f"{r['gpu_avg_pct']}\n"
             )

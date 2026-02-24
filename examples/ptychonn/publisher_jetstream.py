@@ -1,4 +1,5 @@
-import asyncio, time
+import asyncio
+import time
 from nats.aio.client import Client as NATS
 from publisher_util import load_publish_config, make_payload_generator
 
@@ -6,7 +7,8 @@ STREAM = "FRAMES"
 SUBJECT = "frames.raw"
 EOS_PREFIX = b"DRAVA_EOS:"
 RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
-LOG_EVERY = 256
+LOG_EVERY = 1024
+PUBLISH_INFLIGHT = 1024
 
 
 async def main():
@@ -31,7 +33,18 @@ async def main():
 
     next_t = (t0 + period) if pacing else None
     sent_count = 0
-    last_ack = None
+    last_ack_seq = None
+    inflight_limit = PUBLISH_INFLIGHT
+    pending = []
+
+    async def flush_pending():
+        nonlocal pending, last_ack_seq
+        if not pending:
+            return
+        acks = await asyncio.gather(*pending)
+        pending = []
+        if acks:
+            last_ack_seq = acks[-1].seq
 
     while True:
         elapsed = time.perf_counter() - t0
@@ -39,7 +52,9 @@ async def main():
             break
         source_idx = sent_count
         payload = next_payload(source_idx)
-        last_ack = await js.publish(SUBJECT, payload)
+        pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
+        if len(pending) >= inflight_limit:
+            await flush_pending()
         sent_count += 1
         win_count += 1
         if sent_count == 1:
@@ -54,7 +69,7 @@ async def main():
             win_fps = win_count / dt_win if dt_win > 0 else float("inf")
 
             print(
-                f"Published count={sent_count} seq={last_ack.seq} "
+                f"Published count={sent_count} seq={last_ack_seq if last_ack_seq is not None else 'n/a'} "
                 f"win_fps={win_fps:.2f} avg_fps={avg_fps:.2f}"
             )
 
@@ -68,13 +83,15 @@ async def main():
                 await asyncio.sleep(sleep_s)
             next_t += period
 
+    await flush_pending()
+
     # End-of-stream marker with sent frame count
     eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
     eos_ack = await js.publish(SUBJECT, eos_payload)
     await nc.drain()
     t_end = time.perf_counter()
     total_dt = t_end - t0
-    final_seq = last_ack.seq if last_ack is not None else "n/a"
+    final_seq = last_ack_seq if last_ack_seq is not None else "n/a"
     print(
         f"Done: published {sent_count} frames in {total_dt:.3f}s "
         f"(avg_fps={sent_count / total_dt:.2f}) seq={final_seq} eos_seq={eos_ack.seq} "

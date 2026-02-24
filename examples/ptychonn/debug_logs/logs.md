@@ -1,5 +1,20 @@
 ### A 100
-- - If I run app.py and publisher together:
+- Using Memory storage for JS
+
+| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128 | 4 | 200 | 198242 | 6607.96 | 3066.53 | 30.00 | 64.65 | 10.48 |
+| 256 | 4 | 200 | 199579 | 6652.49 | 5179.74 | 30.00 | 38.53 | 15.92 |
+| 512 | 4 | 200 | 199990 | 6666.20 | 6414.30 | 30.00 | 31.18 | 21.17 |
+| 128 | 8 | 200 | 198152 | 6604.94 | 4067.66 | 30.00 | 48.71 | 12.86 |
+| 256 | 8 | 200 | 200513 | 6683.63 | 6435.24 | 30.00 | 31.16 | 12.78 |
+| 512 | 8 | 200 | 199194 | 6639.65 | 6390.47 | 30.00 | 31.17 | 18.86 |
+| 128 | 16 | 200 | 197666 | 6588.73 | 4528.53 | 30.00 | 43.65 | 7.00 |
+| 256 | 16 | 200 | 197901 | 6596.57 | 6321.22 | 30.00 | 31.31 | 12.52 |
+| 512 | 16 | 200 | 200344 | 6677.99 | 6362.96 | 30.00 | 31.49 | 18.07 |
+
+
+- If I run app.py and publisher together:
 
 | BATCH SIZE | TIMEOUT (ms) | PUBLISHER AVG FPS | DRAVA AVG FPS | DRAVA END-TO-END LATENCY (s) | GPU USAGE |
 |---|---:|---:|---:|---:|----------:|
@@ -33,6 +48,40 @@ export DRAVA_PUBLISH_DURATION_S=30
 
 
 # together
+export DRAVA_THREADS=20         
+export DRAVA_INFER_BATCH=512
+export DRAVA_JS_FETCH_BATCH=512
+export DRAVA_FETCH_TIMEOUT_MS=250
+export DRAVA_PUBLISH_RATE_HZ=0
+export DRAVA_PUBLISH_SYNTHETIC=1
+export DRAVA_PUBLISH_DURATION_S=30
+
+Done: published 199148 frames in 30.001s (avg_fps=6638.16) seq=199148 eos_seq=199149 Last frame sent at: 347099.663557688
+
+[99.504014] [TID=1857] [LOGGER] [INFO] [final] frames=199148 expected_frames=199148 frame0_arrival_s=347069.757444 frame199148_done_s=347101.295638 end_to_end_latency_s=31.538194 final_wall_avg_fps=6314.50
+
+
+python benchmark.py \
+  --batches 512 \
+  --timeout-ms 200 \
+  --threads 20 \
+  --xkaapi-verbose 4 \
+  --rate-hz 0 \
+  --duration-s 30 \
+  --runs 1
+
+  done: publisher_avg_fps=6674.02 drava_avg_fps=6420.27
+[global] stopping nats-server
+
+| Batch | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512 | 200 | 200226 | 6674.02 | 6420.27 | 30.00 | 31.19 | 18.86 |
+
+
+
+
+
+
 export DRAVA_THREADS=20
 export DRAVA_INFER_BATCH=512
 export DRAVA_JS_FETCH_BATCH=512
