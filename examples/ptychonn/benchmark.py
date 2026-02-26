@@ -284,6 +284,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         if t0 is not None and t1 is not None and t1 >= t0:
             window = [v for (t, v) in gpu_samples if t0 <= t <= t1]
             if window:
+                print(f"GPU Usage: {window}")
                 row["gpu_avg_pct"] = sum(window) / len(window)
             else:
                 row["gpu_avg_pct"] = sum(v for (_, v) in gpu_samples) / len(gpu_samples)
@@ -345,34 +346,38 @@ def main():
 
     rows = []
     try:
-        for b in batches:
-            for run_idx in range(1, args.runs + 1):
-                print(f"Running batch={b} run={run_idx} ...")
-                row = run_one(args, base_env, run_dir, b, run_idx)
-                rows.append(row)
-                print(
-                    f"  done: publisher_avg_fps={fmt(row['publisher_avg_fps'])} "
-                    f"drava_avg_fps={fmt(row['drava_avg_fps'])}"
-                )
+        try:
+            for b in batches:
+                for run_idx in range(1, args.runs + 1):
+                    print(f"Running batch={b} run={run_idx} ...")
+                    row = run_one(args, base_env, run_dir, b, run_idx)
+                    rows.append(row)
+                    print(
+                        f"  done: publisher_avg_fps={fmt(row['publisher_avg_fps'])} "
+                        f"drava_avg_fps={fmt(row['drava_avg_fps'])}"
+                    )
+
+            print_table(rows)
+            out_csv = run_dir / "summary.csv"
+            with open(out_csv, "w", encoding="utf-8") as f:
+                f.write(
+                    "batch,threads,timeout_ms,total_frames,publisher_avg_fps,drava_avg_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
+                for r in rows:
+                    f.write(
+                        f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
+                        f"{r['publisher_avg_fps']},{r['drava_avg_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
+                        f"{r['gpu_avg_pct']}\n"
+                    )
+            print(f"\nLogs and summary written to: {run_dir}")
+        except BaseException:
+            print(f"\nLogs written to: {run_dir}")
+            raise
     finally:
         if nats_proc is not None:
             print("[global] stopping nats-server")
             terminate_proc(nats_proc, "nats")
         if nats_log_file is not None:
             nats_log_file.close()
-
-    print_table(rows)
-    out_csv = run_dir / "summary.csv"
-    with open(out_csv, "w", encoding="utf-8") as f:
-        f.write(
-            "batch,threads,timeout_ms,total_frames,publisher_avg_fps,drava_avg_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
-        for r in rows:
-            f.write(
-                f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                f"{r['publisher_avg_fps']},{r['drava_avg_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
-                f"{r['gpu_avg_pct']}\n"
-            )
-    print(f"\nLogs and summary written to: {run_dir}")
 
 
 if __name__ == "__main__":

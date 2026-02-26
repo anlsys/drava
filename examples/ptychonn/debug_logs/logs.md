@@ -1,4 +1,32 @@
 ### A 100
+
+- Using asycn publish
+```shell
+python benchmark.py \
+  --batches 128 \
+  --timeout-ms 100 \
+  --threads 24 \
+  --xkaapi-verbose 4 \
+  --rate-hz 0 \
+  --duration-s 30 \
+  --runs 1
+```
+| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128 | 24 | 100 | 592896 | 19733.71 | 4624.33 | 30.05 | 128.21 | 28.13 |
+| 256 | 24 | 100 | 582656 | 19395.97 | 7662.66 | 30.04 | 76.04 | 30.05 |
+| 512 | 24 | 100 | 602112 | 20064.40 | 11489.34 | 30.01 | 52.41 | 40.10 |
+| 1024 | 24 | 100 | 653312 | 21774.68 | 9803.00 | 30.00 | 66.64 | 28.97 |
+| 1024 | 64 | 100 | 670720 | 22329.43 | 9841.97 | 30.04 | 68.15 | 28.89 |
+| 512 | 16 | 100 | 613376 | 20420.18 | 11452.87 | 30.04 | 53.56 | 36.24 |
+| 512 | 4 | 100 | 653312 | 21753.58 | 7930.69 | 30.03 | 82.38 | 26.64 |
+| 512 | 16 | 100 | 591872 | 19702.36 | 11612.68 | 30.04 | 50.97 | 33.30 |
+| 512 | 20 | 100 | 586752 | 19548.77 | 11487.21 | 30.02 | 51.08 | 43.86 |
+| 512 | 24 | 100 | 602112 | 20064.40 | 11489.34 | 30.01 | 52.41 | 40.10 |
+| 512 | 32 | 100 | 608357 | 20275.02 | 11294.76 | 30.00 | 53.86 | 33.13 |
+| 512 | 40 | 100 | 587776 | 19560.77 | 11146.73 | 30.05 | 52.73 | 34.15 |
+| 512 | 48 | 100 | 605184 | 20146.84 | 11134.94 | 30.04 | 54.35 | 43.05 |
+
 - Using Memory storage for JS
 
 | Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |
@@ -48,6 +76,17 @@ export DRAVA_PUBLISH_DURATION_S=30
 
 
 # together
+export XKAAPI_VERBOSE=4
+export DRAVA_TRANSPORT=nats
+export DRAVA_THREADS=64         
+export DRAVA_INFER_BATCH=512
+export DRAVA_JS_FETCH_BATCH=512
+export DRAVA_FETCH_TIMEOUT_MS=200
+export DRAVA_PUBLISH_RATE_HZ=0
+export DRAVA_PUBLISH_SYNTHETIC=1
+export DRAVA_PUBLISH_DURATION_S=30
+
+
 export DRAVA_THREADS=20         
 export DRAVA_INFER_BATCH=512
 export DRAVA_JS_FETCH_BATCH=512
