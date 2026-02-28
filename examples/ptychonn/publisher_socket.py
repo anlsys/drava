@@ -10,19 +10,18 @@ Drava socket transport:
   export DRAVA_TRANSPORT=socket
 """
 import time
-import numpy as np
 import os
 import struct
+from publisher_util import load_publish_config, make_payload_generator
 
 FIFO_PATH = "/tmp/drava_in"
-
-DATA_DIR = "PtychoNN_data_partial"
 
 # target framerate from env:
 #   unset or <= 0 => max speed (no pacing)
 #   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
-RATE_HZ = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
+RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
 LOG_EVERY = 256
+EOS_PREFIX = b"DRAVA_EOS:"
 
 
 def main():
@@ -32,9 +31,7 @@ def main():
             f"Create it (mkfifo {FIFO_PATH}) and start socat/Drava socket transport first."
         )
 
-    X_test = np.load(f"{DATA_DIR}/X_test.npy").astype("float32")  # (N,64,64,1)
-    n_frames = X_test.shape[0]
-    print("X_test shape:", X_test.shape)
+    next_payload = make_payload_generator(SYNTHETIC_MODE)
 
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
@@ -47,27 +44,32 @@ def main():
 
     print(f"Opening FIFO {FIFO_PATH} for writing...")
     with open(FIFO_PATH, "wb") as f:
-        for idx in range(n_frames):
-            frame = X_test[idx]  # (64,64,1)
-            payload = frame.tobytes(order="C")
+        sent_count = 0
+        while True:
+            elapsed = time.perf_counter() - t0
+            if elapsed >= RUN_SECONDS:
+                break
+            source_idx = sent_count
+            payload = next_payload(source_idx)
             f.write(struct.pack("!I", len(payload)))
             f.write(payload)
             f.flush()
 
+            sent_count += 1
             win_count += 1
-            if idx == 0:
+            if sent_count == 1:
                 print(f"First frame sent at:{t0}")
 
-            if (idx + 1) % LOG_EVERY == 0 or idx == n_frames - 1:
+            if sent_count % LOG_EVERY == 0:
                 now = time.perf_counter()
                 dt_total = now - t0
                 dt_win = now - win_t0
 
-                avg_fps = (idx + 1) / dt_total if dt_total > 0 else float("inf")
+                avg_fps = sent_count / dt_total if dt_total > 0 else float("inf")
                 win_fps = win_count / dt_win if dt_win > 0 else float("inf")
 
                 print(
-                    f"Published idx={idx}/{n_frames} "
+                    f"Published count={sent_count} "
                     f"win_fps={win_fps:.2f} avg_fps={avg_fps:.2f}"
                 )
 
@@ -81,11 +83,17 @@ def main():
                     time.sleep(sleep_s)
                 next_t += period
 
+        # End-of-stream marker with sent frame count
+        eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+        f.write(struct.pack("!I", len(eos_payload)))
+        f.write(eos_payload)
+        f.flush()
+
     t_end = time.perf_counter()
     total_dt = t_end - t0
     print(
-        f"Done: published {n_frames} frames in {total_dt:.3f}s "
-        f"(avg_fps={n_frames/total_dt:.2f}) "
+        f"Done: published {sent_count} frames in {total_dt:.3f}s "
+        f"(avg_fps={sent_count / total_dt:.2f}) "
         f"Last frame sent at: {t_end}"
     )
 

@@ -71,7 +71,7 @@ die() {
 
 @test "jetstream: python consumer receives frame" {
   # Start NATS + JetStream
-  nats-server -js -sd "$TDIR/jsdata" -a 127.0.0.1 -p 4222 >"$NATS_LOG" 2>&1 &
+  nats-server -js -a 127.0.0.1 -p 4222 >"$NATS_LOG" 2>&1 &
   NATS_PID=$!
 
   if ! wait_for_log "$NATS_LOG" "Listening for client connections" 10; then

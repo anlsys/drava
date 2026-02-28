@@ -67,7 +67,7 @@ int drava_transport_nats_main(drava_t *drava,
         jsStreamConfig sc;
         std::memset(&sc, 0, sizeof(sc));
         sc.Name = STREAM;
-        sc.Storage = js_FileStorage; // persisted by server to -sd dir
+        sc.Storage = js_MemoryStorage; // js_FileStorage -> persisted by server to -sd dir
         sc.Retention = js_LimitsPolicy;
         const char *subs[] = {"frames.*", nullptr};
         sc.Subjects = subs;

@@ -85,7 +85,7 @@ JetStream → (pull) → Drava → (push) → app.py
 
 ```shell
 cd ~/nats_binary
-./nats-server -js -sd ./jsdata
+./nats-server -js
 ```
 
 - In terminal 2, run the publisher script
@@ -147,6 +147,28 @@ python publisher_socket.py
 cd examples/ptychonn
 source venv/bin/activate
 python app.py
+```
+
+### Benchmark
+- In JLSE compute node
+```shell
+source ~/drava_nvidia.sh
+source ~/venvs/no-gil-3.13/bin/activate
+cd ~/drava/build
+export XKAAPI_VERBOSE=4
+export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
+export DRAVA_TRANSPORT=nats
+cd ../examples/ptychonn
+
+python benchmark.py \           
+  --batches 512 \
+  --timeout-ms 200 \
+  --threads 4 \
+  --xkaapi-verbose 4 \
+  --rate-hz 0 \
+  --duration-s 30 \
+  --runs 1
+
 ```
 
 ### References
