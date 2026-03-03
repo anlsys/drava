@@ -63,6 +63,9 @@ struct drava_t {
     /* Read until the socket is closed */
     int listen(void);
 
+    /* Publish one payload through the configured transport backend */
+    int publish(const void *data, size_t data_len);
+
     /* Deinitialize drava */
     int deinit(void);
 
@@ -72,7 +75,8 @@ struct drava_t {
 
 int drava_parse_transport_from_env(drava_transport_t *out);
 
-const char *drava_env_get_str_default(const char *key, const char *default_value);
+const char *drava_env_get_str_default(const char *key,
+                                      const char *default_value);
 
 int drava_env_get_int_default(const char *key, int default_value);
 
@@ -88,6 +92,14 @@ int drava_transport_socket_main(drava_t *drava,
 int drava_transport_nats_main(drava_t *drava,
                               device_global_id_t device_global_id,
                               thread_t *thread);
+
+int drava_transport_socket_publish(drava_t *drava,
+                                   const void *data,
+                                   size_t data_len);
+
+int drava_transport_nats_publish(drava_t *drava,
+                                 const void *data,
+                                 size_t data_len);
 
 /* main for a thread on a given device */
 int drava_transport_main(drava_t *drava,

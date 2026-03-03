@@ -11,6 +11,8 @@
 #ifndef __DRAVA_C_H__
 #define __DRAVA_C_H__
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -84,6 +86,8 @@ int drava_register_frame_routine(drava_frame_routine_t routine,
 int drava_init(void);
 
 int drava_listen(void);
+
+int drava_publish(const void *data, size_t data_len);
 
 int drava_deinit(void);
 

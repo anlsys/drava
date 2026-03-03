@@ -82,3 +82,17 @@ int drava_listen_py(void)
 
     return rc;
 }
+
+int drava_publish_py(PyObject *payload)
+{
+    if (payload == NULL)
+        return DRAVA_EINVAL;
+
+    Py_buffer view;
+    if (PyObject_GetBuffer(payload, &view, PyBUF_CONTIG_RO) != 0)
+        return DRAVA_EINVAL;
+
+    int rc = drava_publish(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    return rc;
+}

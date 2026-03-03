@@ -39,6 +39,11 @@ int drava_listen(void)
     return drava.listen();
 }
 
+int drava_publish(const void *data, size_t data_len)
+{
+    return drava.publish(data, data_len);
+}
+
 int drava_deinit(void)
 {
     return drava.deinit();

@@ -12,10 +12,81 @@
 
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <nats/nats.h> // Core + JetStream API (libnats 3.12.x)
+
+int drava_transport_nats_publish(drava_t *drava,
+                                 const void *data,
+                                 size_t data_len)
+{
+    (void)drava;
+    if (data == NULL || data_len == 0)
+        return DRAVA_EINVAL;
+
+    static std::mutex out_mu;
+    static bool initialized = false;
+    static natsConnection *nc = nullptr;
+    static jsCtx *js = nullptr;
+    static std::string output_subject;
+
+    std::lock_guard<std::mutex> lock(out_mu);
+    if (!initialized) {
+        const char *nats_url =
+                drava_env_get_str_default("NATS_URL", "nats://127.0.0.1:4222");
+        const char *stream_name =
+                drava_env_get_str_default("DRAVA_OUTPUT_STREAM", "PREDICTIONS");
+        const char *subject = drava_env_get_str_default("DRAVA_OUTPUT_SUBJECT",
+                                                        "frames.stage1");
+
+        natsStatus s;
+        s = natsConnection_ConnectTo(&nc, nats_url);
+        if (s != NATS_OK) {
+            LOGGER_ERROR("NATS publish connect failed: %s",
+                         natsStatus_GetText(s));
+            return DRAVA_ERROR;
+        }
+
+        jsOptions jopts;
+        jsOptions_Init(&jopts);
+        s = natsConnection_JetStream(&js, nc, &jopts);
+        if (s != NATS_OK) {
+            LOGGER_ERROR("JetStream publish ctx failed: %s",
+                         natsStatus_GetText(s));
+            return DRAVA_ERROR;
+        }
+
+        jsStreamConfig sc;
+        std::memset(&sc, 0, sizeof(sc));
+        sc.Name = stream_name;
+        sc.Storage = js_FileStorage;
+        sc.Retention = js_LimitsPolicy;
+        const char *subs[2] = {subject, nullptr};
+        sc.Subjects = subs;
+        sc.SubjectsLen = 1;
+        jsStreamInfo *si = nullptr;
+        (void)js_AddStream(&si, js, &sc, nullptr, nullptr);
+        jsStreamInfo_Destroy(si);
+
+        output_subject = subject;
+        initialized = true;
+        LOGGER_INFO("NATS publish output ready: url=%s stream=%s subject=%s",
+                    nats_url, stream_name, output_subject.c_str());
+    }
+
+    jsPubAck *pa = nullptr;
+    natsStatus s =
+            js_Publish(&pa, js, output_subject.c_str(), (const void *)data,
+                       (int)data_len, nullptr, nullptr);
+    if (s != NATS_OK) {
+        LOGGER_ERROR("NATS publish failed: %s", natsStatus_GetText(s));
+        return DRAVA_ERROR;
+    }
+    jsPubAck_Destroy(pa);
+    return DRAVA_SUCCESS;
+}
 
 int drava_transport_nats_main(drava_t *drava,
                               device_global_id_t device_global_id,
@@ -67,7 +138,8 @@ int drava_transport_nats_main(drava_t *drava,
         jsStreamConfig sc;
         std::memset(&sc, 0, sizeof(sc));
         sc.Name = STREAM;
-        sc.Storage = js_MemoryStorage; // js_FileStorage -> persisted by server to -sd dir
+        sc.Storage = js_MemoryStorage; // js_FileStorage -> persisted by server
+                                       // to -sd dir
         sc.Retention = js_LimitsPolicy;
         const char *subs[] = {"frames.*", nullptr};
         sc.Subjects = subs;

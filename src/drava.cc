@@ -138,6 +138,29 @@ int drava_t::deinit(void)
     return DRAVA_SUCCESS;
 }
 
+int drava_t::publish(const void *data, size_t data_len)
+{
+    if (data == NULL || data_len == 0)
+        return DRAVA_EINVAL;
+
+    switch (this->transport_type) {
+    case DRAVA_TRANSPORT_SOCKET:
+        return drava_transport_socket_publish(this, data, data_len);
+
+    case DRAVA_TRANSPORT_NATS:
+#ifdef DRAVA_HAS_NATS
+        return drava_transport_nats_publish(this, data, data_len);
+#else
+        LOGGER_FATAL("NATS transport selected at runtime but not compiled in");
+        return DRAVA_ENOTSUP;
+#endif
+
+    default:
+        LOGGER_FATAL("Unknown transport type %d", (int)this->transport_type);
+        return DRAVA_EINVAL;
+    }
+}
+
 int drava_t::log(const int verbose_level, const char *msg)
 {
     LOGGER_PRINT(verbose_level, "%s", msg);

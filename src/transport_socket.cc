@@ -12,7 +12,10 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -20,8 +23,11 @@
 #include <unistd.h>
 #include <vector>
 
-/* TODO: env variable or something, socket path */
-static char const *SOCK_PATH = "/tmp/accel_2048.sock";
+const char *sock_path =
+        drava_env_get_str_default("DRAVA_SOCKET_PATH", "/tmp/accel_2048.sock");
+
+const char *fifo_path = drava_env_get_str_default("DRAVA_OUTPUT_FIFO_PATH",
+                                                  "/tmp/drava_stage2_in");
 
 static bool read_exact(int fd, void *buf, size_t len)
 {
@@ -34,6 +40,43 @@ static bool read_exact(int fd, void *buf, size_t len)
         done += (size_t)n;
     }
     return true;
+}
+
+int drava_transport_socket_publish(drava_t *drava,
+                                   const void *data,
+                                   size_t data_len)
+{
+    (void)drava;
+    if (data == NULL || data_len == 0)
+        return DRAVA_EINVAL;
+
+    static std::mutex out_mu;
+    static FILE *out = NULL;
+
+    std::lock_guard<std::mutex> lock(out_mu);
+    if (out == NULL) {
+        if (!std::filesystem::exists(fifo_path)) {
+            LOGGER_ERROR("Output FIFO does not exist: %s", fifo_path);
+            return DRAVA_ERROR;
+        }
+        out = std::fopen(fifo_path, "wb");
+        if (out == NULL) {
+            LOGGER_ERROR("Failed to open output FIFO %s: %s", fifo_path,
+                         std::strerror(errno));
+            return DRAVA_ERROR;
+        }
+        LOGGER_INFO("Socket publish output ready: fifo=%s", fifo_path);
+    }
+
+    const uint32_t be_len = htonl((uint32_t)data_len);
+    if (std::fwrite(&be_len, sizeof(be_len), 1, out) != 1)
+        return DRAVA_ERROR;
+    if (std::fwrite(data, data_len, 1, out) != 1)
+        return DRAVA_ERROR;
+    if (std::fflush(out) != 0)
+        return DRAVA_ERROR;
+
+    return DRAVA_SUCCESS;
 }
 
 int drava_transport_socket_main(drava_t *drava,
