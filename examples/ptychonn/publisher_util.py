@@ -17,6 +17,15 @@ def load_publish_config():
     return rate_hz, synthetic_mode, run_seconds
 
 
+def compute_square_completion(n_raw):
+    if n_raw <= 0:
+        return 1, 1, 1
+    side = int(np.ceil(np.sqrt(n_raw)))
+    n_square = side * side
+    extra = n_square - n_raw
+    return side, n_square, extra
+
+
 def make_payload_generator(synthetic_mode):
     if synthetic_mode:
         rng = np.random.default_rng(SYNTHETIC_SEED)

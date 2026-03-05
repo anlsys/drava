@@ -10,251 +10,177 @@
 
 #include <drava/drava.h>
 
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
-#include <iostream>
+#include <filesystem>
 #include <mutex>
 #include <string>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include <vector>
 
-#include <nats/nats.h> // Core + JetStream API (libnats 3.12.x)
+const char *sock_path =
+        drava_env_get_str_default("DRAVA_SOCKET_PATH", "/tmp/accel_2048.sock");
 
-int drava_transport_nats_publish(drava_t *drava,
-                                 const void *data,
-                                 size_t data_len)
+const char *fifo_path = drava_env_get_str_default("DRAVA_OUTPUT_FIFO_PATH",
+                                                  "/tmp/drava_stage2_in");
+
+static bool read_exact(int fd, void *buf, size_t len)
+{
+    char *p = static_cast<char *>(buf);
+    size_t done = 0;
+    while (done < len) {
+        ssize_t n = read(fd, p + done, len - done);
+        if (n <= 0)
+            return false;
+        done += (size_t)n;
+    }
+    return true;
+}
+
+int drava_transport_socket_publish(drava_t *drava,
+                                   const void *data,
+                                   size_t data_len)
 {
     (void)drava;
     if (data == NULL || data_len == 0)
         return DRAVA_EINVAL;
 
     static std::mutex out_mu;
-    static bool initialized = false;
-    static natsConnection *nc = nullptr;
-    static jsCtx *js = nullptr;
-    static std::string output_subject;
+    static FILE *out = NULL;
 
     std::lock_guard<std::mutex> lock(out_mu);
-    if (!initialized) {
-        const char *nats_url =
-                drava_env_get_str_default("NATS_URL", "nats://127.0.0.1:4222");
-        const char *stream_name =
-                drava_env_get_str_default("DRAVA_OUTPUT_STREAM", "PREDICTIONS");
-        const char *subject = drava_env_get_str_default("DRAVA_OUTPUT_SUBJECT",
-                                                        "frames.stage1");
-
-        natsStatus s;
-        s = natsConnection_ConnectTo(&nc, nats_url);
-        if (s != NATS_OK) {
-            LOGGER_ERROR("NATS publish connect failed: %s",
-                         natsStatus_GetText(s));
+    if (out == NULL) {
+        if (!std::filesystem::exists(fifo_path)) {
+            LOGGER_ERROR("Output FIFO does not exist: %s", fifo_path);
             return DRAVA_ERROR;
         }
-
-        jsOptions jopts;
-        jsOptions_Init(&jopts);
-        s = natsConnection_JetStream(&js, nc, &jopts);
-        if (s != NATS_OK) {
-            LOGGER_ERROR("JetStream publish ctx failed: %s",
-                         natsStatus_GetText(s));
+        out = std::fopen(fifo_path, "wb");
+        if (out == NULL) {
+            LOGGER_ERROR("Failed to open output FIFO %s: %s", fifo_path,
+                         std::strerror(errno));
             return DRAVA_ERROR;
         }
-
-        jsStreamConfig sc;
-        std::memset(&sc, 0, sizeof(sc));
-        sc.Name = stream_name;
-        sc.Storage = js_FileStorage;
-        sc.Retention = js_LimitsPolicy;
-        const char *subs[2] = {subject, nullptr};
-        sc.Subjects = subs;
-        sc.SubjectsLen = 1;
-        jsStreamInfo *si = nullptr;
-        (void)js_AddStream(&si, js, &sc, nullptr, nullptr);
-        jsStreamInfo_Destroy(si);
-
-        output_subject = subject;
-        initialized = true;
-        LOGGER_INFO("NATS publish output ready: url=%s stream=%s subject=%s",
-                    nats_url, stream_name, output_subject.c_str());
+        LOGGER_INFO("Socket publish output ready: fifo=%s", fifo_path);
     }
 
-    jsPubAck *pa = nullptr;
-    natsStatus s =
-            js_Publish(&pa, js, output_subject.c_str(), (const void *)data,
-                       (int)data_len, nullptr, nullptr);
-    if (s != NATS_OK) {
-        LOGGER_ERROR("NATS publish failed: %s", natsStatus_GetText(s));
+    const uint32_t be_len = htonl((uint32_t)data_len);
+    if (std::fwrite(&be_len, sizeof(be_len), 1, out) != 1)
         return DRAVA_ERROR;
-    }
-    jsPubAck_Destroy(pa);
+    if (std::fwrite(data, data_len, 1, out) != 1)
+        return DRAVA_ERROR;
+    if (std::fflush(out) != 0)
+        return DRAVA_ERROR;
+
     return DRAVA_SUCCESS;
 }
 
-int drava_transport_nats_main(drava_t *drava,
-                              device_global_id_t device_global_id,
-                              thread_t *thread)
+int drava_transport_socket_main(drava_t *drava,
+                                device_global_id_t device_global_id,
+                                thread_t *thread)
 {
-    LOGGER_INFO("drava_transport_nats_main: device=%d tid=%u",
-                (int)device_global_id, (unsigned)thread->tid);
     drava_device_t *drava_device = drava->devices + device_global_id;
     team_t *team = &drava_device->team;
 
-    /* thread 0: subscribe + fetch from JetStream, spawn a task per message */
+    /* the thread 0 reads from the socket and spawns task */
     if (thread->tid == 0) {
-        LOGGER_INFO("JetStream trying to connect");
-        const char *NATS_URL =
-                drava_env_get_str_default("NATS_URL", "nats://127.0.0.1:4222");
-        const char *STREAM =
-                drava_env_get_str_default("DRAVA_STREAM", "FRAMES");
-        const char *SUBJECT =
-                drava_env_get_str_default("DRAVA_SUBJECT", "frames.raw");
-        const char *DURABLE =
-                drava_env_get_str_default("DRAVA_DURABLE", "drava_consumer");
-        int fetch_batch = drava_env_get_int_default("DRAVA_JS_FETCH_BATCH", 8);
-        int fetch_timeout_ms =
+        /* setup unix socket */
+        if (!std::filesystem::exists(sock_path))
+            LOGGER_FATAL("Socket %s does not exists", sock_path);
+
+        int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sockfd < 0)
+            LOGGER_FATAL("Could not open socket %s: %s", sock_path,
+                         strerror(errno));
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path) - 1);
+
+        if (connect(sockfd, reinterpret_cast<sockaddr *>(&addr),
+                    sizeof(addr)) == -1)
+            LOGGER_FATAL("Could not connect socket %s: %s", sock_path,
+                         strerror(errno));
+
+        LOGGER_INFO("Connected to socket %s, reading framed binary payloads...",
+                    sock_path);
+
+        int flush_timeout_ms =
                 drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
-
         LOGGER_INFO(
-                "JetStream fetch config: batch=%d timeout_ms=%d callback_batch=%zu",
-                fetch_batch, fetch_timeout_ms,
-                (size_t)drava->callback_batch_size);
+                "Socket fetch config: flush_timeout_ms=%d callback_batch=%zu",
+                flush_timeout_ms, drava->callback_batch_size);
 
-        natsStatus s;
-        natsConnection *nc = nullptr;
-        jsCtx *js = nullptr;
-        natsSubscription *sub = nullptr;
-
-        // Connect
-        s = natsConnection_ConnectTo(&nc, NATS_URL);
-        if (s != NATS_OK)
-            LOGGER_FATAL("NATS connect failed: %s", natsStatus_GetText(s));
-
-        // JetStream context
-        jsOptions jopts;
-        jsOptions_Init(&jopts);
-        s = natsConnection_JetStream(&js, nc, &jopts);
-        if (s != NATS_OK)
-            LOGGER_FATAL("JetStream ctx failed: %s", natsStatus_GetText(s));
-
-        // Ensure stream exists (subjects must include frames.raw)
-        jsStreamConfig sc;
-        std::memset(&sc, 0, sizeof(sc));
-        sc.Name = STREAM;
-        sc.Storage = js_MemoryStorage; // js_FileStorage -> persisted by server
-                                       // to -sd dir
-        sc.Retention = js_LimitsPolicy;
-        const char *subs[] = {"frames.*", nullptr};
-        sc.Subjects = subs;
-        sc.SubjectsLen = 1;
-
-        jsStreamInfo *si = nullptr;
-        (void)js_AddStream(&si, js, &sc, /*opts*/ nullptr, /*err*/ nullptr);
-        jsStreamInfo_Destroy(si); // ok if it already existed
-
-        // Ensure durable consumer filtered to SUBJECT (explicit acks)
-        jsConsumerConfig cc;
-        std::memset(&cc, 0, sizeof(cc));
-        cc.Durable = DURABLE;
-        cc.AckPolicy = js_AckExplicit;
-        cc.FilterSubject = SUBJECT;
-
-        jsConsumerInfo *ci = nullptr;
-        (void)js_AddConsumer(&ci, js, STREAM, &cc, /*opts*/ nullptr,
-                             /*err*/ nullptr);
-        jsConsumerInfo_Destroy(ci);
-
-        // Pull subscribe
-        s = js_PullSubscribe(&sub, js, SUBJECT, STREAM,
-                             /*opts*/ nullptr, /*subOpts*/ nullptr,
-                             /*err*/ nullptr);
-        if (s != NATS_OK)
-            LOGGER_FATAL("PullSubscribe failed: %s", natsStatus_GetText(s));
-
-        LOGGER_INFO("JetStream ready: url=%s stream=%s subject=%s durable=%s",
-                    NATS_URL, STREAM, SUBJECT, DURABLE);
-
-        // Fetch loop — pull batches and spawn Drava tasks
         std::vector<std::string> pending;
         pending.reserve(drava->callback_batch_size);
 
+        auto flush_pending = [&]() {
+            if (pending.empty())
+                return;
+            std::vector<std::string> batch_payloads = std::move(pending);
+            pending.clear();
+            pending.reserve(drava->callback_batch_size);
+
+            drava->runtime.team_task_spawn(
+                    team,
+                    [drava, device_global_id,
+                     batch_payloads = std::move(batch_payloads)](task_t *task) {
+                        (void)task;
+                        drava_dispatch_payload_batch(drava, device_global_id,
+                                                     batch_payloads);
+                    });
+        };
+
+        /* each frame is: [4-byte big-endian length][payload bytes] */
         while (true) {
-            natsMsgList list = {0};
-            s = natsSubscription_Fetch(&list, sub, /*batch*/ fetch_batch,
-                                       /*timeout ms*/ fetch_timeout_ms,
-                                       /*err*/ nullptr);
-            if (s == NATS_TIMEOUT) {
-                if (!pending.empty()) {
-                    std::vector<std::string> batch_payloads =
-                            std::move(pending);
-                    pending.clear();
-                    pending.reserve(drava->callback_batch_size);
-                    drava->runtime.team_task_spawn(
-                            team, [drava, device_global_id,
-                                   batch_payloads = std::move(batch_payloads)](
-                                          task_t *task) {
-                                (void)task;
-                                drava_dispatch_payload_batch(drava,
-                                                             device_global_id,
-                                                             batch_payloads);
-                            });
+            if (!pending.empty()) {
+                fd_set rfds;
+                FD_ZERO(&rfds);
+                FD_SET(sockfd, &rfds);
+                struct timeval tv;
+                tv.tv_sec = flush_timeout_ms / 1000;
+                tv.tv_usec = (flush_timeout_ms % 1000) * 1000;
+                int sel = select(sockfd + 1, &rfds, nullptr, nullptr, &tv);
+                if (sel == 0) {
+                    flush_pending();
+                    continue;
                 }
-                // idle; allow other threads to progress
+                if (sel < 0) {
+                    if (errno == EINTR)
+                        continue;
+                    break;
+                }
+            }
+
+            uint32_t be_len = 0;
+            if (!read_exact(sockfd, &be_len, sizeof(be_len)))
+                break;
+
+            const uint32_t payload_len = ntohl(be_len);
+            if (payload_len == 0)
                 continue;
-            }
-            if (s != NATS_OK) {
-                LOGGER_FATAL("Fetch error: %s", natsStatus_GetText(s));
-            }
 
-            for (int i = 0; i < list.Count; ++i) {
-                natsMsg *msg = list.Msgs[i];
+            std::string payload((size_t)payload_len, '\0');
+            if (!read_exact(sockfd, payload.data(), payload.size()))
+                break;
 
-                // Optional: log JetStream metadata (seq numbers)
-                jsMsgMetaData *md = nullptr;
-                if (natsMsg_GetMetaData(&md, msg) == NATS_OK && md != nullptr) {
-                    LOGGER_DEBUG("[stream_seq=%" PRIu64 " consumer_seq=%" PRIu64
-                                 "]",
-                                 (uint64_t)md->Sequence.Stream,
-                                 (uint64_t)md->Sequence.Consumer);
-                    jsMsgMetaData_Destroy(md);
-                }
+            pending.push_back(std::move(payload));
 
-                // Extract payload bytes
-                std::string line(natsMsg_GetData(msg),
-                                 (size_t)natsMsg_GetDataLength(msg));
-                pending.push_back(std::move(line));
+            if (pending.size() < drava->callback_batch_size)
+                continue;
 
-                if (pending.size() >= drava->callback_batch_size) {
-                    std::vector<std::string> batch_payloads =
-                            std::move(pending);
-                    pending.clear();
-                    pending.reserve(drava->callback_batch_size);
-
-                    drava->runtime.team_task_spawn(
-                            team, [drava, device_global_id,
-                                   batch_payloads = std::move(batch_payloads)](
-                                          task_t *task) {
-                                (void)task;
-                                drava_dispatch_payload_batch(drava,
-                                                             device_global_id,
-                                                             batch_payloads);
-                            });
-                }
-
-                // Ack after enqueue to achieve at-least-once semantics
-                natsStatus as = natsMsg_Ack(msg, /*opts*/ nullptr);
-                if (as != NATS_OK)
-                    LOGGER_WARN("Ack failed: %s", natsStatus_GetText(as));
-            }
-
-            // Destroy the fetched batch safely
-            natsMsgList_Destroy(&list);
+            flush_pending();
         }
 
-        natsSubscription_Destroy(sub);
-        jsCtx_Destroy(js);
-        natsConnection_Destroy(nc);
-        nats_Close();
+        flush_pending();
+        close(sockfd);
     }
 
-    /* other threads work-steal */
+    /* other threads worksteal */
     drava->runtime.team_barrier<true>(team, thread);
 
     return DRAVA_SUCCESS;

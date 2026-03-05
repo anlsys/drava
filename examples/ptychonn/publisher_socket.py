@@ -12,7 +12,11 @@ Drava socket transport:
 import time
 import os
 import struct
-from publisher_util import load_publish_config, make_payload_generator
+from publisher_util import (
+    compute_square_completion,
+    load_publish_config,
+    make_payload_generator,
+)
 
 FIFO_PATH = "/tmp/drava_in"
 
@@ -32,7 +36,6 @@ def main():
         )
 
     next_payload = make_payload_generator(SYNTHETIC_MODE)
-
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
 
@@ -83,8 +86,22 @@ def main():
                     time.sleep(sleep_s)
                 next_t += period
 
+        n_raw = sent_count
+        side, n_square, extra = compute_square_completion(n_raw)
+        print(
+            f"Square completion: n_raw={n_raw} side={side} n_square={n_square} extra={extra}"
+        )
+        for _ in range(extra):
+            source_idx = sent_count
+            payload = next_payload(source_idx)
+            f.write(struct.pack("!I", len(payload)))
+            f.write(payload)
+            f.flush()
+            sent_count += 1
+            win_count += 1
+
         # End-of-stream marker with sent frame count
-        eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+        eos_payload = EOS_PREFIX + str(n_square).encode("ascii")
         f.write(struct.pack("!I", len(eos_payload)))
         f.write(eos_payload)
         f.flush()

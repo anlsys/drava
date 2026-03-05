@@ -1,4 +1,5 @@
 import time
+import threading
 
 import drava
 import numpy as np
@@ -54,6 +55,7 @@ class Stage2Accumulator:
         self.t0: float | None = None
         self.next_log = LOG_EVERY
         self.finalized = False
+        self.lock = threading.Lock()
 
     def reset_job(self, job_id: int) -> None:
         self.current_job_id = job_id
@@ -190,7 +192,11 @@ class Stage2Accumulator:
         t1 = time.perf_counter()
 
         consume_elapsed = t0 - self.t0
-        consume_fps = (self.total_received / consume_elapsed) if consume_elapsed > 0 else float("inf")
+        consume_fps = (
+            self.total_unique_received / consume_elapsed
+            if consume_elapsed > 0
+            else float("inf")
+        )
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
             f"[stage2-final] frames={self.expected_frames} stitched_frames={used} "
@@ -205,16 +211,17 @@ _acc = Stage2Accumulator(tst_side=STAGE2_SCAN_SIDE)
 
 
 def func(frames) -> None:
-    for raw in frames:
-        if raw.startswith(EOS_PREFIX):
-            try:
-                eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
-            except ValueError:
-                drava.log(drava.DRAVA_VERBOSE_WARN, f"[stage2] Ignoring malformed EOS marker: {raw!r}")
-                continue
-            _acc.on_eos(eos_frames)
-        else:
-            _acc.consume(raw)
+    with _acc.lock:
+        for raw in frames:
+            if raw.startswith(EOS_PREFIX):
+                try:
+                    eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
+                except ValueError:
+                    drava.log(drava.DRAVA_VERBOSE_WARN, f"[stage2] Ignoring malformed EOS marker: {raw!r}")
+                    continue
+                _acc.on_eos(eos_frames)
+            else:
+                _acc.consume(raw)
 
 
 rc = drava.init()

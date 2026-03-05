@@ -1,7 +1,11 @@
 import asyncio
 import time
 from nats.aio.client import Client as NATS
-from publisher_util import load_publish_config, make_payload_generator
+from publisher_util import (
+    compute_square_completion,
+    load_publish_config,
+    make_payload_generator,
+)
 
 STREAM = "FRAMES"
 SUBJECT = "frames.raw"
@@ -22,7 +26,6 @@ async def main():
         pass
 
     next_payload = make_payload_generator(SYNTHETIC_MODE)
-
     # Pacing setup
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
@@ -83,10 +86,24 @@ async def main():
                 await asyncio.sleep(sleep_s)
             next_t += period
 
+    n_raw = sent_count
+    side, n_square, extra = compute_square_completion(n_raw)
+    print(
+        f"Square completion: n_raw={n_raw} side={side} n_square={n_square} extra={extra}"
+    )
+    for _ in range(extra):
+        source_idx = sent_count
+        payload = next_payload(source_idx)
+        pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
+        if len(pending) >= inflight_limit:
+            await flush_pending()
+        sent_count += 1
+        win_count += 1
+
     await flush_pending()
 
     # End-of-stream marker with sent frame count
-    eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+    eos_payload = EOS_PREFIX + str(n_square).encode("ascii")
     eos_ack = await js.publish(SUBJECT, eos_payload)
     await nc.drain()
     t_end = time.perf_counter()
