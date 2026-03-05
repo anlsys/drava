@@ -89,25 +89,25 @@ int drava_transport_socket_main(drava_t *drava,
     /* the thread 0 reads from the socket and spawns task */
     if (thread->tid == 0) {
         /* setup unix socket */
-        if (!std::filesystem::exists(SOCK_PATH))
-            LOGGER_FATAL("Socket %s does not exists", SOCK_PATH);
+        if (!std::filesystem::exists(sock_path))
+            LOGGER_FATAL("Socket %s does not exists", sock_path);
 
         int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sockfd < 0)
-            LOGGER_FATAL("Could not open socket %s: %s", SOCK_PATH,
+            LOGGER_FATAL("Could not open socket %s: %s", sock_path,
                          strerror(errno));
 
         sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
-        std::strncpy(addr.sun_path, SOCK_PATH, sizeof(addr.sun_path) - 1);
+        std::strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path) - 1);
 
         if (connect(sockfd, reinterpret_cast<sockaddr *>(&addr),
                     sizeof(addr)) == -1)
-            LOGGER_FATAL("Could not connect socket %s: %s", SOCK_PATH,
+            LOGGER_FATAL("Could not connect socket %s: %s", sock_path,
                          strerror(errno));
 
         LOGGER_INFO("Connected to socket %s, reading framed binary payloads...",
-                    SOCK_PATH);
+                    sock_path);
 
         int flush_timeout_ms =
                 drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
