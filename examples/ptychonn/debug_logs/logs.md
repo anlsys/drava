@@ -1,5 +1,20 @@
 ### A 100
+- 2 stage
+```shell
+Published count=9216 seq=30600 win_fps=999.91 avg_fps=999.92
+Square completion: n_raw=10000 side=100 n_square=10000 extra=0
+Done: published 10000 frames in 10.002s (avg_fps=999.81) seq=31395 eos_seq=31396 Last frame sent at: 2851374.15498543
 
+[57.054146] [TID=13113] [LOGGER] [INFO] [stage1] frames=10000 batch=16 step_ms=205.48 infer_avg_fps=227.67 published_frames=10000 published_msgs=625 publish_avg_fps=228.03
+[57.054178] [TID=13113] [LOGGER] [INFO] [stage1-final] frames=10000 expected_frames=10000 frame0_arrival_s=2851364.169312 last_infer_done_s=2851408.093473 end_to_end_latency_s=43.924161 infer_avg_fps=227.67 publish_avg_fps=228.03 e2e_fps=227.67
+
+[48.051626] [TID=13213] [LOGGER] [INFO] [stage2] received=9968/10000 consume_avg_fps=233.62
+[48.674307] [TID=13212] [LOGGER] [INFO] [stage2] received=9984/10000 consume_avg_fps=230.63
+[48.674551] [TID=13212] [LOGGER] [INFO] [stage2] received=10000/10000 consume_avg_fps=230.99
+[48.820188] [TID=13212] [LOGGER] [INFO] [stage2-final] frames=10000 stitched_frames=10000 stitch_side=100 consume_avg_fps=230.99 stitch_time_s=0.146 amp_shape=(300, 300) phi_shape=(300, 300)
+
+
+```
 - Using asycn publish
 ```shell
 python benchmark.py \
