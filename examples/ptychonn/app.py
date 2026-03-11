@@ -40,6 +40,7 @@ drava.log(drava.DRAVA_VERBOSE_INFO, f"Using dataset dir: {DATA_DIR}")
 FRAME_DTYPE = np.float32
 FRAME_BYTES = PATCH_SIDE * PATCH_SIDE * np.dtype(FRAME_DTYPE).itemsize
 EOS_PREFIX = b"DRAVA_EOS:"
+PUBLISH_CHUNK = 16
 
 _next_start = 0
 _total_infers = 0
@@ -54,6 +55,9 @@ _published_msgs = 0
 _publish_t0: float | None = None
 _state_lock = threading.Lock()
 _predict_lock = threading.Lock()
+_pending_raw: list[bytes] = []
+_eos_raw: bytes | None = None
+_eos_forwarded = False
 
 
 def warmup_model(runs: int = 2, batch_size: int = DRAVA_INFER_BATCH) -> None:
@@ -67,39 +71,59 @@ def func(frames) -> None:
     global _next_start, _total_infers, _infer_t0
     global _first_arrival_s, _last_done_s, _next_log, _final_logged
     global _published_frames, _published_msgs, _publish_t0, _expected_frames
+    global _pending_raw, _eos_raw, _eos_forwarded
 
     arrival_s = time.perf_counter()
-    batch_raw = []
     info_line = None
-    for raw in frames:
-        if raw.startswith(EOS_PREFIX):
-            try:
-                eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
-            except ValueError:
-                drava.log(drava.DRAVA_VERBOSE_WARN, f"Ignoring malformed EOS marker: {raw!r}")
-                continue
-            rc = drava.publish_py(raw)
-            if rc != drava.DRAVA_SUCCESS:
-                raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
-            with _state_lock:
+    with _state_lock:
+        for raw in frames:
+            if raw.startswith(EOS_PREFIX):
+                try:
+                    eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
+                except ValueError:
+                    drava.log(drava.DRAVA_VERBOSE_WARN, f"Ignoring malformed EOS marker: {raw!r}")
+                    continue
                 prev = _expected_frames
                 if (_expected_frames is None) or (eos_frames > _expected_frames):
                     _expected_frames = eos_frames
+                    _eos_raw = raw
                 if prev != _expected_frames:
                     info_line = f"EOS received: expected_frames={_expected_frames}"
-            continue
-        if len(raw) == 0:
-            continue
-        if len(raw) != FRAME_BYTES:
-            raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
-        batch_raw.append(raw)
+                continue
+            if len(raw) == 0:
+                continue
+            if len(raw) != FRAME_BYTES:
+                raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
+            _pending_raw.append(raw)
     if info_line is not None:
         drava.log(drava.DRAVA_VERBOSE_INFO, info_line)
 
     log_line = None
     final_line = None
 
-    if batch_raw:
+    while True:
+        with _state_lock:
+            run_batch = len(_pending_raw) >= DRAVA_INFER_BATCH
+            flush_tail = (_eos_raw is not None) and (len(_pending_raw) > 0)
+            if run_batch:
+                batch_raw = _pending_raw[:DRAVA_INFER_BATCH]
+                del _pending_raw[:DRAVA_INFER_BATCH]
+            elif flush_tail:
+                batch_raw = _pending_raw[:]
+                _pending_raw.clear()
+            else:
+                batch_raw = []
+
+            if batch_raw:
+                batch_size = len(batch_raw)
+                start = _next_start
+                end = start + batch_size
+                _next_start = end
+                expected_for_payload = _expected_frames if _expected_frames is not None else 0
+
+        if not batch_raw:
+            break
+
         batch_size = len(batch_raw)
         stacked = b"".join(batch_raw)
         tensor = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
@@ -111,30 +135,30 @@ def func(frames) -> None:
             pred_amp, pred_phi = model.predict(tensor, verbose=0)
         t_inf1 = time.perf_counter()
 
+        pred_amp_3d = pred_amp[..., 0]
+        pred_phi_3d = pred_phi[..., 0]
+        for off in range(0, batch_size, PUBLISH_CHUNK):
+            chunk_end = min(off + PUBLISH_CHUNK, batch_size)
+            payload = encode_stage1_prediction(
+                job_id=STAGE1_JOB_ID,
+                start=start + off,
+                end=start + chunk_end,
+                n_total=expected_for_payload,
+                pred_amp=pred_amp_3d[off:chunk_end],
+                pred_phi=pred_phi_3d[off:chunk_end],
+            )
+
+            rc = drava.publish_py(payload)
+            if rc != drava.DRAVA_SUCCESS:
+                raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
+
+            with _state_lock:
+                if _publish_t0 is None:
+                    _publish_t0 = time.perf_counter()
+                _published_msgs += 1
+
         with _state_lock:
-            start = _next_start
-            end = start + batch_size
-            _next_start = end
-            expected_for_payload = _expected_frames if _expected_frames is not None else 0
-
-        payload = encode_stage1_prediction(
-            job_id=STAGE1_JOB_ID,
-            start=start,
-            end=end,
-            n_total=expected_for_payload,
-            pred_amp=pred_amp[..., 0],
-            pred_phi=pred_phi[..., 0],
-        )
-
-        rc = drava.publish_py(payload)
-        if rc != drava.DRAVA_SUCCESS:
-            raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
-
-        with _state_lock:
-            if _publish_t0 is None:
-                _publish_t0 = time.perf_counter()
             _published_frames += batch_size
-            _published_msgs += 1
 
             if _infer_t0 is None:
                 _infer_t0 = t_inf0
@@ -155,6 +179,23 @@ def func(frames) -> None:
                     f"published_msgs={_published_msgs} publish_avg_fps={publish_avg_fps:.2f}"
                 )
                 _next_log += LOG_EVERY
+
+    with _state_lock:
+        can_forward_eos = (
+                (_eos_raw is not None)
+                and (not _eos_forwarded)
+                and (len(_pending_raw) == 0)
+                and (_expected_frames is not None)
+                and (_published_frames >= _expected_frames)
+        )
+        eos_to_send = _eos_raw if can_forward_eos else None
+        if can_forward_eos:
+            _eos_forwarded = True
+
+    if eos_to_send is not None:
+        rc = drava.publish_py(eos_to_send)
+        if rc != drava.DRAVA_SUCCESS:
+            raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
 
     with _state_lock:
         expected = _expected_frames

@@ -1,6 +1,30 @@
 ### A 100
 - 2 stage
 ```shell
+Published count=175104 seq=208121 win_fps=21774.55 avg_fps=21856.69
+Square completion: n_raw=175104 side=419 n_square=175561 extra=457
+Done: published 175561 frames in 8.033s (avg_fps=21855.41) seq=208578 eos_seq=208579 Last frame sent at: 2853307.117681778
+
+[81.900096] [TID=44040] [LOGGER] [INFO] [stage1] frames=175561 batch=256 step_ms=303.30 infer_avg_fps=2423.20 published_frames=175561 published_msgs=10973 publish_avg_fps=2426.42
+[81.900129] [TID=44040] [LOGGER] [INFO] [stage1-final] frames=175561 expected_frames=175561 frame0_arrival_s=2853299.129231 last_infer_done_s=2853371.580180 end_to_end_latency_s=72.450949 infer_avg_fps=2423.20 publish_avg_fps=2426.42 e2e_fps=2423.17
+
+
+=175353 capacity=175561 finalized=0
+[78.489554] [TID=44122] [LOGGER] [INFO] [stage2] received=175369/175561 consume_avg_fps=2463.61
+[78.489859] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175385 total_received=175385 capacity=175561 finalized=0
+[78.489964] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175401 total_received=175401 capacity=175561 finalized=0
+[78.490066] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175417 total_received=175417 capacity=175561 finalized=0
+[78.490162] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175433 total_received=175433 capacity=175561 finalized=0
+[78.490324] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175449 total_received=175449 capacity=175561 finalized=0
+[78.490469] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175465 total_received=175465 capacity=175561 finalized=0
+[78.490616] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175481 total_received=175481 capacity=175561 finalized=0
+[78.490764] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175497 total_received=175497 capacity=175561 finalized=0
+[78.490914] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175513 total_received=175513 capacity=175561 finalized=0
+[78.491093] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175529 total_received=175529 capacity=175561 finalized=0
+[78.491287] [TID=44122] [LOGGER] [INFO] [stage2] waiting_for_expected job_id=1 expected=175561 unique_received=175545 total_received=175545 capacity=175561 finalized=0
+[81.050336] [TID=44122] [LOGGER] [INFO] [stage2-final] frames=175561 stitched_frames=175561 stitch_side=419 consume_avg_fps=2466.24 stitch_time_s=2.559 amp_shape=(1257, 1257) phi_shape=(1257, 1257)
+
+---
 Published count=9216 seq=30600 win_fps=999.91 avg_fps=999.92
 Square completion: n_raw=10000 side=100 n_square=10000 extra=0
 Done: published 10000 frames in 10.002s (avg_fps=999.81) seq=31395 eos_seq=31396 Last frame sent at: 2851374.15498543
