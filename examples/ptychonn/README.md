@@ -169,6 +169,30 @@ python benchmark.py \
   --duration-s 30 \
   --runs 1
 
+python3 benchmark.py \
+  --batches 256 \
+  --runs 1 \
+  --duration-s 10 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --rate-hz 1000 \
+  --nats-url nats://127.0.0.1:4222
+
+
+python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --duration-s 8 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --nats-url nats://127.0.0.1:4222 \
+  --rate-hz 1000 \
+  --input-stream FRAMES \
+  --input-subject frames.raw \
+  --output-stream PREDICTIONS \
+  --output-subject frames.stage1
+
+
 ```
 
 ### References

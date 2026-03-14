@@ -1,4 +1,64 @@
 ### A 100
+- New bench
+```shell
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark.py \
+  --batches 256 \
+  --runs 1 \
+  --duration-s 10 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --rate-hz 1000 \
+  --nats-url nats://127.0.0.1:4222
+
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app.py
+[batch=256 run=1] app ready
+[batch=256 run=1] starting publisher_jetstream.py
+[batch=256 run=1] publisher finished
+[batch=256 run=1] waiting for app final (timeout=120.0s)
+[batch=256 run=1] app final received
+  done: publisher_avg_fps=999.81 stage1_infer_avg_fps=904.28
+
+| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Stage1 Infer FPS | Stage1 Publish FPS | Stage1 E2E FPS | Publisher Time (s) | Stage1 E2E (s) | GPU Avg (%) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 200 | 10000 | 999.81 | 904.28 | 911.24 | 904.21 | 10.00 | 11.06 | 10.00 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs/20260314_163327
+[global] stopping nats-server
+
+
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --duration-s 8 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --nats-url nats://127.0.0.1:4222 \
+  --rate-hz 1000 \
+  --input-stream FRAMES \
+  --input-subject frames.raw \
+  --output-stream PREDICTIONS \
+  --output-subject frames.stage1
+
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=1011.54 stage1_infer_fps=898.20 stage2_consume_fps=851.59
+
+| Batch | Threads | Timeout (ms) | Frames | Publisher FPS | Stage1 Infer FPS | Stage1 Publish FPS | Stage1 E2E FPS | Stage2 Consume FPS | Stage2 Stitch (s) | Stage2 Side | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 200 | 8100 | 1011.54 | 898.20 | 906.20 | 898.11 | 851.59 | 0.12 | 90 | 10.50 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260314_163608
+[global] stopping nats-server
+
+
+```
 - 2 stage
 ```shell
 Published count=175104 seq=208121 win_fps=21774.55 avg_fps=21856.69
