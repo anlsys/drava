@@ -13,9 +13,10 @@ import time
 from pathlib import Path
 
 APP_FINAL_RE = re.compile(
-    r"\[final\]\s+frames=(?P<frames>\d+)\s+expected_frames=(?P<expected>\d+)\s+"
-    r"frame0_arrival_s=(?P<arrival>[0-9.]+)\s+frame(?P<done_n>\d+)_done_s=(?P<done>[0-9.]+)\s+"
-    r"end_to_end_latency_s=(?P<e2e>[0-9.]+)\s+final_wall_avg_fps=(?P<fps>[0-9.]+)"
+    r"\[stage1-final\]\s+frames=(?P<frames>\d+)\s+expected_frames=(?P<expected>\d+)\s+"
+    r"frame0_arrival_s=(?P<arrival>[0-9.]+)\s+last_infer_done_s=(?P<done>[0-9.]+)\s+"
+    r"end_to_end_latency_s=(?P<e2e>[0-9.]+)\s+infer_avg_fps=(?P<infer_fps>[0-9.]+)\s+"
+    r"publish_avg_fps=(?P<publish_fps>[0-9.]+)\s+e2e_fps=(?P<e2e_fps>[0-9.]+)"
 )
 PUB_DONE_RE = re.compile(
     r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
@@ -140,7 +141,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "publisher_time_s": None,
         "publisher_avg_fps": None,
         "drava_frames": None,
-        "drava_avg_fps": None,
+        "stage1_infer_avg_fps": None,
+        "stage1_publish_avg_fps": None,
+        "stage1_e2e_fps": None,
         "drava_e2e_s": None,
         "gpu_avg_pct": None,
     }
@@ -266,7 +269,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     if app_final:
         row["drava_frames"] = int(app_final["frames"])
         row["drava_e2e_s"] = float(app_final["e2e"])
-        row["drava_avg_fps"] = float(app_final["fps"])
+        row["stage1_infer_avg_fps"] = float(app_final["infer_fps"])
+        row["stage1_publish_avg_fps"] = float(app_final["publish_fps"])
+        row["stage1_e2e_fps"] = float(app_final["e2e_fps"])
         if row["total_frames"] is None:
             row["total_frames"] = row["drava_frames"]
     else:
@@ -305,13 +310,14 @@ def fmt(x, f="{:.2f}"):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava Avg FPS | Publisher Time (s) | Drava E2E (s) | GPU Avg (%) |")
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        "| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Stage1 Infer FPS | Stage1 Publish FPS | Stage1 E2E FPS | Publisher Time (s) | Stage1 E2E (s) | GPU Avg (%) |")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['batch']} | {r['threads']} | {r['timeout_ms']} | "
             f"{fmt(r['total_frames'], '{:.0f}')} | {fmt(r['publisher_avg_fps'])} | "
-            f"{fmt(r['drava_avg_fps'])} | {fmt(r['publisher_time_s'])} | "
+            f"{fmt(r['stage1_infer_avg_fps'])} | {fmt(r['stage1_publish_avg_fps'])} | "
+            f"{fmt(r['stage1_e2e_fps'])} | {fmt(r['publisher_time_s'])} | "
             f"{fmt(r['drava_e2e_s'])} | {fmt(r['gpu_avg_pct'])} |"
         )
 
@@ -354,18 +360,20 @@ def main():
                     rows.append(row)
                     print(
                         f"  done: publisher_avg_fps={fmt(row['publisher_avg_fps'])} "
-                        f"drava_avg_fps={fmt(row['drava_avg_fps'])}"
+                        f"stage1_infer_avg_fps={fmt(row['stage1_infer_avg_fps'])}"
                     )
 
             print_table(rows)
             out_csv = run_dir / "summary.csv"
             with open(out_csv, "w", encoding="utf-8") as f:
                 f.write(
-                    "batch,threads,timeout_ms,total_frames,publisher_avg_fps,drava_avg_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
+                    "batch,threads,timeout_ms,total_frames,publisher_avg_fps,stage1_infer_avg_fps,"
+                    "stage1_publish_avg_fps,stage1_e2e_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
                 for r in rows:
                     f.write(
                         f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                        f"{r['publisher_avg_fps']},{r['drava_avg_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
+                        f"{r['publisher_avg_fps']},{r['stage1_infer_avg_fps']},{r['stage1_publish_avg_fps']},"
+                        f"{r['stage1_e2e_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
                         f"{r['gpu_avg_pct']}\n"
                     )
             print(f"\nLogs and summary written to: {run_dir}")
