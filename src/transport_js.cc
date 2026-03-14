@@ -183,6 +183,7 @@ int drava_transport_nats_main(drava_t *drava,
                             std::move(pending);
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);
+                    drava_callback_task_begin(drava);
                     drava->runtime.team_task_spawn(
                             team, [drava, device_global_id,
                                    batch_payloads = std::move(batch_payloads)](
@@ -224,6 +225,7 @@ int drava_transport_nats_main(drava_t *drava,
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);
 
+                    drava_callback_task_begin(drava);
                     drava->runtime.team_task_spawn(
                             team, [drava, device_global_id,
                                    batch_payloads = std::move(batch_payloads)](

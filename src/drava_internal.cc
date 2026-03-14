@@ -19,6 +19,7 @@
 #include <limits>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -77,6 +78,8 @@ static const char *map_stage_field_to_env(const std::string &section,
     if (section == "ingress") {
         if (key == "transport")
             return "DRAVA_TRANSPORT";
+        if (key == "url")
+            return "NATS_URL";
         if (key == "stream")
             return "DRAVA_STREAM";
         if (key == "subject")
@@ -345,6 +348,31 @@ uint64_t drava_callback_context_recv_ts_ns()
     return g_callback_recv_ts_ns;
 }
 
+void drava_callback_task_begin(drava_t *drava)
+{
+    if (drava == nullptr)
+        return;
+    drava->pending_callback_tasks.fetch_add(1);
+}
+
+void drava_callback_task_end(drava_t *drava, bool saw_eos)
+{
+    if (drava == nullptr)
+        return;
+
+    if (saw_eos)
+        drava->pending_rx_eos_snapshot.store(1);
+
+    const uint64_t remaining = drava->pending_callback_tasks.fetch_sub(1) - 1;
+    if (remaining != 0)
+        return;
+
+    if (drava->pending_rx_eos_snapshot.exchange(0) != 0)
+        drava_stats_log_snapshot(drava, "rx_eos");
+    if (drava->pending_tx_eos_snapshot.exchange(0) != 0)
+        drava_stats_log_snapshot(drava, "tx_eos");
+}
+
 static void drava_dispatch_execute(drava_t *drava,
                                    device_global_id_t device_global_id,
                                    const std::vector<std::string> &payloads)
@@ -396,8 +424,7 @@ static void drava_dispatch_execute(drava_t *drava,
     g_callback_recv_ts_ns = prev_recv_ts;
     drava_stats_record_callback_batch(drava, data_frame_count, total_bytes,
                                       cb_t1 - cb_t0);
-    if (saw_eos)
-        drava_stats_log_snapshot(drava, "rx_eos");
+    drava_callback_task_end(drava, saw_eos);
 }
 
 void drava_dispatch_payload_batch(drava_t *drava,

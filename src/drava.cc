@@ -173,8 +173,13 @@ int drava_t::publish(const void *data, size_t data_len)
             if (now_ns >= recv_ts_ns)
                 drava_stats_record_stage_latency_ns(this, now_ns - recv_ts_ns);
         }
-        if (drava_payload_is_eos(data, data_len))
-            drava_stats_log_snapshot(this, "tx_eos");
+        if (drava_payload_is_eos(data, data_len)) {
+            this->pending_tx_eos_snapshot.store(1);
+            if (this->pending_callback_tasks.load() == 0 &&
+                this->pending_tx_eos_snapshot.exchange(0) != 0) {
+                drava_stats_log_snapshot(this, "tx_eos");
+            }
+        }
     }
     return rc;
 }
@@ -226,5 +231,8 @@ int drava_t::stats_reset(void)
     this->rx_last_ns.store(0);
     this->tx_first_ns.store(0);
     this->tx_last_ns.store(0);
+    this->pending_callback_tasks.store(0);
+    this->pending_rx_eos_snapshot.store(0);
+    this->pending_tx_eos_snapshot.store(0);
     return DRAVA_SUCCESS;
 }

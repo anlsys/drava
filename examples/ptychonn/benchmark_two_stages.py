@@ -39,7 +39,8 @@ def parse_args():
     p.add_argument("--runs", type=int, default=1, help="Runs per batch.")
     p.add_argument("--python", default=sys.executable, help="Python executable.")
     p.add_argument("--reuse-nats", action="store_true", help="Use existing NATS server.")
-    p.add_argument("--nats-url", default="nats://127.0.0.1:4222", help="NATS URL.")
+    p.add_argument("--nats-url", default="", help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
+    p.add_argument("--stage-config", default="pipeline.yaml", help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs_two_stages", help="Output dir under examples/ptychonn.")
     p.add_argument("--app-timeout-s", type=float, default=240.0, help="Wait for final lines after publisher exits.")
     p.add_argument("--input-stream", default="FRAMES", help="Publisher->Stage1 stream.")
@@ -49,6 +50,47 @@ def parse_args():
     p.add_argument("--stage1-durable-prefix", default="drava_stage1_bench", help="Stage1 durable prefix.")
     p.add_argument("--stage2-durable-prefix", default="drava_stage2_bench", help="Stage2 durable prefix.")
     return p.parse_args()
+
+
+def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
+    if not path.exists():
+        return None
+    in_stages = False
+    in_target = False
+    in_ingress = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if body == "stages:":
+            in_stages = True
+            in_target = False
+            in_ingress = False
+            continue
+        if not in_stages:
+            continue
+        if indent == 2 and body.startswith("- "):
+            in_target = False
+            in_ingress = False
+            kv = body[2:]
+            if kv.startswith("name:") and kv.split(":", 1)[1].strip().strip("\"'") == stage_name:
+                in_target = True
+            continue
+        if not in_target:
+            continue
+        if indent == 4 and body == "ingress:":
+            in_ingress = True
+            continue
+        if indent == 4 and body.endswith(":") and body != "ingress:":
+            in_ingress = False
+            continue
+        if in_ingress and indent >= 6 and ":" in body:
+            key, value = body.split(":", 1)
+            if key.strip() == key_name:
+                return value.strip().strip("\"'")
+    return None
 
 
 def stream_lines(proc, log_path, line_cb=None):
@@ -131,38 +173,37 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "pipeline_e2e_s": None,
     }
 
+    root = Path(__file__).resolve().parent
+    stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
+        args.stage_config)
+    input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or args.input_subject
+    nats_url = (
+            args.nats_url
+            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or "nats://127.0.0.1:4222"
+    )
+
     env_common = dict(base_env)
-    env_common["DRAVA_TRANSPORT"] = "nats"
-    env_common["NATS_URL"] = args.nats_url
     env_common["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
     env_common["DRAVA_THREADS"] = str(args.threads)
-    env_common["DRAVA_FETCH_TIMEOUT_MS"] = str(args.timeout_ms)
+    env_common["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
 
     env_stage1 = dict(env_common)
-    env_stage1["DRAVA_STREAM"] = args.input_stream
-    env_stage1["DRAVA_SUBJECT"] = args.input_subject
     env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_b{batch_size}_r{run_idx}"
-    env_stage1["DRAVA_OUTPUT_STREAM"] = args.output_stream
-    env_stage1["DRAVA_OUTPUT_SUBJECT"] = args.output_subject
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
-    env_stage1["DRAVA_JS_FETCH_BATCH"] = str(batch_size)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
 
     env_stage2 = dict(env_common)
-    env_stage2["DRAVA_STREAM"] = args.output_stream
-    env_stage2["DRAVA_SUBJECT"] = args.output_subject
     env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_b{batch_size}_r{run_idx}"
-    env_stage2["DRAVA_JS_FETCH_BATCH"] = str(batch_size)
-    env_stage2["DRAVA_LOG_EVERY"] = str(batch_size)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
 
     env_pub = dict(env_common)
-    env_pub["DRAVA_SUBJECT"] = args.input_subject
+    env_pub["NATS_URL"] = nats_url
+    env_pub["DRAVA_SUBJECT"] = input_subject
     env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz)
     env_pub["DRAVA_PUBLISH_SYNTHETIC"] = "1"
     env_pub["DRAVA_PUBLISH_DURATION_S"] = str(args.duration_s)
 
-    root = Path(__file__).resolve().parent
     stage1_log = run_dir / f"app_stage1_b{batch_size}_r{run_idx}.log"
     stage2_log = run_dir / f"app_stage2_b{batch_size}_r{run_idx}.log"
     pub_log = run_dir / f"pub_b{batch_size}_r{run_idx}.log"
@@ -327,6 +368,13 @@ def main():
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root / args.out_dir / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
+    stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
+        args.stage_config)
+    nats_url = (
+            args.nats_url
+            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or "nats://127.0.0.1:4222"
+    )
 
     base_env = dict(os.environ)
     nats_proc = None
@@ -334,16 +382,16 @@ def main():
 
     if not args.reuse_nats:
         print("[global] starting nats-server")
-        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, args.nats_url)
+        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, nats_url)
         ok = wait_for_log_line(nats_log_path, "Listening for client connections", 20)
         if not ok:
             terminate_proc(nats_proc)
             if nats_log_file:
                 nats_log_file.close()
             raise SystemExit(f"Failed to start nats-server. See {nats_log_path}")
-        print(f"[global] nats ready ({args.nats_url})")
+        print(f"[global] nats ready ({nats_url})")
     else:
-        print(f"[global] reusing existing nats ({args.nats_url})")
+        print(f"[global] reusing existing nats ({nats_url})")
 
     rows = []
     try:

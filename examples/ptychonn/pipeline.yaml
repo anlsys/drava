@@ -5,6 +5,7 @@ stages:
   - name: stage1
     ingress:
       transport: nats
+      url: nats://127.0.0.1:4222
       stream: FRAMES
       subject: frames.raw
       durable: drava_stage1
@@ -17,8 +18,9 @@ stages:
   - name: stage2
     ingress:
       transport: nats
+      url: nats://127.0.0.1:4222
       stream: PREDICTIONS
       subject: frames.stage1
       durable: drava_stage2
       fetch_batch: 256
-      fetch_timeout_ms: 200
+      fetch_timeout_ms: 500

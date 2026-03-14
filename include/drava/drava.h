@@ -66,6 +66,9 @@ struct drava_t {
     std::atomic<uint64_t> rx_last_ns;
     std::atomic<uint64_t> tx_first_ns;
     std::atomic<uint64_t> tx_last_ns;
+    std::atomic<uint64_t> pending_callback_tasks;
+    std::atomic<uint64_t> pending_rx_eos_snapshot;
+    std::atomic<uint64_t> pending_tx_eos_snapshot;
 
     /***********/
     /* Methods */
@@ -117,6 +120,10 @@ void drava_stats_record_tx(drava_t *drava, size_t data_len);
 void drava_stats_log_snapshot(drava_t *drava, const char *reason);
 
 uint64_t drava_callback_context_recv_ts_ns();
+
+void drava_callback_task_begin(drava_t *drava);
+
+void drava_callback_task_end(drava_t *drava, bool saw_eos);
 
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,

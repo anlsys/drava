@@ -125,6 +125,7 @@ int drava_transport_socket_main(drava_t *drava,
             pending.clear();
             pending.reserve(drava->callback_batch_size);
 
+            drava_callback_task_begin(drava);
             drava->runtime.team_task_spawn(
                     team,
                     [drava, device_global_id,

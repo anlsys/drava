@@ -44,13 +44,56 @@ def parse_args():
                    help="Python executable to use.")
     p.add_argument("--reuse-nats", action="store_true",
                    help="Use existing NATS server instead of launching one.")
-    p.add_argument("--nats-url", default="nats://127.0.0.1:4222",
-                   help="NATS URL.")
+    p.add_argument("--nats-url", default="",
+                   help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
+    p.add_argument("--stage-config", default="pipeline.yaml",
+                   help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs",
                    help="Output directory under examples/ptychonn.")
     p.add_argument("--app-timeout-s", type=float, default=120.0,
                    help="Max wait for app final line after publisher exits.")
     return p.parse_args()
+
+
+def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
+    if not path.exists():
+        return None
+    in_stages = False
+    in_target = False
+    in_ingress = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if body == "stages:":
+            in_stages = True
+            in_target = False
+            in_ingress = False
+            continue
+        if not in_stages:
+            continue
+        if indent == 2 and body.startswith("- "):
+            in_target = False
+            in_ingress = False
+            kv = body[2:]
+            if kv.startswith("name:") and kv.split(":", 1)[1].strip().strip("\"'") == stage_name:
+                in_target = True
+            continue
+        if not in_target:
+            continue
+        if indent == 4 and body == "ingress:":
+            in_ingress = True
+            continue
+        if indent == 4 and body.endswith(":") and body != "ingress:":
+            in_ingress = False
+            continue
+        if in_ingress and indent >= 6 and ":" in body:
+            key, value = body.split(":", 1)
+            if key.strip() == key_name:
+                return value.strip().strip("\"'")
+    return None
 
 
 def stream_lines(proc, log_path, line_cb=None):
@@ -147,14 +190,22 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "gpu_avg_pct": None,
     }
 
+    root = Path(__file__).resolve().parent
+    stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
+        args.stage_config)
+    input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or "frames.raw"
+    nats_url = (
+            args.nats_url
+            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or "nats://127.0.0.1:4222"
+    )
+
     env = dict(base_env)
-    env["DRAVA_TRANSPORT"] = "nats"
-    env["NATS_URL"] = args.nats_url
     env["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
     env["DRAVA_THREADS"] = str(args.threads)
+    env["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
+    env["DRAVA_STAGE_NAME"] = "stage1"
     env["DRAVA_INFER_BATCH"] = str(batch_size)
-    env["DRAVA_JS_FETCH_BATCH"] = str(batch_size)
-    env["DRAVA_FETCH_TIMEOUT_MS"] = str(args.timeout_ms)
     env["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz)
     env["DRAVA_PUBLISH_SYNTHETIC"] = "1"
     env["DRAVA_PUBLISH_DURATION_S"] = str(args.duration_s)
@@ -180,7 +231,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     print(f"[batch={batch_size} run={run_idx}] starting app.py")
     app_proc = subprocess.Popen(
         [args.python, "app.py"],
-        cwd=Path(__file__).resolve().parent,
+        cwd=root,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -227,8 +278,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     pub_proc = subprocess.Popen(
         [args.python, "publisher_jetstream.py"],
-        cwd=Path(__file__).resolve().parent,
-        env=env,
+        cwd=root,
+        env=dict(env, NATS_URL=nats_url, DRAVA_SUBJECT=input_subject),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -331,6 +382,13 @@ def main():
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root / args.out_dir / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
+    stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
+        args.stage_config)
+    nats_url = (
+            args.nats_url
+            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or "nats://127.0.0.1:4222"
+    )
 
     base_env = dict(os.environ)
     nats_proc = None
@@ -338,16 +396,16 @@ def main():
 
     if not args.reuse_nats:
         print("[global] starting nats-server")
-        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, args.nats_url)
+        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, nats_url)
         ok = wait_for_log_line(nats_log_path, "Listening for client connections", 20)
         if not ok:
             terminate_proc(nats_proc, "nats")
             if nats_log_file:
                 nats_log_file.close()
             raise SystemExit(f"Failed to start nats-server. See {nats_log_path}")
-        print(f"[global] nats ready ({args.nats_url})")
+        print(f"[global] nats ready ({nats_url})")
     else:
-        print(f"[global] reusing existing nats ({args.nats_url})")
+        print(f"[global] reusing existing nats ({nats_url})")
 
     rows = []
     try:
