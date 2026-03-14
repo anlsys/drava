@@ -26,6 +26,10 @@ STAGE2_FINAL_RE = re.compile(
     r"\[stage2-final\]\s+frames=(?P<frames>\d+)\s+stitched_frames=(?P<stitched>\d+)\s+"
     r"stitch_side=(?P<side>\d+)"
 )
+STAGE2_RUNTIME_RE = re.compile(
+    r"\[stage2-runtime\]\s+rx_frames=(?P<rx_frames>\d+)\s+rx_fps=(?P<rx_fps>[0-9.]+)\s+"
+    r"stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)"
+)
 
 
 def parse_args():
@@ -225,11 +229,11 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     def on_stage2_line(line: str):
         if "JetStream ready:" in line:
             stage2_ready.set()
-        m = STAGE1_FINAL_RE.search(line)
-        if m and m.group("reason") == "rx_eos":
+        m = STAGE2_FINAL_RE.search(line)
+        if m:
             stage2_final.update(m.groupdict())
             marks["stage2_final"] = time.monotonic()
-        m = STAGE2_FINAL_RE.search(line)
+        m = STAGE2_RUNTIME_RE.search(line)
         if m:
             stage2_final.update(m.groupdict())
 
@@ -297,8 +301,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     end_wait = time.time() + args.app_timeout_s
     while time.time() < end_wait and (
             not stage1_final
-            or "rx_frames" not in stage2_final
             or "frames" not in stage2_final
+            or "rx_frames" not in stage2_final
     ):
         if stage1_proc.poll() is not None and stage2_proc.poll() is not None:
             break
@@ -313,10 +317,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         raise RuntimeError(f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
     if not stage1_final:
         raise RuntimeError(f"stage1 drava metrics not found\n--- stage1 tail ---\n{tail_text(stage1_log)}")
-    if "rx_frames" not in stage2_final:
-        raise RuntimeError(f"stage2 drava metrics not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
     if "frames" not in stage2_final:
         raise RuntimeError(f"stage2 finalize line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+    if "rx_frames" not in stage2_final:
+        raise RuntimeError(f"stage2 runtime line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
 
     pub_frames = int(pub_done["frames"])
     s1_frames = int(stage1_final["rx_frames"])
