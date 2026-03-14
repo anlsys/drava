@@ -16,4 +16,6 @@
 void drava_register_routine_py(PyObject * cb);
 void drava_listen_py(void);
 int drava_publish_py(PyObject *payload);
+PyObject *drava_stats_snapshot_py(void);
+int drava_stats_reset_py(void);
 %}

@@ -1,11 +1,9 @@
-import time
 import threading
 import traceback
 
 import drava
 import numpy as np
 
-from config import LOG_EVERY
 from pipeline_schema import decode_stage1_prediction
 
 EOS_PREFIX = b"DRAVA_EOS:"
@@ -52,22 +50,8 @@ class Stage2Accumulator:
 
         self.total_received = 0
         self.total_unique_received = 0
-        self.t0: float | None = None
-        self.next_log = LOG_EVERY
         self.finalized = False
         self.lock = threading.Lock()
-        self.callback_batches = 0
-        self.decoded_messages = 0
-        self.last_got_logged = 0
-
-    def _log_state(self, prefix: str) -> None:
-        cap = self.received_mask.size if self.received_mask is not None else 0
-        drava.log(
-            drava.DRAVA_VERBOSE_INFO,
-            f"[stage2] {prefix} job_id={self.current_job_id} expected={self.expected_frames} "
-            f"unique_received={self.total_unique_received} total_received={self.total_received} "
-            f"capacity={cap} finalized={int(self.finalized)}",
-        )
 
     def reset_job(self, job_id: int) -> None:
         self.current_job_id = job_id
@@ -77,8 +61,6 @@ class Stage2Accumulator:
         self.received_mask = None
         self.total_received = 0
         self.total_unique_received = 0
-        self.t0 = None
-        self.next_log = LOG_EVERY
         self.finalized = False
         drava.log(drava.DRAVA_VERBOSE_INFO, f"[stage2] reset job_id={job_id}")
 
@@ -112,7 +94,6 @@ class Stage2Accumulator:
             self.expected_frames = eos_frames
             self._ensure_capacity(eos_frames)
             drava.log(drava.DRAVA_VERBOSE_INFO, f"[stage2] EOS received: expected_frames={self.expected_frames}")
-            self._log_state("after_eos")
         self._try_finalize()
 
     def consume(self, payload: bytes) -> None:
@@ -132,20 +113,9 @@ class Stage2Accumulator:
         n_total = item["n_total"]
         pred_amp = item["pred_amp"]
         pred_phi = item["pred_phi"]
-        self.decoded_messages += 1
-        if self.decoded_messages <= 5:
-            drava.log(
-                drava.DRAVA_VERBOSE_INFO,
-                f"[stage2] decoded msg#{self.decoded_messages} job_id={job_id} "
-                f"start={start} end={end} n_total={n_total} "
-                f"amp_shape={pred_amp.shape} phi_shape={pred_phi.shape}",
-            )
 
         if self.current_job_id != job_id:
             self.reset_job(job_id)
-
-        if self.t0 is None:
-            self.t0 = time.perf_counter()
 
         if n_total > 0:
             if self.expected_frames is None or n_total > self.expected_frames:
@@ -162,19 +132,6 @@ class Stage2Accumulator:
         self.total_unique_received += int((~already).sum())
         self.total_received += (end - start)
 
-        got = self.total_unique_received
-        total = self.expected_frames if self.expected_frames is not None else self.received_mask.size
-        if got >= self.next_log:
-            now = time.perf_counter()
-            elapsed = now - self.t0
-            consume_fps = (got / elapsed) if elapsed > 0 else float("inf")
-            drava.log(
-                drava.DRAVA_VERBOSE_INFO,
-                f"[stage2] received={got}/{total} consume_avg_fps={consume_fps:.2f}",
-            )
-            self.next_log += LOG_EVERY
-            self.last_got_logged = got
-
         self._try_finalize()
 
     def _try_finalize(self) -> None:
@@ -183,16 +140,12 @@ class Stage2Accumulator:
         if self.expected_frames is None:
             return
         if self.total_unique_received < self.expected_frames:
-            if self.total_unique_received != self.last_got_logged:
-                self._log_state("waiting_for_expected")
-                self.last_got_logged = self.total_unique_received
             return
         self.finalize()
 
     def finalize(self) -> None:
         assert self.amp_pred_all is not None
         assert self.phi_pred_all is not None
-        assert self.t0 is not None
         assert self.expected_frames is not None
 
         n = self.expected_frames
@@ -218,23 +171,13 @@ class Stage2Accumulator:
             self.finalized = True
             return
 
-        t0 = time.perf_counter()
         stitched_amp = stitch_component(self.amp_pred_all[:used], tst_side=stitch_side)
         stitched_phi = stitch_component(self.phi_pred_all[:used], tst_side=stitch_side)
-        t1 = time.perf_counter()
-
-        consume_elapsed = t0 - self.t0
-        consume_fps = (
-            self.total_unique_received / consume_elapsed
-            if consume_elapsed > 0
-            else float("inf")
-        )
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
             f"[stage2-final] frames={self.expected_frames} stitched_frames={used} "
-            f"stitch_side={stitch_side} consume_avg_fps={consume_fps:.2f} "
-            f"stitch_time_s={(t1 - t0):.3f} "
-            f"amp_shape={stitched_amp.shape} phi_shape={stitched_phi.shape}",
+            f"stitch_side={stitch_side} amp_shape={stitched_amp.shape} "
+            f"phi_shape={stitched_phi.shape}",
         )
         self.finalized = True
 
@@ -245,12 +188,6 @@ _acc = Stage2Accumulator()
 def func(frames) -> None:
     try:
         with _acc.lock:
-            _acc.callback_batches += 1
-            if _acc.callback_batches <= 5 or (_acc.callback_batches % 100 == 0):
-                drava.log(
-                    drava.DRAVA_VERBOSE_INFO,
-                    f"[stage2] callback batch #{_acc.callback_batches} count={len(frames)}",
-                )
             for raw in frames:
                 if raw.startswith(EOS_PREFIX):
                     try:

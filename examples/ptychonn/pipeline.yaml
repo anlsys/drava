@@ -1,0 +1,24 @@
+pipeline:
+  name: ptychonn_two_stage
+
+stages:
+  - name: stage1
+    ingress:
+      transport: nats
+      stream: FRAMES
+      subject: frames.raw
+      durable: drava_stage1
+      fetch_batch: 256
+      fetch_timeout_ms: 200
+    egress:
+      stream: PREDICTIONS
+      subject: frames.stage1
+
+  - name: stage2
+    ingress:
+      transport: nats
+      stream: PREDICTIONS
+      subject: frames.stage1
+      durable: drava_stage2
+      fetch_batch: 256
+      fetch_timeout_ms: 200

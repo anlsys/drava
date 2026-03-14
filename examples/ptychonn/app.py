@@ -1,4 +1,3 @@
-import time
 import threading
 
 import drava
@@ -9,7 +8,6 @@ from keras.models import load_model
 from config import (
     DATA_DIR,
     DRAVA_INFER_BATCH,
-    LOG_EVERY,
     PATCH_SIDE,
     STAGE1_JOB_ID,
     WT_DIR,
@@ -43,16 +41,8 @@ EOS_PREFIX = b"DRAVA_EOS:"
 PUBLISH_CHUNK = 16
 
 _next_start = 0
-_total_infers = 0
-_infer_t0: float | None = None
-_first_arrival_s: float | None = None
-_last_done_s: float | None = None
-_next_log = LOG_EVERY
-_final_logged = False
 _expected_frames: int | None = None
 _published_frames = 0
-_published_msgs = 0
-_publish_t0: float | None = None
 _state_lock = threading.Lock()
 _predict_lock = threading.Lock()
 _pending_raw: list[bytes] = []
@@ -68,12 +58,9 @@ def warmup_model(runs: int = 2, batch_size: int = DRAVA_INFER_BATCH) -> None:
 
 
 def func(frames) -> None:
-    global _next_start, _total_infers, _infer_t0
-    global _first_arrival_s, _last_done_s, _next_log, _final_logged
-    global _published_frames, _published_msgs, _publish_t0, _expected_frames
+    global _next_start, _published_frames, _expected_frames
     global _pending_raw, _eos_raw, _eos_forwarded
 
-    arrival_s = time.perf_counter()
     info_line = None
     with _state_lock:
         for raw in frames:
@@ -97,9 +84,6 @@ def func(frames) -> None:
             _pending_raw.append(raw)
     if info_line is not None:
         drava.log(drava.DRAVA_VERBOSE_INFO, info_line)
-
-    log_line = None
-    final_line = None
 
     while True:
         with _state_lock:
@@ -130,10 +114,8 @@ def func(frames) -> None:
             (batch_size, PATCH_SIDE, PATCH_SIDE, 1), order="C"
         )
 
-        t_inf0 = time.perf_counter()
         with _predict_lock:
             pred_amp, pred_phi = model.predict(tensor, verbose=0)
-        t_inf1 = time.perf_counter()
 
         pred_amp_3d = pred_amp[..., 0]
         pred_phi_3d = pred_phi[..., 0]
@@ -152,33 +134,8 @@ def func(frames) -> None:
             if rc != drava.DRAVA_SUCCESS:
                 raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
 
-            with _state_lock:
-                if _publish_t0 is None:
-                    _publish_t0 = time.perf_counter()
-                _published_msgs += 1
-
         with _state_lock:
             _published_frames += batch_size
-
-            if _infer_t0 is None:
-                _infer_t0 = t_inf0
-                _first_arrival_s = arrival_s
-            _last_done_s = t_inf1
-            _total_infers += batch_size
-
-            infer_wall_s = t_inf1 - _infer_t0
-            infer_avg_fps = (_total_infers / infer_wall_s) if infer_wall_s > 0 else float("inf")
-            publish_wall_s = (time.perf_counter() - _publish_t0) if _publish_t0 is not None else 0.0
-            publish_avg_fps = (_published_frames / publish_wall_s) if publish_wall_s > 0 else 0.0
-            step_ms = (t_inf1 - t_inf0) * 1000.0
-
-            if _total_infers >= _next_log:
-                log_line = (
-                    f"[stage1] frames={_total_infers} batch={batch_size} step_ms={step_ms:.2f} "
-                    f"infer_avg_fps={infer_avg_fps:.2f} published_frames={_published_frames} "
-                    f"published_msgs={_published_msgs} publish_avg_fps={publish_avg_fps:.2f}"
-                )
-                _next_log += LOG_EVERY
 
     with _state_lock:
         can_forward_eos = (
@@ -196,41 +153,6 @@ def func(frames) -> None:
         rc = drava.publish_py(eos_to_send)
         if rc != drava.DRAVA_SUCCESS:
             raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
-
-    with _state_lock:
-        expected = _expected_frames
-        if (
-                (not _final_logged)
-                and (expected is not None)
-                and (_total_infers >= expected)
-                and (_first_arrival_s is not None)
-                and (_last_done_s is not None)
-        ):
-            app_e2e_s = _last_done_s - _first_arrival_s
-            e2e_fps = (_total_infers / app_e2e_s) if app_e2e_s > 0 else float("inf")
-            infer_elapsed = (_last_done_s - _infer_t0) if _infer_t0 is not None else 0.0
-            infer_avg_final = (_total_infers / infer_elapsed) if infer_elapsed > 0 else float("inf")
-            publish_elapsed = (time.perf_counter() - _publish_t0) if _publish_t0 is not None else 0.0
-            publish_avg_final = (
-                (_published_frames / publish_elapsed) if publish_elapsed > 0 else 0.0
-            )
-            final_line = (
-                f"[stage1-final] frames={_total_infers} expected_frames={expected} "
-                f"frame0_arrival_s={_first_arrival_s:.6f} "
-                f"last_infer_done_s={_last_done_s:.6f} end_to_end_latency_s={app_e2e_s:.6f} "
-                f"infer_avg_fps={infer_avg_final:.2f} "
-                f"publish_avg_fps={publish_avg_final:.2f} "
-                f"e2e_fps={e2e_fps:.2f}"
-            )
-            _final_logged = True
-
-    if log_line is not None:
-        drava.log(
-            drava.DRAVA_VERBOSE_INFO,
-            log_line,
-        )
-    if final_line is not None:
-        drava.log(drava.DRAVA_VERBOSE_INFO, final_line)
 
 
 warmup_model()

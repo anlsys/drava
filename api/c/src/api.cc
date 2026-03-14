@@ -53,3 +53,13 @@ int drava_log(const drava_verbose_t verbose_level, const char *msg)
 {
     return drava.log(verbose_level, msg);
 }
+
+int drava_stats_snapshot(drava_stats_t *out_stats)
+{
+    return drava.stats_snapshot(out_stats);
+}
+
+int drava_stats_reset(void)
+{
+    return drava.stats_reset();
+}

@@ -2,9 +2,7 @@
 import argparse
 import datetime as dt
 import os
-import queue
 import re
-import shlex
 import signal
 import subprocess
 import sys
@@ -12,11 +10,13 @@ import threading
 import time
 from pathlib import Path
 
-APP_FINAL_RE = re.compile(
-    r"\[stage1-final\]\s+frames=(?P<frames>\d+)\s+expected_frames=(?P<expected>\d+)\s+"
-    r"frame0_arrival_s=(?P<arrival>[0-9.]+)\s+last_infer_done_s=(?P<done>[0-9.]+)\s+"
-    r"end_to_end_latency_s=(?P<e2e>[0-9.]+)\s+infer_avg_fps=(?P<infer_fps>[0-9.]+)\s+"
-    r"publish_avg_fps=(?P<publish_fps>[0-9.]+)\s+e2e_fps=(?P<e2e_fps>[0-9.]+)"
+DRAVA_METRICS_RE = re.compile(
+    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
+    r"rx_frames=(?P<rx_frames>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
+    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
+    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
+    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_fps=(?P<rx_fps>[0-9.]+)\s+"
+    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+stage=(?P<stage>\S+)"
 )
 PUB_DONE_RE = re.compile(
     r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
@@ -140,11 +140,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "publisher_frames": None,
         "publisher_time_s": None,
         "publisher_avg_fps": None,
-        "drava_frames": None,
-        "stage1_infer_avg_fps": None,
-        "stage1_publish_avg_fps": None,
-        "stage1_e2e_fps": None,
-        "drava_e2e_s": None,
+        "drava_rx_frames": None,
+        "drava_rx_fps": None,
+        "drava_stage_avg_ms": None,
+        "drava_cb_avg_ms": None,
         "gpu_avg_pct": None,
     }
 
@@ -159,22 +158,23 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     env["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz)
     env["DRAVA_PUBLISH_SYNTHETIC"] = "1"
     env["DRAVA_PUBLISH_DURATION_S"] = str(args.duration_s)
+    env["DRAVA_STAGE_NAME"] = "stage1"
 
     app_log = run_dir / f"app_b{batch_size}_r{run_idx}.log"
     pub_log = run_dir / f"pub_b{batch_size}_r{run_idx}.log"
 
-    app_final = {}
+    app_metrics = {}
     app_ready = threading.Event()
     timing_marks = {"infer_start_monotonic": None, "final_monotonic": None}
 
     def on_app_line(line: str):
         if "JetStream ready:" in line:
             app_ready.set()
-        if timing_marks["infer_start_monotonic"] is None and "[frames]=" in line:
+        if timing_marks["infer_start_monotonic"] is None and "drava_transport" in line:
             timing_marks["infer_start_monotonic"] = time.monotonic()
-        m = APP_FINAL_RE.search(line)
-        if m:
-            app_final.update(m.groupdict())
+        m = DRAVA_METRICS_RE.search(line)
+        if m and m.group("reason") == "tx_eos":
+            app_metrics.update(m.groupdict())
             timing_marks["final_monotonic"] = time.monotonic()
 
     print(f"[batch={batch_size} run={run_idx}] starting app.py")
@@ -242,8 +242,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     print(f"[batch={batch_size} run={run_idx}] publisher finished")
 
     end_wait = time.time() + args.app_timeout_s
-    print(f"[batch={batch_size} run={run_idx}] waiting for app final (timeout={args.app_timeout_s}s)")
-    while time.time() < end_wait and not app_final:
+    print(f"[batch={batch_size} run={run_idx}] waiting for drava metrics (timeout={args.app_timeout_s}s)")
+    while time.time() < end_wait and not app_metrics:
         if app_proc.poll() is not None:
             break
         time.sleep(0.2)
@@ -253,10 +253,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     terminate_proc(app_proc, "app")
     app_thread.join(timeout=5)
-    if app_final:
-        print(f"[batch={batch_size} run={run_idx}] app final received")
+    if app_metrics:
+        print(f"[batch={batch_size} run={run_idx}] drava metrics received")
     else:
-        print(f"[batch={batch_size} run={run_idx}] app final not found")
+        print(f"[batch={batch_size} run={run_idx}] drava metrics not found")
 
     if pub_done:
         row["publisher_frames"] = int(pub_done["frames"])
@@ -266,21 +266,20 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     else:
         raise RuntimeError(f"[batch={batch_size} run={run_idx}] failed to parse publisher final line")
 
-    if app_final:
-        row["drava_frames"] = int(app_final["frames"])
-        row["drava_e2e_s"] = float(app_final["e2e"])
-        row["stage1_infer_avg_fps"] = float(app_final["infer_fps"])
-        row["stage1_publish_avg_fps"] = float(app_final["publish_fps"])
-        row["stage1_e2e_fps"] = float(app_final["e2e_fps"])
+    if app_metrics:
+        row["drava_rx_frames"] = int(app_metrics["rx_frames"])
+        row["drava_rx_fps"] = float(app_metrics["rx_fps"])
+        row["drava_stage_avg_ms"] = float(app_metrics["stage_avg_ms"])
+        row["drava_cb_avg_ms"] = float(app_metrics["cb_avg_ms"])
         if row["total_frames"] is None:
-            row["total_frames"] = row["drava_frames"]
+            row["total_frames"] = row["drava_rx_frames"]
     else:
-        raise RuntimeError(f"[batch={batch_size} run={run_idx}] app final line not found")
+        raise RuntimeError(f"[batch={batch_size} run={run_idx}] drava metrics line not found")
 
-    if row["publisher_frames"] != row["drava_frames"]:
+    if row["publisher_frames"] != row["drava_rx_frames"]:
         raise RuntimeError(
             f"[batch={batch_size} run={run_idx}] frame mismatch: "
-            f"publisher={row['publisher_frames']} drava={row['drava_frames']}"
+            f"publisher={row['publisher_frames']} drava_rx={row['drava_rx_frames']}"
         )
 
     if gpu_samples:
@@ -310,15 +309,15 @@ def fmt(x, f="{:.2f}"):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Stage1 Infer FPS | Stage1 Publish FPS | Stage1 E2E FPS | Publisher Time (s) | Stage1 E2E (s) | GPU Avg (%) |")
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        "| Batch | Threads | Timeout (ms) | Total Frames | Publisher Avg FPS | Drava RX FPS | Drava Stage Avg (ms) | Drava Callback Avg (ms) | Publisher Time (s) | GPU Avg (%) |")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['batch']} | {r['threads']} | {r['timeout_ms']} | "
             f"{fmt(r['total_frames'], '{:.0f}')} | {fmt(r['publisher_avg_fps'])} | "
-            f"{fmt(r['stage1_infer_avg_fps'])} | {fmt(r['stage1_publish_avg_fps'])} | "
-            f"{fmt(r['stage1_e2e_fps'])} | {fmt(r['publisher_time_s'])} | "
-            f"{fmt(r['drava_e2e_s'])} | {fmt(r['gpu_avg_pct'])} |"
+            f"{fmt(r['drava_rx_fps'])} | {fmt(r['drava_stage_avg_ms'])} | "
+            f"{fmt(r['drava_cb_avg_ms'])} | {fmt(r['publisher_time_s'])} | "
+            f"{fmt(r['gpu_avg_pct'])} |"
         )
 
 
@@ -360,20 +359,20 @@ def main():
                     rows.append(row)
                     print(
                         f"  done: publisher_avg_fps={fmt(row['publisher_avg_fps'])} "
-                        f"stage1_infer_avg_fps={fmt(row['stage1_infer_avg_fps'])}"
+                        f"drava_rx_fps={fmt(row['drava_rx_fps'])}"
                     )
 
             print_table(rows)
             out_csv = run_dir / "summary.csv"
             with open(out_csv, "w", encoding="utf-8") as f:
                 f.write(
-                    "batch,threads,timeout_ms,total_frames,publisher_avg_fps,stage1_infer_avg_fps,"
-                    "stage1_publish_avg_fps,stage1_e2e_fps,publisher_time_s,drava_e2e_s,gpu_avg_pct\n")
+                    "batch,threads,timeout_ms,total_frames,publisher_avg_fps,drava_rx_fps,"
+                    "drava_stage_avg_ms,drava_cb_avg_ms,publisher_time_s,gpu_avg_pct\n")
                 for r in rows:
                     f.write(
                         f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                        f"{r['publisher_avg_fps']},{r['stage1_infer_avg_fps']},{r['stage1_publish_avg_fps']},"
-                        f"{r['stage1_e2e_fps']},{r['publisher_time_s']},{r['drava_e2e_s']},"
+                        f"{r['publisher_avg_fps']},{r['drava_rx_fps']},{r['drava_stage_avg_ms']},"
+                        f"{r['drava_cb_avg_ms']},{r['publisher_time_s']},"
                         f"{r['gpu_avg_pct']}\n"
                     )
             print(f"\nLogs and summary written to: {run_dir}")
