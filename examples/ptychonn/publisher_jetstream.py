@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from nats.aio.client import Client as NATS
 from publisher_util import (
@@ -6,8 +7,9 @@ from publisher_util import (
     make_payload_generator,
 )
 
-STREAM = "FRAMES"
-SUBJECT = "frames.raw"
+NATS_URL = os.getenv("NATS_URL", "nats://0.0.0.0:4222")
+STREAM = os.getenv("DRAVA_STREAM", "FRAMES")
+SUBJECT = os.getenv("DRAVA_SUBJECT", "frames.raw")
 EOS_PREFIX = b"DRAVA_EOS:"
 RATE_HZ, SYNTHETIC_MODE, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 1024
@@ -16,11 +18,11 @@ PUBLISH_INFLIGHT = 1024
 
 async def main():
     nc = NATS()
-    await nc.connect("nats://0.0.0.0:4222")
+    await nc.connect(NATS_URL)
     js = nc.jetstream()
 
     try:
-        await js.add_stream(name=STREAM, subjects=["frames.*"])
+        await js.add_stream(name=STREAM, subjects=[SUBJECT])
     except Exception:
         pass
 

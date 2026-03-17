@@ -132,14 +132,14 @@ int drava_transport_nats_main(drava_t *drava,
         if (s != NATS_OK)
             LOGGER_FATAL("JetStream ctx failed: %s", natsStatus_GetText(s));
 
-        // Ensure stream exists (subjects must include frames.raw)
+        // Ensure stream exists for the configured subject
         jsStreamConfig sc;
         std::memset(&sc, 0, sizeof(sc));
         sc.Name = stream_name;
-        sc.Storage = js_MemoryStorage; // js_FileStorage -> persisted by server
-                                       // to -sd dir
+        sc.Storage = js_FileStorage; // persisted by server to the JetStream
+                                     // storage directory
         sc.Retention = js_LimitsPolicy;
-        const char *subs[] = {"frames.*", nullptr};
+        const char *subs[] = {subject_name, nullptr};
         sc.Subjects = subs;
         sc.SubjectsLen = 1;
 
@@ -160,7 +160,7 @@ int drava_transport_nats_main(drava_t *drava,
         jsConsumerInfo_Destroy(ci);
 
         // Pull subscribe
-        s = js_PullSubscribe(&sub, js, subject_name, stream_name,
+        s = js_PullSubscribe(&sub, js, subject_name, durable_name,
                              /*opts*/ nullptr, /*subOpts*/ nullptr,
                              /*err*/ nullptr);
         if (s != NATS_OK)
@@ -170,12 +170,46 @@ int drava_transport_nats_main(drava_t *drava,
                     nats_url, stream_name, subject_name, durable_name);
 
         // Fetch loop — pull batches and spawn Drava tasks
-        std::vector<std::string> pending;
+        struct pending_msg_t {
+            std::string payload;
+            uint64_t stream_seq;
+            uint64_t consumer_seq;
+            bool is_eos;
+        };
+
+        std::vector<pending_msg_t> pending;
         pending.reserve(drava->callback_batch_size);
-        auto dispatch_batch = [&](std::vector<std::string> batch_payloads) {
-            if (batch_payloads.empty())
+        auto dispatch_batch = [&](std::vector<pending_msg_t> batch_msgs) {
+            if (batch_msgs.empty())
                 return;
+            bool eos_in_batch = false;
+            uint64_t first_stream_seq = 0;
+            uint64_t last_stream_seq = 0;
+            uint64_t first_consumer_seq = 0;
+            uint64_t last_consumer_seq = 0;
+            std::vector<std::string> batch_payloads;
+            batch_payloads.reserve(batch_msgs.size());
+            for (size_t bi = 0; bi < batch_msgs.size(); ++bi) {
+                const pending_msg_t &msg = batch_msgs[bi];
+                if (bi == 0) {
+                    first_stream_seq = msg.stream_seq;
+                    first_consumer_seq = msg.consumer_seq;
+                }
+                last_stream_seq = msg.stream_seq;
+                last_consumer_seq = msg.consumer_seq;
+                eos_in_batch = eos_in_batch || msg.is_eos;
+                batch_payloads.push_back(msg.payload);
+            }
+            LOGGER_INFO(
+                    "[transport-js] dispatch batch count=%zu eos=%d stream_seq=[%" PRIu64
+                    ",%" PRIu64 "] consumer_seq=[%" PRIu64 ",%" PRIu64
+                    "] stage=%s",
+                    batch_payloads.size(), eos_in_batch ? 1 : 0,
+                    first_stream_seq, last_stream_seq, first_consumer_seq,
+                    last_consumer_seq,
+                    drava_env_get_str_default("DRAVA_STAGE_NAME", "unknown"));
             if (drava->callback_serialize) {
+                drava_callback_task_begin(drava);
                 drava_dispatch_payload_batch(drava, device_global_id,
                                              batch_payloads);
                 return;
@@ -198,7 +232,7 @@ int drava_transport_nats_main(drava_t *drava,
                                        /*err*/ nullptr);
             if (s == NATS_TIMEOUT) {
                 if (!pending.empty() && callback_flush_timeout_ms > 0) {
-                    std::vector<std::string> batch_payloads =
+                    std::vector<pending_msg_t> batch_payloads =
                             std::move(pending);
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);
@@ -216,11 +250,14 @@ int drava_transport_nats_main(drava_t *drava,
 
                 // Optional: log JetStream metadata (seq numbers)
                 jsMsgMetaData *md = nullptr;
+                uint64_t stream_seq = 0;
+                uint64_t consumer_seq = 0;
                 if (natsMsg_GetMetaData(&md, msg) == NATS_OK && md != nullptr) {
+                    stream_seq = (uint64_t)md->Sequence.Stream;
+                    consumer_seq = (uint64_t)md->Sequence.Consumer;
                     LOGGER_DEBUG("[stream_seq=%" PRIu64 " consumer_seq=%" PRIu64
                                  "]",
-                                 (uint64_t)md->Sequence.Stream,
-                                 (uint64_t)md->Sequence.Consumer);
+                                 stream_seq, consumer_seq);
                     jsMsgMetaData_Destroy(md);
                 }
 
@@ -229,10 +266,19 @@ int drava_transport_nats_main(drava_t *drava,
                                  (size_t)natsMsg_GetDataLength(msg));
                 const bool is_eos =
                         drava_payload_is_eos(line.data(), line.size());
-                pending.push_back(std::move(line));
+                if (is_eos) {
+                    LOGGER_INFO("[transport-js] fetched eos stream_seq=%" PRIu64
+                                " consumer_seq=%" PRIu64
+                                " pending_before=%zu stage=%s",
+                                stream_seq, consumer_seq, pending.size(),
+                                drava_env_get_str_default("DRAVA_STAGE_NAME",
+                                                          "unknown"));
+                }
+                pending.push_back(
+                        {std::move(line), stream_seq, consumer_seq, is_eos});
 
                 if (pending.size() >= drava->callback_batch_size || is_eos) {
-                    std::vector<std::string> batch_payloads =
+                    std::vector<pending_msg_t> batch_payloads =
                             std::move(pending);
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);

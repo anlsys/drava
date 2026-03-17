@@ -39,7 +39,7 @@ def load_publish_config():
     yaml_synth = _parse_yaml_scalar(cfg, "publisher", "synthetic") if cfg else None
     yaml_num_frames = _parse_yaml_scalar(cfg, "publisher", "num_frames") if cfg else None
 
-    rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", yaml_rate or "1000"))
+    rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", yaml_rate or "0"))
     synthetic_mode = os.getenv(
         "DRAVA_PUBLISH_SYNTHETIC",
         yaml_synth if yaml_synth is not None else "0",

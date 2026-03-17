@@ -4,6 +4,79 @@
 (no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
   --batches 256 \
   --runs 1 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --rate-hz 1500
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=1499.50 stage1_fps=1295.30 stage2_fps=701.72
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 10000 | 6.67 | 1499.50 | 7.72 | 1295.30 | 4.87 | 0.47 | 14.25 | 701.72 | 14.13 | 100 | 17.46 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260317_184122
+[global] stopping nats-server
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --rate-hz 5000
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=4995.72 stage1_fps=1814.73 stage2_fps=708.00
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 10000 | 2.00 | 4995.72 | 5.51 | 1814.73 | 4.87 | 0.44 | 14.12 | 708.00 | 14.00 | 100 | 16.32 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260317_184312
+[global] stopping nats-server
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --rate-hz 10000
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=9978.74 stage1_fps=1817.24 stage2_fps=702.93
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 10000 | 1.00 | 9978.74 | 5.50 | 1817.24 | 4.85 | 0.45 | 14.23 | 702.93 | 14.10 | 100 | 16.42 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260317_184516
+[global] stopping nats-server
+
+
+python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --rate-hz 1000
+
+
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
   --duration-s 8 \
   --threads 4 \
   --timeout-ms 200 \

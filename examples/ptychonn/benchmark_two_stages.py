@@ -37,7 +37,7 @@ def parse_args():
     p.add_argument("--timeout-ms", type=int, default=500, help="DRAVA_FETCH_TIMEOUT_MS.")
     p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
     p.add_argument("--xkaapi-verbose", type=int, default=4, help="XKAAPI_VERBOSE.")
-    p.add_argument("--rate-hz", type=float, default=0.0, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
+    p.add_argument("--rate-hz", type=float, default=None, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
     p.add_argument("--num-frames", type=int, default=0, help="DRAVA_PUBLISH_NUM_FRAMES. Overrides duration mode.")
     p.add_argument("--runs", type=int, default=1, help="Runs per batch.")
     p.add_argument("--python", default=sys.executable, help="Python executable.")
@@ -136,6 +136,10 @@ def tail_text(path: Path, n: int = 40):
     return "\n".join(lines[-n:])
 
 
+def fail_with_logs(run_dir: Path, message: str):
+    raise RuntimeError(f"{message}\n--- logs ---\n{run_dir}")
+
+
 def start_nats(run_dir: Path, nats_url: str):
     host_port = nats_url.replace("nats://", "")
     if ":" not in host_port:
@@ -206,7 +210,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     root = Path(__file__).resolve().parent
     stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
         args.stage_config)
-    input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or args.input_subject
+    base_input_stream = args.input_stream
+    base_input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or args.input_subject
+    base_output_stream = args.output_stream
+    base_output_subject = args.output_subject
     nats_url = (
             args.nats_url
             or parse_stage_ingress_value(stage_config_path, "stage1", "url")
@@ -224,21 +231,38 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     env_common["DRAVA_THREADS"] = str(args.threads)
     env_common["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
 
+    run_tag = f"{run_dir.name}_b{batch_size}_r{run_idx}"
+    input_stream = f"{base_input_stream}_{run_tag}"
+    input_subject = f"{base_input_subject}.{run_tag}"
+    output_stream = f"{base_output_stream}_{run_tag}"
+    output_subject = f"{base_output_subject}.{run_tag}"
+    stage1_job_id = str(abs(hash(run_tag)) % 2147483647 or 1)
+
     env_stage1 = dict(env_common)
-    env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_b{batch_size}_r{run_idx}"
+    env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_{run_tag}"
+    env_stage1["DRAVA_STREAM"] = input_stream
+    env_stage1["DRAVA_SUBJECT"] = input_subject
+    env_stage1["DRAVA_OUTPUT_STREAM"] = output_stream
+    env_stage1["DRAVA_OUTPUT_SUBJECT"] = output_subject
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
     env_stage1["DRAVA_CALLBACK_BATCH"] = str(batch_size)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
+    env_stage1["STAGE1_JOB_ID"] = stage1_job_id
 
     env_stage2 = dict(env_common)
-    env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_b{batch_size}_r{run_idx}"
+    env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_{run_tag}"
+    env_stage2["DRAVA_STREAM"] = output_stream
+    env_stage2["DRAVA_SUBJECT"] = output_subject
     env_stage2["DRAVA_CALLBACK_BATCH"] = str(batch_size)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
 
     env_pub = dict(env_common)
     env_pub["NATS_URL"] = nats_url
+    env_pub["DRAVA_STREAM"] = input_stream
     env_pub["DRAVA_SUBJECT"] = input_subject
-    env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz if args.rate_hz != 0.0 else float(yaml_rate_hz or 0.0))
+    env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(
+        float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0)
+    )
     env_pub["DRAVA_PUBLISH_SYNTHETIC"] = "1"
     if args.num_frames > 0:
         env_pub["DRAVA_PUBLISH_NUM_FRAMES"] = str(args.num_frames)
@@ -324,9 +348,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         time.sleep(0.2)
 
     if stage1_proc.poll() is not None:
-        raise RuntimeError(f"stage1 exited early\n--- stage1 tail ---\n{tail_text(stage1_log)}")
+        fail_with_logs(run_dir, f"stage1 exited early\n--- stage1 tail ---\n{tail_text(stage1_log)}")
     if stage2_proc.poll() is not None:
-        raise RuntimeError(f"stage2 exited early\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+        fail_with_logs(run_dir, f"stage2 exited early\n--- stage2 tail ---\n{tail_text(stage2_log)}")
 
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     marks["pub_start"] = time.monotonic()
@@ -362,20 +386,21 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     stage2_thread.join(timeout=5)
 
     if not pub_done:
-        raise RuntimeError(f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
+        fail_with_logs(run_dir, f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
     if not stage1_metrics:
-        raise RuntimeError(f"stage1 drava metrics not found\n--- stage1 tail ---\n{tail_text(stage1_log)}")
+        fail_with_logs(run_dir, f"stage1 drava metrics not found\n--- stage1 tail ---\n{tail_text(stage1_log)}")
     if not stage2_metrics:
-        raise RuntimeError(f"stage2 drava metrics not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+        fail_with_logs(run_dir, f"stage2 drava metrics not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
     if not stage2_final:
-        raise RuntimeError(f"stage2 finalize line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+        fail_with_logs(run_dir, f"stage2 finalize line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
 
     pub_frames = int(pub_done["frames"])
     s1_frames = int(stage1_metrics["rx_items"])
     s2_frames = int(stage2_final["frames"])
     stitched_frames = int(stage2_final["stitched"])
     if not (pub_frames == s1_frames == s2_frames == stitched_frames):
-        raise RuntimeError(
+        fail_with_logs(
+            run_dir,
             f"frame mismatch: publisher={pub_frames} stage1_rx={s1_frames} "
             f"stage2_rx={s2_frames} stage2_final={stitched_frames}"
         )
@@ -457,35 +482,39 @@ def main():
 
     rows = []
     try:
-        for b in batches:
-            for run_idx in range(1, args.runs + 1):
-                print(f"Running batch={b} run={run_idx} ...")
-                row = run_one(args, base_env, run_dir, b, run_idx)
-                rows.append(row)
-                print(
-                    f"  done: publisher_fps={fmt(row['publisher_avg_fps'])} "
-                    f"stage1_fps={fmt(row['stage1_total_fps'])} "
-                    f"stage2_fps={fmt(row['stage2_total_fps'])}"
-                )
+        try:
+            for b in batches:
+                for run_idx in range(1, args.runs + 1):
+                    print(f"Running batch={b} run={run_idx} ...")
+                    row = run_one(args, base_env, run_dir, b, run_idx)
+                    rows.append(row)
+                    print(
+                        f"  done: publisher_fps={fmt(row['publisher_avg_fps'])} "
+                        f"stage1_fps={fmt(row['stage1_total_fps'])} "
+                        f"stage2_fps={fmt(row['stage2_total_fps'])}"
+                    )
 
-        print_table(rows)
-        out_csv = run_dir / "summary.csv"
-        with open(out_csv, "w", encoding="utf-8") as f:
-            f.write(
-                "batch,run,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
-                "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,stage1_publish_time_s,"
-                "stage2_total_time_s,stage2_total_fps,stage2_callback_time_s,stage2_side,pipeline_e2e_s\n"
-            )
-            for r in rows:
+            print_table(rows)
+            out_csv = run_dir / "summary.csv"
+            with open(out_csv, "w", encoding="utf-8") as f:
                 f.write(
-                    f"{r['batch']},{r['run']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                    f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
-                    f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
-                    f"{r['stage2_total_time_s']},{r['stage2_total_fps']},{r['stage2_callback_time_s']},"
-                    f"{r['stage2_side']},"
-                    f"{r['pipeline_e2e_s']}\n"
+                    "batch,run,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
+                    "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,stage1_publish_time_s,"
+                    "stage2_total_time_s,stage2_total_fps,stage2_callback_time_s,stage2_side,pipeline_e2e_s\n"
                 )
-        print(f"\nLogs and summary written to: {run_dir}")
+                for r in rows:
+                    f.write(
+                        f"{r['batch']},{r['run']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
+                        f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
+                        f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
+                        f"{r['stage2_total_time_s']},{r['stage2_total_fps']},{r['stage2_callback_time_s']},"
+                        f"{r['stage2_side']},"
+                        f"{r['pipeline_e2e_s']}\n"
+                    )
+            print(f"\nLogs and summary written to: {run_dir}", flush=True)
+        except BaseException:
+            print(f"\nLogs written to: {run_dir}", flush=True)
+            raise
     finally:
         if nats_proc is not None:
             print("[global] stopping nats-server")

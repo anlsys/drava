@@ -37,7 +37,7 @@ def parse_args():
                    help="DRAVA_THREADS for app.")
     p.add_argument("--xkaapi-verbose", type=int, default=4,
                    help="XKAAPI_VERBOSE for app runtime.")
-    p.add_argument("--rate-hz", type=float, default=0.0,
+    p.add_argument("--rate-hz", type=float, default=None,
                    help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
     p.add_argument("--num-frames", type=int, default=0,
                    help="DRAVA_PUBLISH_NUM_FRAMES. Overrides YAML.")
@@ -240,7 +240,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     env["DRAVA_STAGE_NAME"] = "stage1"
     env["DRAVA_INFER_BATCH"] = str(batch_size)
     env["DRAVA_CALLBACK_BATCH"] = str(batch_size)
-    env["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz if args.rate_hz != 0.0 else float(yaml_rate_hz or 0.0))
+    env["DRAVA_PUBLISH_RATE_HZ"] = str(
+        float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0)
+    )
     env["DRAVA_PUBLISH_SYNTHETIC"] = "1"
     if args.num_frames > 0:
         env["DRAVA_PUBLISH_NUM_FRAMES"] = str(args.num_frames)
