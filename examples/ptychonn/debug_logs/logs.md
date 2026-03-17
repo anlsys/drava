@@ -1,4 +1,28 @@
 ### A 100
+- Bench config + batch on drava
+```shell
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --duration-s 8 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --rate-hz 1000
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=1011.56 stage1_fps=911.24 stage2_fps=706.06
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 8100 | 8.01 | 1011.56 | 8.89 | 911.24 | 4.09 | 0.28 | 11.47 | 706.06 | 9.05 | 90 | 16.03 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260317_155653
+[global] stopping nats-server
+```
 - Bench (with config)
 ```shell
 (no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \

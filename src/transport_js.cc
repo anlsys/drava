@@ -172,6 +172,24 @@ int drava_transport_nats_main(drava_t *drava,
         // Fetch loop — pull batches and spawn Drava tasks
         std::vector<std::string> pending;
         pending.reserve(drava->callback_batch_size);
+        auto dispatch_batch = [&](std::vector<std::string> batch_payloads) {
+            if (batch_payloads.empty())
+                return;
+            if (drava->callback_serialize) {
+                drava_dispatch_payload_batch(drava, device_global_id,
+                                             batch_payloads);
+                return;
+            }
+            drava_callback_task_begin(drava);
+            drava->runtime.team_task_spawn(
+                    team,
+                    [drava, device_global_id,
+                     batch_payloads = std::move(batch_payloads)](task_t *task) {
+                        (void)task;
+                        drava_dispatch_payload_batch(drava, device_global_id,
+                                                     batch_payloads);
+                    });
+        };
 
         while (true) {
             natsMsgList list = {0};
@@ -184,16 +202,7 @@ int drava_transport_nats_main(drava_t *drava,
                             std::move(pending);
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);
-                    drava_callback_task_begin(drava);
-                    drava->runtime.team_task_spawn(
-                            team, [drava, device_global_id,
-                                   batch_payloads = std::move(batch_payloads)](
-                                          task_t *task) {
-                                (void)task;
-                                drava_dispatch_payload_batch(drava,
-                                                             device_global_id,
-                                                             batch_payloads);
-                            });
+                    dispatch_batch(std::move(batch_payloads));
                 }
                 // idle; allow other threads to progress
                 continue;
@@ -227,17 +236,7 @@ int drava_transport_nats_main(drava_t *drava,
                             std::move(pending);
                     pending.clear();
                     pending.reserve(drava->callback_batch_size);
-
-                    drava_callback_task_begin(drava);
-                    drava->runtime.team_task_spawn(
-                            team, [drava, device_global_id,
-                                   batch_payloads = std::move(batch_payloads)](
-                                          task_t *task) {
-                                (void)task;
-                                drava_dispatch_payload_batch(drava,
-                                                             device_global_id,
-                                                             batch_payloads);
-                            });
+                    dispatch_batch(std::move(batch_payloads));
                 }
 
                 // Ack after enqueue to achieve at-least-once semantics

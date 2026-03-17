@@ -126,7 +126,11 @@ int drava_transport_socket_main(drava_t *drava,
             std::vector<std::string> batch_payloads = std::move(pending);
             pending.clear();
             pending.reserve(drava->callback_batch_size);
-
+            if (drava->callback_serialize) {
+                drava_dispatch_payload_batch(drava, device_global_id,
+                                             batch_payloads);
+                return;
+            }
             drava_callback_task_begin(drava);
             drava->runtime.team_task_spawn(
                     team,

@@ -38,7 +38,7 @@ def parse_args():
     p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
     p.add_argument("--xkaapi-verbose", type=int, default=4, help="XKAAPI_VERBOSE.")
     p.add_argument("--rate-hz", type=float, default=0.0, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
-    p.add_argument("--duration-s", type=float, default=10.0, help="DRAVA_PUBLISH_DURATION_S.")
+    p.add_argument("--num-frames", type=int, default=0, help="DRAVA_PUBLISH_NUM_FRAMES. Overrides duration mode.")
     p.add_argument("--runs", type=int, default=1, help="Runs per batch.")
     p.add_argument("--python", default=sys.executable, help="Python executable.")
     p.add_argument("--reuse-nats", action="store_true", help="Use existing NATS server.")
@@ -91,6 +91,29 @@ def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
             in_ingress = False
             continue
         if in_ingress and indent >= 6 and ":" in body:
+            key, value = body.split(":", 1)
+            if key.strip() == key_name:
+                return value.strip().strip("\"'")
+    return None
+
+
+def parse_publisher_value(path: Path, key_name: str):
+    if not path.exists():
+        return None
+    in_publisher = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if indent == 0 and body == "publisher:":
+            in_publisher = True
+            continue
+        if indent == 0 and body.endswith(":") and body != "publisher:":
+            in_publisher = False
+            continue
+        if in_publisher and indent >= 2 and ":" in body:
             key, value = body.split(":", 1)
             if key.strip() == key_name:
                 return value.strip().strip("\"'")
@@ -189,6 +212,12 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
             or parse_stage_ingress_value(stage_config_path, "stage1", "url")
             or "nats://127.0.0.1:4222"
     )
+    yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
+    yaml_rate_hz = parse_publisher_value(stage_config_path, "rate_hz")
+    configured_num_frames = (
+        args.num_frames if args.num_frames > 0
+        else (int(yaml_num_frames) if yaml_num_frames is not None else 0)
+    )
 
     env_common = dict(base_env)
     env_common["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
@@ -209,9 +238,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     env_pub = dict(env_common)
     env_pub["NATS_URL"] = nats_url
     env_pub["DRAVA_SUBJECT"] = input_subject
-    env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz)
+    env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(args.rate_hz if args.rate_hz != 0.0 else float(yaml_rate_hz or 0.0))
     env_pub["DRAVA_PUBLISH_SYNTHETIC"] = "1"
-    env_pub["DRAVA_PUBLISH_DURATION_S"] = str(args.duration_s)
+    if args.num_frames > 0:
+        env_pub["DRAVA_PUBLISH_NUM_FRAMES"] = str(args.num_frames)
+    elif yaml_num_frames is not None:
+        env_pub["DRAVA_PUBLISH_NUM_FRAMES"] = str(int(yaml_num_frames))
+    else:
+        raise RuntimeError(
+            "No publisher frame count configured. Set --num-frames or "
+            "publisher.num_frames in the stage config YAML."
+        )
 
     stage1_log = run_dir / f"app_stage1_b{batch_size}_r{run_idx}.log"
     stage2_log = run_dir / f"app_stage2_b{batch_size}_r{run_idx}.log"
@@ -305,7 +342,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log, on_pub_line), daemon=True)
     pub_thread.start()
 
-    pub_proc.wait(timeout=max(120, int(args.duration_s * 6)))
+    pub_timeout_s = max(120, int(max(1, configured_num_frames) / 1000) + 120)
+    pub_proc.wait(timeout=pub_timeout_s)
     pub_thread.join(timeout=5)
 
     end_wait = time.time() + args.app_timeout_s

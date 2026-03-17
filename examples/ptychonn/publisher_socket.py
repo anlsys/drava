@@ -13,7 +13,6 @@ import time
 import os
 import struct
 from publisher_util import (
-    compute_square_completion,
     load_publish_config,
     make_payload_generator,
 )
@@ -23,7 +22,7 @@ FIFO_PATH = "/tmp/drava_in"
 # target framerate from env:
 #   unset or <= 0 => max speed (no pacing)
 #   e.g. export DRAVA_PUBLISH_RATE_HZ=1000
-RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
+RATE_HZ, SYNTHETIC_MODE, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 256
 EOS_PREFIX = b"DRAVA_EOS:"
 
@@ -48,10 +47,7 @@ def main():
     print(f"Opening FIFO {FIFO_PATH} for writing...")
     with open(FIFO_PATH, "wb") as f:
         sent_count = 0
-        while True:
-            elapsed = time.perf_counter() - t0
-            if elapsed >= RUN_SECONDS:
-                break
+        while sent_count < TARGET_FRAMES:
             source_idx = sent_count
             payload = next_payload(source_idx)
             f.write(struct.pack("!I", len(payload)))
@@ -86,22 +82,11 @@ def main():
                     time.sleep(sleep_s)
                 next_t += period
 
-        n_raw = sent_count
-        side, n_square, extra = compute_square_completion(n_raw)
-        print(
-            f"Square completion: n_raw={n_raw} side={side} n_square={n_square} extra={extra}"
-        )
-        for _ in range(extra):
-            source_idx = sent_count
-            payload = next_payload(source_idx)
-            f.write(struct.pack("!I", len(payload)))
-            f.write(payload)
-            f.flush()
-            sent_count += 1
-            win_count += 1
+        n_frames = sent_count
+        print(f"Fixed-frame completion: n_frames={n_frames}")
 
         # End-of-stream marker with sent frame count
-        eos_payload = EOS_PREFIX + str(n_square).encode("ascii")
+        eos_payload = EOS_PREFIX + str(n_frames).encode("ascii")
         f.write(struct.pack("!I", len(eos_payload)))
         f.write(eos_payload)
         f.flush()

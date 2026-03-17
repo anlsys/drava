@@ -2,7 +2,6 @@ import asyncio
 import time
 from nats.aio.client import Client as NATS
 from publisher_util import (
-    compute_square_completion,
     load_publish_config,
     make_payload_generator,
 )
@@ -10,7 +9,7 @@ from publisher_util import (
 STREAM = "FRAMES"
 SUBJECT = "frames.raw"
 EOS_PREFIX = b"DRAVA_EOS:"
-RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
+RATE_HZ, SYNTHETIC_MODE, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 1024
 PUBLISH_INFLIGHT = 1024
 
@@ -49,10 +48,7 @@ async def main():
         if acks:
             last_ack_seq = acks[-1].seq
 
-    while True:
-        elapsed = time.perf_counter() - t0
-        if elapsed >= RUN_SECONDS:
-            break
+    while sent_count < TARGET_FRAMES:
         source_idx = sent_count
         payload = next_payload(source_idx)
         pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
@@ -86,24 +82,13 @@ async def main():
                 await asyncio.sleep(sleep_s)
             next_t += period
 
-    n_raw = sent_count
-    side, n_square, extra = compute_square_completion(n_raw)
-    print(
-        f"Square completion: n_raw={n_raw} side={side} n_square={n_square} extra={extra}"
-    )
-    for _ in range(extra):
-        source_idx = sent_count
-        payload = next_payload(source_idx)
-        pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
-        if len(pending) >= inflight_limit:
-            await flush_pending()
-        sent_count += 1
-        win_count += 1
+    n_frames = sent_count
+    print(f"Fixed-frame completion: n_frames={n_frames}")
 
     await flush_pending()
 
     # End-of-stream marker with sent frame count
-    eos_payload = EOS_PREFIX + str(n_square).encode("ascii")
+    eos_payload = EOS_PREFIX + str(n_frames).encode("ascii")
     eos_ack = await js.publish(SUBJECT, eos_payload)
     await nc.drain()
     t_end = time.perf_counter()

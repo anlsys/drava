@@ -1,6 +1,11 @@
 pipeline:
   name: ptychonn_two_stage
 
+publisher:
+  synthetic: true
+  num_frames: 10000
+  rate_hz: 1000
+
 stages:
   - name: stage1
     ingress:

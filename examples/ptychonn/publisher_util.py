@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import numpy as np
 
 DATA_DIR = "PtychoNN_data_partial"
@@ -7,23 +8,55 @@ SYNTHETIC_SEED = 56465
 SYNTHETIC_POOL_SIZE = 3600
 
 
+def _parse_yaml_scalar(path: Path, section: str, key_name: str):
+    if not path.exists():
+        return None
+    in_section = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if indent == 0 and body == f"{section}:":
+            in_section = True
+            continue
+        if indent == 0 and body.endswith(":") and body != f"{section}:":
+            in_section = False
+            continue
+        if in_section and indent >= 2 and ":" in body:
+            key, value = body.split(":", 1)
+            if key.strip() == key_name:
+                return value.strip().strip("\"'")
+    return None
+
+
 def load_publish_config():
-    rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", "1000"))
-    synthetic_mode = os.getenv("DRAVA_PUBLISH_SYNTHETIC", "0") == "1"
-    run_seconds = float(os.getenv("DRAVA_PUBLISH_DURATION_S", "30"))
-    print(f"DRAVA_PUBLISH_RATE_HZ: {rate_hz},"
-          f"DRAVA_PUBLISH_SYNTHETIC: {synthetic_mode},"
-          f"DRAVA_PUBLISH_DURATION_S: {run_seconds}")
-    return rate_hz, synthetic_mode, run_seconds
+    cfg_path = os.getenv("DRAVA_STAGE_CONFIG", "")
+    cfg = Path(cfg_path) if cfg_path else None
 
+    yaml_rate = _parse_yaml_scalar(cfg, "publisher", "rate_hz") if cfg else None
+    yaml_synth = _parse_yaml_scalar(cfg, "publisher", "synthetic") if cfg else None
+    yaml_num_frames = _parse_yaml_scalar(cfg, "publisher", "num_frames") if cfg else None
 
-def compute_square_completion(n_raw):
-    if n_raw <= 0:
-        return 1, 1, 1
-    side = int(np.ceil(np.sqrt(n_raw)))
-    n_square = side * side
-    extra = n_square - n_raw
-    return side, n_square, extra
+    rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", yaml_rate or "1000"))
+    synthetic_mode = os.getenv(
+        "DRAVA_PUBLISH_SYNTHETIC",
+        yaml_synth if yaml_synth is not None else "0",
+    ) == "1"
+    num_frames_raw = os.getenv("DRAVA_PUBLISH_NUM_FRAMES", yaml_num_frames or "")
+    if not num_frames_raw:
+        raise RuntimeError(
+            "Publisher requires a fixed frame count. Set DRAVA_PUBLISH_NUM_FRAMES "
+            "or publisher.num_frames in the stage config YAML."
+        )
+    num_frames = int(num_frames_raw)
+    print(
+        f"DRAVA_PUBLISH_RATE_HZ: {rate_hz},"
+        f"DRAVA_PUBLISH_SYNTHETIC: {synthetic_mode},"
+        f"DRAVA_PUBLISH_NUM_FRAMES: {num_frames}"
+    )
+    return rate_hz, synthetic_mode, num_frames
 
 
 def make_payload_generator(synthetic_mode):
