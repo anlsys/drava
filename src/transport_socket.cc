@@ -111,9 +111,11 @@ int drava_transport_socket_main(drava_t *drava,
 
         int flush_timeout_ms =
                 drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
+        int callback_flush_timeout_ms = drava->callback_flush_timeout_ms;
         LOGGER_INFO(
-                "Socket fetch config: flush_timeout_ms=%d callback_batch=%zu",
-                flush_timeout_ms, drava->callback_batch_size);
+                "Socket fetch config: read_timeout_ms=%d callback_batch=%zu callback_flush_timeout_ms=%d",
+                flush_timeout_ms, drava->callback_batch_size,
+                callback_flush_timeout_ms);
 
         std::vector<std::string> pending;
         pending.reserve(drava->callback_batch_size);
@@ -147,6 +149,8 @@ int drava_transport_socket_main(drava_t *drava,
                 tv.tv_usec = (flush_timeout_ms % 1000) * 1000;
                 int sel = select(sockfd + 1, &rfds, nullptr, nullptr, &tv);
                 if (sel == 0) {
+                    if (callback_flush_timeout_ms <= 0)
+                        continue;
                     flush_pending();
                     continue;
                 }
@@ -169,9 +173,11 @@ int drava_transport_socket_main(drava_t *drava,
             if (!read_exact(sockfd, payload.data(), payload.size()))
                 break;
 
+            const bool is_eos =
+                    drava_payload_is_eos(payload.data(), payload.size());
             pending.push_back(std::move(payload));
 
-            if (pending.size() < drava->callback_batch_size)
+            if (!is_eos && pending.size() < drava->callback_batch_size)
                 continue;
 
             flush_pending();

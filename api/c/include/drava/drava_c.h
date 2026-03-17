@@ -78,21 +78,20 @@ typedef struct drava_frame_batch_t {
 
 typedef struct drava_stats_t {
     uint64_t rx_msgs;
-    uint64_t rx_frames;
+    uint64_t rx_items;
     uint64_t rx_bytes;
     uint64_t tx_msgs;
     uint64_t tx_bytes;
     uint64_t callback_batches;
-    uint64_t callback_frames;
     uint64_t callback_ns_sum;
     uint64_t callback_ns_max;
+    uint64_t publish_ns_sum;
+    uint64_t publish_ns_max;
     uint64_t stage_latency_samples;
     uint64_t stage_latency_ns_sum;
     uint64_t stage_latency_ns_max;
-    uint64_t rx_first_ns;
-    uint64_t rx_last_ns;
-    uint64_t tx_first_ns;
-    uint64_t tx_last_ns;
+    uint64_t first_rx_ns;
+    uint64_t last_stage_ns;
 } drava_stats_t;
 
 /** Batch routine type */
@@ -115,6 +114,12 @@ int drava_log(const drava_verbose_t verbose_level, const char *msg);
 int drava_stats_snapshot(drava_stats_t *out_stats);
 
 int drava_stats_reset(void);
+
+int drava_set_callback_batch(size_t batch_size);
+
+int drava_set_callback_flush_timeout_ms(int timeout_ms);
+
+int drava_set_callback_serialize(int enabled);
 
 #ifdef __cplusplus
 }

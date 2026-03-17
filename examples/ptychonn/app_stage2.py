@@ -1,4 +1,3 @@
-import threading
 import traceback
 
 import drava
@@ -51,7 +50,6 @@ class Stage2Accumulator:
         self.total_received = 0
         self.total_unique_received = 0
         self.finalized = False
-        self.lock = threading.Lock()
 
     def reset_job(self, job_id: int) -> None:
         self.current_job_id = job_id
@@ -173,34 +171,12 @@ class Stage2Accumulator:
 
         stitched_amp = stitch_component(self.amp_pred_all[:used], tst_side=stitch_side)
         stitched_phi = stitch_component(self.phi_pred_all[:used], tst_side=stitch_side)
-        stats = drava.stats_snapshot_py()
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
             f"[stage2-final] frames={self.expected_frames} stitched_frames={used} "
-            f"stitch_side={stitch_side} amp_shape={stitched_amp.shape} "
-            f"phi_shape={stitched_phi.shape}",
+            f"stitch_side={stitch_side} "
+            f"amp_shape={stitched_amp.shape} phi_shape={stitched_phi.shape}",
         )
-        if stats.get("rc", drava.DRAVA_ERROR) == drava.DRAVA_SUCCESS:
-            rx_frames = int(stats.get("rx_frames", 0))
-            rx_first_ns = int(stats.get("rx_first_ns", 0))
-            rx_last_ns = int(stats.get("rx_last_ns", 0))
-            rx_fps = (
-                (rx_frames * 1.0e9) / (rx_last_ns - rx_first_ns)
-                if rx_frames > 0 and rx_last_ns > rx_first_ns
-                else 0.0
-            )
-            stage_samples = int(stats.get("stage_latency_samples", 0))
-            stage_ns_sum = int(stats.get("stage_latency_ns_sum", 0))
-            stage_avg_ms = (
-                (stage_ns_sum / stage_samples) / 1.0e6
-                if stage_samples > 0
-                else 0.0
-            )
-            drava.log(
-                drava.DRAVA_VERBOSE_INFO,
-                f"[stage2-runtime] rx_frames={rx_frames} rx_fps={rx_fps:.2f} "
-                f"stage_avg_ms={stage_avg_ms:.3f}",
-            )
         self.finalized = True
 
 
@@ -209,17 +185,15 @@ _acc = Stage2Accumulator()
 
 def func(frames) -> None:
     try:
-        with _acc.lock:
-            for raw in frames:
-                if raw.startswith(EOS_PREFIX):
-                    try:
-                        eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
-                    except ValueError:
-                        drava.log(drava.DRAVA_VERBOSE_WARN, f"[stage2] Ignoring malformed EOS marker: {raw!r}")
-                        continue
-                    _acc.on_eos(eos_frames)
-                else:
-                    _acc.consume(raw)
+        for raw in frames:
+            if raw.startswith(EOS_PREFIX):
+                try:
+                    eos_frames = int(raw[len(EOS_PREFIX):].decode("ascii"))
+                except ValueError:
+                    raise ValueError(f"[stage2] malformed EOS marker: {raw!r}")
+                _acc.on_eos(eos_frames)
+            else:
+                _acc.consume(raw)
     except Exception as exc:
         drava.log(drava.DRAVA_VERBOSE_ERROR, f"[stage2] callback exception: {exc}")
         drava.log(drava.DRAVA_VERBOSE_ERROR, traceback.format_exc())
@@ -234,6 +208,8 @@ if rc != drava.DRAVA_SUCCESS:
     )
 
 try:
+    drava.set_callback_serialize(1)
+    drava.set_callback_flush_timeout_ms(0)
     drava.log(drava.DRAVA_VERBOSE_INFO, "[stage2] registering callback")
     drava.register_routine_py(func)
     drava.log(drava.DRAVA_VERBOSE_INFO, "[stage2] entering listen loop")

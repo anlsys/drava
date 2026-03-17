@@ -108,11 +108,12 @@ int drava_transport_nats_main(drava_t *drava,
         int fetch_batch = drava_env_get_int_default("DRAVA_JS_FETCH_BATCH", 8);
         int fetch_timeout_ms =
                 drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
+        int callback_flush_timeout_ms = drava->callback_flush_timeout_ms;
 
         LOGGER_INFO(
-                "JetStream fetch config: batch=%d timeout_ms=%d callback_batch=%zu",
+                "JetStream fetch config: batch=%d timeout_ms=%d callback_batch=%zu callback_flush_timeout_ms=%d",
                 fetch_batch, fetch_timeout_ms,
-                (size_t)drava->callback_batch_size);
+                (size_t)drava->callback_batch_size, callback_flush_timeout_ms);
 
         natsStatus s;
         natsConnection *nc = nullptr;
@@ -178,7 +179,7 @@ int drava_transport_nats_main(drava_t *drava,
                                        /*timeout ms*/ fetch_timeout_ms,
                                        /*err*/ nullptr);
             if (s == NATS_TIMEOUT) {
-                if (!pending.empty()) {
+                if (!pending.empty() && callback_flush_timeout_ms > 0) {
                     std::vector<std::string> batch_payloads =
                             std::move(pending);
                     pending.clear();
@@ -217,9 +218,11 @@ int drava_transport_nats_main(drava_t *drava,
                 // Extract payload bytes
                 std::string line(natsMsg_GetData(msg),
                                  (size_t)natsMsg_GetDataLength(msg));
+                const bool is_eos =
+                        drava_payload_is_eos(line.data(), line.size());
                 pending.push_back(std::move(line));
 
-                if (pending.size() >= drava->callback_batch_size) {
+                if (pending.size() >= drava->callback_batch_size || is_eos) {
                     std::vector<std::string> batch_payloads =
                             std::move(pending);
                     pending.clear();

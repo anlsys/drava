@@ -58,12 +58,18 @@ static void *drava_main(team_t *team, thread_t *thread)
 int drava_t::init(drava_transport_t transport_type)
 {
     /* Remember which backend to use (socket vs NATS) */
-    int cb = drava_env_get_int_default("DRAVA_INFER_BATCH", 128);
+    int cb = drava_env_get_int_default("DRAVA_CALLBACK_BATCH", 128);
+    int flush_timeout_ms =
+            drava_env_get_int_default("DRAVA_CALLBACK_FLUSH_TIMEOUT_MS", 0);
+    int serialize_callbacks =
+            drava_env_get_int_default("DRAVA_CALLBACK_SERIALIZE", 1);
     this->transport_type = transport_type;
     this->runtime.init();
     this->frame_routine = NULL;
     this->frame_routine_user_data = NULL;
     this->callback_batch_size = (size_t)cb;
+    this->callback_flush_timeout_ms = flush_timeout_ms;
+    this->callback_serialize = (serialize_callbacks != 0);
     this->next_batch_id.store(1);
     this->next_frame_id.store(1);
     this->stats_reset();
@@ -145,6 +151,7 @@ int drava_t::publish(const void *data, size_t data_len)
     if (data == NULL || data_len == 0)
         return DRAVA_EINVAL;
 
+    const uint64_t publish_t0 = drava_monotonic_ns();
     int rc = DRAVA_EINVAL;
     switch (this->transport_type) {
     case DRAVA_TRANSPORT_SOCKET:
@@ -166,12 +173,14 @@ int drava_t::publish(const void *data, size_t data_len)
     }
 
     if (rc == DRAVA_SUCCESS) {
-        drava_stats_record_tx(this, data_len);
+        const uint64_t publish_t1 = drava_monotonic_ns();
+        drava_stats_record_tx(this, data_len, publish_t1 - publish_t0,
+                              publish_t1);
         const uint64_t recv_ts_ns = drava_callback_context_recv_ts_ns();
         if (recv_ts_ns > 0) {
-            const uint64_t now_ns = drava_monotonic_ns();
-            if (now_ns >= recv_ts_ns)
-                drava_stats_record_stage_latency_ns(this, now_ns - recv_ts_ns);
+            if (publish_t1 >= recv_ts_ns)
+                drava_stats_record_stage_latency_ns(this,
+                                                    publish_t1 - recv_ts_ns);
         }
         if (drava_payload_is_eos(data, data_len)) {
             this->pending_tx_eos_snapshot.store(1);
@@ -195,44 +204,64 @@ int drava_t::stats_snapshot(drava_stats_t *out_stats) const
     if (out_stats == NULL)
         return DRAVA_EINVAL;
     out_stats->rx_msgs = this->rx_msgs.load();
-    out_stats->rx_frames = this->rx_frames.load();
+    out_stats->rx_items = this->rx_items.load();
     out_stats->rx_bytes = this->rx_bytes.load();
     out_stats->tx_msgs = this->tx_msgs.load();
     out_stats->tx_bytes = this->tx_bytes.load();
     out_stats->callback_batches = this->callback_batches.load();
-    out_stats->callback_frames = this->callback_frames.load();
     out_stats->callback_ns_sum = this->callback_ns_sum.load();
     out_stats->callback_ns_max = this->callback_ns_max.load();
+    out_stats->publish_ns_sum = this->publish_ns_sum.load();
+    out_stats->publish_ns_max = this->publish_ns_max.load();
     out_stats->stage_latency_samples = this->stage_latency_samples.load();
     out_stats->stage_latency_ns_sum = this->stage_latency_ns_sum.load();
     out_stats->stage_latency_ns_max = this->stage_latency_ns_max.load();
-    out_stats->rx_first_ns = this->rx_first_ns.load();
-    out_stats->rx_last_ns = this->rx_last_ns.load();
-    out_stats->tx_first_ns = this->tx_first_ns.load();
-    out_stats->tx_last_ns = this->tx_last_ns.load();
+    out_stats->first_rx_ns = this->first_rx_ns.load();
+    out_stats->last_stage_ns = this->last_stage_ns.load();
     return DRAVA_SUCCESS;
 }
 
 int drava_t::stats_reset(void)
 {
     this->rx_msgs.store(0);
-    this->rx_frames.store(0);
+    this->rx_items.store(0);
     this->rx_bytes.store(0);
     this->tx_msgs.store(0);
     this->tx_bytes.store(0);
     this->callback_batches.store(0);
-    this->callback_frames.store(0);
     this->callback_ns_sum.store(0);
     this->callback_ns_max.store(0);
+    this->publish_ns_sum.store(0);
+    this->publish_ns_max.store(0);
     this->stage_latency_samples.store(0);
     this->stage_latency_ns_sum.store(0);
     this->stage_latency_ns_max.store(0);
-    this->rx_first_ns.store(0);
-    this->rx_last_ns.store(0);
-    this->tx_first_ns.store(0);
-    this->tx_last_ns.store(0);
+    this->first_rx_ns.store(0);
+    this->last_stage_ns.store(0);
     this->pending_callback_tasks.store(0);
     this->pending_rx_eos_snapshot.store(0);
     this->pending_tx_eos_snapshot.store(0);
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::set_callback_batch(size_t batch_size)
+{
+    if (batch_size == 0)
+        return DRAVA_EINVAL;
+    this->callback_batch_size = batch_size;
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::set_callback_flush_timeout_ms(int timeout_ms)
+{
+    if (timeout_ms < 0)
+        return DRAVA_EINVAL;
+    this->callback_flush_timeout_ms = timeout_ms;
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::set_callback_serialize(bool enabled)
+{
+    this->callback_serialize = enabled;
     return DRAVA_SUCCESS;
 }

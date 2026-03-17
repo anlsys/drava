@@ -63,3 +63,18 @@ int drava_stats_reset(void)
 {
     return drava.stats_reset();
 }
+
+int drava_set_callback_batch(size_t batch_size)
+{
+    return drava.set_callback_batch(batch_size);
+}
+
+int drava_set_callback_flush_timeout_ms(int timeout_ms)
+{
+    return drava.set_callback_flush_timeout_ms(timeout_ms);
+}
+
+int drava_set_callback_serialize(int enabled)
+{
+    return drava.set_callback_serialize(enabled != 0);
+}

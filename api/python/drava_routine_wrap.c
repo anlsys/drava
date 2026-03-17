@@ -109,23 +109,22 @@ PyObject *drava_stats_snapshot_py(void)
         return Py_BuildValue("{s:i}", "rc", rc);
 
     return Py_BuildValue(
-            "{s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:i}",
-            "rx_msgs", (unsigned long long)s.rx_msgs, "rx_frames",
-            (unsigned long long)s.rx_frames, "rx_bytes",
+            "{s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:i}",
+            "rx_msgs", (unsigned long long)s.rx_msgs, "rx_items",
+            (unsigned long long)s.rx_items, "rx_bytes",
             (unsigned long long)s.rx_bytes, "tx_msgs",
             (unsigned long long)s.tx_msgs, "tx_bytes",
             (unsigned long long)s.tx_bytes, "callback_batches",
-            (unsigned long long)s.callback_batches, "callback_frames",
-            (unsigned long long)s.callback_frames, "callback_ns_sum",
+            (unsigned long long)s.callback_batches, "callback_ns_sum",
             (unsigned long long)s.callback_ns_sum, "callback_ns_max",
             (unsigned long long)s.callback_ns_max, "stage_latency_samples",
             (unsigned long long)s.stage_latency_samples, "stage_latency_ns_sum",
             (unsigned long long)s.stage_latency_ns_sum, "stage_latency_ns_max",
-            (unsigned long long)s.stage_latency_ns_max, "rx_first_ns",
-            (unsigned long long)s.rx_first_ns, "rx_last_ns",
-            (unsigned long long)s.rx_last_ns, "tx_first_ns",
-            (unsigned long long)s.tx_first_ns, "tx_last_ns",
-            (unsigned long long)s.tx_last_ns, "rc", rc);
+            (unsigned long long)s.stage_latency_ns_max, "first_rx_ns",
+            (unsigned long long)s.first_rx_ns, "last_stage_ns",
+            (unsigned long long)s.last_stage_ns, "publish_ns_sum",
+            (unsigned long long)s.publish_ns_sum, "publish_ns_max",
+            (unsigned long long)s.publish_ns_max, "rc", rc);
 }
 
 int drava_stats_reset_py(void)

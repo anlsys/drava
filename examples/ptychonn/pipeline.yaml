@@ -10,6 +10,7 @@ stages:
       subject: frames.raw
       durable: drava_stage1
       fetch_batch: 256
+      callback_batch: 256
       fetch_timeout_ms: 200
     egress:
       stream: PREDICTIONS
@@ -23,4 +24,5 @@ stages:
       subject: frames.stage1
       durable: drava_stage2
       fetch_batch: 256
+      callback_batch: 256
       fetch_timeout_ms: 500

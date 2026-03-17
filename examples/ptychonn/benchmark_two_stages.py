@@ -10,25 +10,24 @@ import threading
 import time
 from pathlib import Path
 
+DRAVA_METRICS_RE = re.compile(
+    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
+    r"rx_items=(?P<rx_items>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
+    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
+    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
+    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_item_fps=(?P<rx_item_fps>[0-9.]+)\s+"
+    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+cb_total_s=(?P<cb_total_s>[0-9.]+)\s+"
+    r"publish_total_s=(?P<publish_total_s>[0-9.]+)\s+compute_total_s=(?P<compute_total_s>[0-9.]+)\s+"
+    r"stage_total_s=(?P<stage_total_s>[0-9.]+)\s+stage_total_fps=(?P<stage_total_fps>[0-9.]+)\s+"
+    r"stage=(?P<stage>\S+)"
+)
 PUB_DONE_RE = re.compile(
     r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
     r"\(avg_fps=(?P<fps>[0-9.]+)\)"
 )
-STAGE1_FINAL_RE = re.compile(
-    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
-    r"rx_frames=(?P<rx_frames>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
-    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
-    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
-    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_fps=(?P<rx_fps>[0-9.]+)\s+"
-    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+stage=(?P<stage>\S+)"
-)
 STAGE2_FINAL_RE = re.compile(
     r"\[stage2-final\]\s+frames=(?P<frames>\d+)\s+stitched_frames=(?P<stitched>\d+)\s+"
     r"stitch_side=(?P<side>\d+)"
-)
-STAGE2_RUNTIME_RE = re.compile(
-    r"\[stage2-runtime\]\s+rx_frames=(?P<rx_frames>\d+)\s+rx_fps=(?P<rx_fps>[0-9.]+)\s+"
-    r"stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)"
 )
 
 
@@ -46,7 +45,8 @@ def parse_args():
     p.add_argument("--nats-url", default="", help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs_two_stages", help="Output dir under examples/ptychonn.")
-    p.add_argument("--app-timeout-s", type=float, default=240.0, help="Wait for final lines after publisher exits.")
+    p.add_argument("--app-timeout-s", type=float, default=240.0,
+                   help="Wait for runtime/final logs after publisher exits.")
     p.add_argument("--input-stream", default="FRAMES", help="Publisher->Stage1 stream.")
     p.add_argument("--input-subject", default="frames.raw", help="Publisher->Stage1 subject.")
     p.add_argument("--output-stream", default="PREDICTIONS", help="Stage1->Stage2 stream.")
@@ -169,10 +169,13 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "total_frames": None,
         "publisher_avg_fps": None,
         "publisher_time_s": None,
-        "stage1_rx_fps": None,
-        "stage1_stage_avg_ms": None,
-        "stage2_rx_fps": None,
-        "stage2_stage_avg_ms": None,
+        "stage1_total_fps": None,
+        "stage1_total_time_s": None,
+        "stage1_compute_time_s": None,
+        "stage1_publish_time_s": None,
+        "stage2_total_fps": None,
+        "stage2_total_time_s": None,
+        "stage2_callback_time_s": None,
         "stage2_side": None,
         "pipeline_e2e_s": None,
     }
@@ -195,10 +198,12 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     env_stage1 = dict(env_common)
     env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_b{batch_size}_r{run_idx}"
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
+    env_stage1["DRAVA_CALLBACK_BATCH"] = str(batch_size)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
 
     env_stage2 = dict(env_common)
     env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_b{batch_size}_r{run_idx}"
+    env_stage2["DRAVA_CALLBACK_BATCH"] = str(batch_size)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
 
     env_pub = dict(env_common)
@@ -214,7 +219,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     stage1_ready = threading.Event()
     stage2_ready = threading.Event()
-    stage1_final = {}
+    stage1_metrics = {}
+    stage2_metrics = {}
     stage2_final = {}
     pub_done = {}
     marks = {"pub_start": None, "stage2_final": None}
@@ -222,20 +228,24 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     def on_stage1_line(line: str):
         if "JetStream ready:" in line:
             stage1_ready.set()
-        m = STAGE1_FINAL_RE.search(line)
-        if m and m.group("reason") == "tx_eos":
-            stage1_final.update(m.groupdict())
+        m = DRAVA_METRICS_RE.search(line)
+        if m:
+            gd = m.groupdict()
+            if gd.get("reason") in ("rx_eos", "tx_eos"):
+                stage1_metrics.update(gd)
 
     def on_stage2_line(line: str):
         if "JetStream ready:" in line:
             stage2_ready.set()
+        m = DRAVA_METRICS_RE.search(line)
+        if m:
+            gd = m.groupdict()
+            if gd.get("reason") in ("rx_eos", "tx_eos"):
+                stage2_metrics.update(gd)
         m = STAGE2_FINAL_RE.search(line)
         if m:
             stage2_final.update(m.groupdict())
             marks["stage2_final"] = time.monotonic()
-        m = STAGE2_RUNTIME_RE.search(line)
-        if m:
-            stage2_final.update(m.groupdict())
 
     def on_pub_line(line: str):
         m = PUB_DONE_RE.search(line)
@@ -300,9 +310,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     end_wait = time.time() + args.app_timeout_s
     while time.time() < end_wait and (
-            not stage1_final
-            or "frames" not in stage2_final
-            or "rx_frames" not in stage2_final
+            not stage1_metrics
+            or not stage2_metrics
+            or not stage2_final
     ):
         if stage1_proc.poll() is not None and stage2_proc.poll() is not None:
             break
@@ -315,17 +325,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     if not pub_done:
         raise RuntimeError(f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
-    if not stage1_final:
+    if not stage1_metrics:
         raise RuntimeError(f"stage1 drava metrics not found\n--- stage1 tail ---\n{tail_text(stage1_log)}")
-    if "frames" not in stage2_final:
+    if not stage2_metrics:
+        raise RuntimeError(f"stage2 drava metrics not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+    if not stage2_final:
         raise RuntimeError(f"stage2 finalize line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
-    if "rx_frames" not in stage2_final:
-        raise RuntimeError(f"stage2 runtime line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
 
     pub_frames = int(pub_done["frames"])
-    s1_frames = int(stage1_final["rx_frames"])
-    s2_frames = int(stage2_final["rx_frames"])
-    stitched_frames = int(stage2_final["frames"])
+    s1_frames = int(stage1_metrics["rx_items"])
+    s2_frames = int(stage2_final["frames"])
+    stitched_frames = int(stage2_final["stitched"])
     if not (pub_frames == s1_frames == s2_frames == stitched_frames):
         raise RuntimeError(
             f"frame mismatch: publisher={pub_frames} stage1_rx={s1_frames} "
@@ -335,10 +345,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     row["total_frames"] = pub_frames
     row["publisher_avg_fps"] = float(pub_done["fps"])
     row["publisher_time_s"] = float(pub_done["time"])
-    row["stage1_rx_fps"] = float(stage1_final["rx_fps"])
-    row["stage1_stage_avg_ms"] = float(stage1_final["stage_avg_ms"])
-    row["stage2_rx_fps"] = float(stage2_final["rx_fps"])
-    row["stage2_stage_avg_ms"] = float(stage2_final["stage_avg_ms"])
+    row["stage1_total_time_s"] = float(stage1_metrics["stage_total_s"])
+    row["stage1_total_fps"] = float(stage1_metrics["stage_total_fps"])
+    row["stage1_compute_time_s"] = float(stage1_metrics["compute_total_s"])
+    row["stage1_publish_time_s"] = float(stage1_metrics["publish_total_s"])
+    row["stage2_total_time_s"] = float(stage2_metrics["stage_total_s"])
+    row["stage2_total_fps"] = (
+        s2_frames / row["stage2_total_time_s"]
+        if row["stage2_total_time_s"] and row["stage2_total_time_s"] > 0
+        else None
+    )
+    row["stage2_callback_time_s"] = float(stage2_metrics["cb_total_s"])
     row["stage2_side"] = int(stage2_final["side"])
 
     if marks["pub_start"] is not None and marks["stage2_final"] is not None:
@@ -350,14 +367,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Timeout (ms) | Frames | Publisher FPS | Stage1 RX FPS | Stage1 Stage Avg (ms) | Stage2 RX FPS | Stage2 Stage Avg (ms) | Stage2 Side | Pipeline E2E (s) |"
+        "| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
-            f"| {r['batch']} | {r['threads']} | {r['timeout_ms']} | {fmt(r['total_frames'], '{:.0f}')} | "
-            f"{fmt(r['publisher_avg_fps'])} | {fmt(r['stage1_rx_fps'])} | {fmt(r['stage1_stage_avg_ms'])} | "
-            f"{fmt(r['stage2_rx_fps'])} | {fmt(r['stage2_stage_avg_ms'])} | "
+            f"| {r['batch']} | {r['threads']} | {fmt(r['total_frames'], '{:.0f}')} | "
+            f"{fmt(r['publisher_time_s'])} | {fmt(r['publisher_avg_fps'])} | "
+            f"{fmt(r['stage1_total_time_s'])} | {fmt(r['stage1_total_fps'])} | "
+            f"{fmt(r['stage1_compute_time_s'])} | {fmt(r['stage1_publish_time_s'])} | "
+            f"{fmt(r['stage2_total_time_s'])} | {fmt(r['stage2_total_fps'])} | "
+            f"{fmt(r['stage2_callback_time_s'])} | "
             f"{fmt(r['stage2_side'], '{:.0f}')} | {fmt(r['pipeline_e2e_s'])} |"
         )
 
@@ -406,23 +426,24 @@ def main():
                 rows.append(row)
                 print(
                     f"  done: publisher_fps={fmt(row['publisher_avg_fps'])} "
-                    f"stage1_rx_fps={fmt(row['stage1_rx_fps'])} "
-                    f"stage2_rx_fps={fmt(row['stage2_rx_fps'])}"
+                    f"stage1_fps={fmt(row['stage1_total_fps'])} "
+                    f"stage2_fps={fmt(row['stage2_total_fps'])}"
                 )
 
         print_table(rows)
         out_csv = run_dir / "summary.csv"
         with open(out_csv, "w", encoding="utf-8") as f:
             f.write(
-                "batch,run,threads,timeout_ms,total_frames,publisher_avg_fps,publisher_time_s,"
-                "stage1_rx_fps,stage1_stage_avg_ms,stage2_rx_fps,stage2_stage_avg_ms,"
-                "stage2_side,pipeline_e2e_s\n"
+                "batch,run,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
+                "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,stage1_publish_time_s,"
+                "stage2_total_time_s,stage2_total_fps,stage2_callback_time_s,stage2_side,pipeline_e2e_s\n"
             )
             for r in rows:
                 f.write(
                     f"{r['batch']},{r['run']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                    f"{r['publisher_avg_fps']},{r['publisher_time_s']},{r['stage1_rx_fps']},"
-                    f"{r['stage1_stage_avg_ms']},{r['stage2_rx_fps']},{r['stage2_stage_avg_ms']},"
+                    f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
+                    f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
+                    f"{r['stage2_total_time_s']},{r['stage2_total_fps']},{r['stage2_callback_time_s']},"
                     f"{r['stage2_side']},"
                     f"{r['pipeline_e2e_s']}\n"
                 )
