@@ -36,7 +36,7 @@ drava.log(drava.DRAVA_VERBOSE_INFO, f"Using model assets dir: {DATA_DIR}")
 FRAME_DTYPE = np.float32
 FRAME_BYTES = PATCH_SIDE * PATCH_SIDE * np.dtype(FRAME_DTYPE).itemsize
 EOS_PREFIX = b"DRAVA_EOS:"
-PUBLISH_CHUNK = 32
+PUBLISH_CHUNK = 16
 
 _next_start = 0
 _published_frames = 0
