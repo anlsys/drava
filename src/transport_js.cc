@@ -66,7 +66,9 @@ int drava_transport_nats_publish(drava_t *drava,
         jsStreamConfig sc;
         std::memset(&sc, 0, sizeof(sc));
         sc.Name = output_stream_name;
-        sc.Storage = js_FileStorage;
+//        sc.Storage = js_FileStorage;
+        sc.Storage = js_MemoryStorage;
+        sc.MaxBytes = 1024LL * 1024LL * 1024LL;
         sc.Retention = js_LimitsPolicy;
         const char *subs[2] = {output_subject_name, nullptr};
         sc.Subjects = subs;
