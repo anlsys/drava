@@ -53,7 +53,7 @@ def parse_args():
                    help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs",
                    help="Output directory under examples/ptychonn.")
-    p.add_argument("--app-timeout-s", type=float, default=120.0,
+    p.add_argument("--app-timeout-s", type=float, default=None,
                    help="Max wait for Drava metrics after publisher exits.")
     return p.parse_args()
 
@@ -100,22 +100,26 @@ def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
 
 
 def parse_publisher_value(path: Path, key_name: str):
+    return parse_section_value(path, "publisher", key_name)
+
+
+def parse_section_value(path: Path, section_name: str, key_name: str):
     if not path.exists():
         return None
-    in_publisher = False
+    in_section = False
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].rstrip()
         if not line:
             continue
         indent = len(line) - len(line.lstrip(" "))
         body = line.strip()
-        if indent == 0 and body == "publisher:":
-            in_publisher = True
+        if indent == 0 and body == f"{section_name}:":
+            in_section = True
             continue
-        if indent == 0 and body.endswith(":") and body != "publisher:":
-            in_publisher = False
+        if indent == 0 and body.endswith(":") and body != f"{section_name}:":
+            in_section = False
             continue
-        if in_publisher and indent >= 2 and ":" in body:
+        if in_section and indent >= 2 and ":" in body:
             key, value = body.split(":", 1)
             if key.strip() == key_name:
                 return value.strip().strip("\"'")
@@ -228,9 +232,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     )
     yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
     yaml_rate_hz = parse_publisher_value(stage_config_path, "rate_hz")
+    yaml_app_timeout_s = parse_section_value(stage_config_path, "benchmark", "app_timeout_s")
     configured_num_frames = (
         args.num_frames if args.num_frames > 0
         else (int(yaml_num_frames) if yaml_num_frames is not None else 0)
+    )
+    effective_app_timeout_s = (
+        float(args.app_timeout_s)
+        if args.app_timeout_s is not None
+        else float(yaml_app_timeout_s) if yaml_app_timeout_s is not None
+        else 45.0
     )
 
     env = dict(base_env)
@@ -339,8 +350,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     pub_thread.join(timeout=5)
     print(f"[batch={batch_size} run={run_idx}] publisher finished")
 
-    end_wait = time.time() + args.app_timeout_s
-    print(f"[batch={batch_size} run={run_idx}] waiting for drava metrics (timeout={args.app_timeout_s}s)")
+    end_wait = time.time() + effective_app_timeout_s
+    print(f"[batch={batch_size} run={run_idx}] waiting for drava metrics (timeout={effective_app_timeout_s}s)")
     while time.time() < end_wait and not app_metrics:
         if app_proc.poll() is not None:
             break

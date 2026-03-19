@@ -45,7 +45,7 @@ def parse_args():
     p.add_argument("--nats-url", default="", help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs_two_stages", help="Output dir under examples/ptychonn.")
-    p.add_argument("--app-timeout-s", type=float, default=240.0,
+    p.add_argument("--app-timeout-s", type=float, default=None,
                    help="Wait for runtime/final logs after publisher exits.")
     p.add_argument("--input-stream", default="FRAMES", help="Publisher->Stage1 stream.")
     p.add_argument("--input-subject", default="frames.raw", help="Publisher->Stage1 subject.")
@@ -98,22 +98,26 @@ def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
 
 
 def parse_publisher_value(path: Path, key_name: str):
+    return parse_section_value(path, "publisher", key_name)
+
+
+def parse_section_value(path: Path, section_name: str, key_name: str):
     if not path.exists():
         return None
-    in_publisher = False
+    in_section = False
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].rstrip()
         if not line:
             continue
         indent = len(line) - len(line.lstrip(" "))
         body = line.strip()
-        if indent == 0 and body == "publisher:":
-            in_publisher = True
+        if indent == 0 and body == f"{section_name}:":
+            in_section = True
             continue
-        if indent == 0 and body.endswith(":") and body != "publisher:":
-            in_publisher = False
+        if indent == 0 and body.endswith(":") and body != f"{section_name}:":
+            in_section = False
             continue
-        if in_publisher and indent >= 2 and ":" in body:
+        if in_section and indent >= 2 and ":" in body:
             key, value = body.split(":", 1)
             if key.strip() == key_name:
                 return value.strip().strip("\"'")
@@ -221,9 +225,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     )
     yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
     yaml_rate_hz = parse_publisher_value(stage_config_path, "rate_hz")
+    yaml_app_timeout_s = parse_section_value(stage_config_path, "benchmark", "app_timeout_s")
     configured_num_frames = (
         args.num_frames if args.num_frames > 0
         else (int(yaml_num_frames) if yaml_num_frames is not None else 0)
+    )
+    effective_app_timeout_s = (
+        float(args.app_timeout_s)
+        if args.app_timeout_s is not None
+        else float(yaml_app_timeout_s) if yaml_app_timeout_s is not None
+        else 45.0
     )
 
     env_common = dict(base_env)
@@ -370,7 +381,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     pub_proc.wait(timeout=pub_timeout_s)
     pub_thread.join(timeout=5)
 
-    end_wait = time.time() + args.app_timeout_s
+    end_wait = time.time() + effective_app_timeout_s
     while time.time() < end_wait and (
             not stage1_metrics
             or not stage2_metrics
@@ -430,9 +441,9 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Stage2 Side | Pipeline E2E (s) |"
+        "| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Pipeline E2E (s) |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['batch']} | {r['threads']} | {fmt(r['total_frames'], '{:.0f}')} | "
@@ -440,8 +451,7 @@ def print_table(rows):
             f"{fmt(r['stage1_total_time_s'])} | {fmt(r['stage1_total_fps'])} | "
             f"{fmt(r['stage1_compute_time_s'])} | {fmt(r['stage1_publish_time_s'])} | "
             f"{fmt(r['stage2_total_time_s'])} | {fmt(r['stage2_total_fps'])} | "
-            f"{fmt(r['stage2_callback_time_s'])} | "
-            f"{fmt(r['stage2_side'], '{:.0f}')} | {fmt(r['pipeline_e2e_s'])} |"
+            f"{fmt(r['stage2_callback_time_s'])} | {fmt(r['pipeline_e2e_s'])} |"
         )
 
 
