@@ -30,6 +30,27 @@ const char *output_stream_name =
 const char *output_subject_name =
         drava_env_get_str_default("DRAVA_OUTPUT_SUBJECT", "frames.stage1");
 
+static void
+drava_nats_ensure_stream(jsCtx *js, const char *name, const char *subject)
+{
+    jsStreamConfig sc;
+    std::memset(&sc, 0, sizeof(sc));
+    sc.Name = name;
+    sc.Storage = js_FileStorage;
+    sc.Retention = js_LimitsPolicy;
+    const char *subs[2] = {subject, nullptr};
+    sc.Subjects = subs;
+    sc.SubjectsLen = 1;
+
+    jsStreamInfo *si = nullptr;
+    natsStatus s = js_AddStream(&si, js, &sc, nullptr, nullptr);
+    if (s != NATS_OK) {
+        LOGGER_ERROR("JetStream add stream failed: stream=%s subject=%s err=%s",
+                     name, subject, natsStatus_GetText(s));
+    }
+    jsStreamInfo_Destroy(si);
+}
+
 int drava_transport_nats_publish(drava_t *drava,
                                  const void *data,
                                  size_t data_len)
@@ -63,19 +84,7 @@ int drava_transport_nats_publish(drava_t *drava,
             return DRAVA_ERROR;
         }
 
-        jsStreamConfig sc;
-        std::memset(&sc, 0, sizeof(sc));
-        sc.Name = output_stream_name;
-//        sc.Storage = js_FileStorage;
-        sc.Storage = js_MemoryStorage;
-        sc.MaxBytes = 1024LL * 1024LL * 1024LL;
-        sc.Retention = js_LimitsPolicy;
-        const char *subs[2] = {output_subject_name, nullptr};
-        sc.Subjects = subs;
-        sc.SubjectsLen = 1;
-        jsStreamInfo *si = nullptr;
-        (void)js_AddStream(&si, js, &sc, nullptr, nullptr);
-        jsStreamInfo_Destroy(si);
+        drava_nats_ensure_stream(js, output_stream_name, output_subject_name);
 
         output_subject = output_subject_name;
         initialized = true;
@@ -135,19 +144,7 @@ int drava_transport_nats_main(drava_t *drava,
             LOGGER_FATAL("JetStream ctx failed: %s", natsStatus_GetText(s));
 
         // Ensure stream exists for the configured subject
-        jsStreamConfig sc;
-        std::memset(&sc, 0, sizeof(sc));
-        sc.Name = stream_name;
-        sc.Storage = js_MemoryStorage;
-        sc.MaxBytes = 1024LL * 1024LL * 1024LL;
-        sc.Retention = js_LimitsPolicy;
-        const char *subs[] = {subject_name, nullptr};
-        sc.Subjects = subs;
-        sc.SubjectsLen = 1;
-
-        jsStreamInfo *si = nullptr;
-        (void)js_AddStream(&si, js, &sc, /*opts*/ nullptr, /*err*/ nullptr);
-        jsStreamInfo_Destroy(si); // ok if it already existed
+        drava_nats_ensure_stream(js, stream_name, subject_name);
 
         // Ensure durable consumer filtered to SUBJECT (explicit acks)
         jsConsumerConfig cc;
