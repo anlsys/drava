@@ -1,4 +1,163 @@
 ### A 100
+- Tuner
+```shell
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 tune_two_stage.py \
+  --batches 256,512 \
+  --stage1-threads 4,8 \
+  --stage2-threads 4 \  
+  --stage1-callback-batches 256 \    
+  --stage2-callback-batches 32,64 \ 
+  --rates 0 \
+  --runs 1 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --objective pipeline_e2e_s \
+  --top-k 10 \
+  --keep-going
+Running 8 configurations serially.
+
+[1/8] batch=256 s1_threads=4 s2_threads=4 s1_cb=256 s2_cb=32 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=17140.16 stage1_fps=3911.09 stage2_fps=1703.22
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4/4 | 10000 | 0.58 | 17140.16 | 2.56 | 3911.09 | 5.87 | 1703.22 | 6.45 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165334
+[global] stopping nats-server
+
+[2/8] batch=256 s1_threads=4 s2_threads=4 s1_cb=256 s2_cb=64 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16844.53 stage1_fps=4090.01 stage2_fps=1726.54
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4/4 | 10000 | 0.59 | 16844.53 | 2.44 | 4090.01 | 5.79 | 1726.54 | 6.41 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165356
+[global] stopping nats-server
+
+[3/8] batch=256 s1_threads=8 s2_threads=4 s1_cb=256 s2_cb=32 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16056.66 stage1_fps=4341.31 stage2_fps=941.69
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 8/4 | 10000 | 0.62 | 16056.66 | 2.30 | 4341.31 | 10.62 | 941.69 | 11.22 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165415
+[global] stopping nats-server
+
+[4/8] batch=256 s1_threads=8 s2_threads=4 s1_cb=256 s2_cb=64 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16936.74 stage1_fps=4320.34 stage2_fps=1066.13
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 8/4 | 10000 | 0.59 | 16936.74 | 2.31 | 4320.34 | 9.38 | 1066.13 | 10.06 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165439
+[global] stopping nats-server
+
+[5/8] batch=512 s1_threads=4 s2_threads=4 s1_cb=256 s2_cb=32 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=512 run=1 ...
+[batch=512 run=1] starting app_stage2.py
+[batch=512 run=1] starting app.py
+[batch=512 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16041.55 stage1_fps=5560.56 stage2_fps=828.03
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512 | 4/4 | 10000 | 0.62 | 16041.55 | 1.80 | 5560.56 | 12.08 | 828.03 | 12.67 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165503
+[global] stopping nats-server
+
+[6/8] batch=512 s1_threads=4 s2_threads=4 s1_cb=256 s2_cb=64 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=512 run=1 ...
+[batch=512 run=1] starting app_stage2.py
+[batch=512 run=1] starting app.py
+[batch=512 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16285.13 stage1_fps=5402.49 stage2_fps=1016.21
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512 | 4/4 | 10000 | 0.61 | 16285.13 | 1.85 | 5402.49 | 9.84 | 1016.21 | 10.48 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165528
+[global] stopping nats-server
+
+[7/8] batch=512 s1_threads=8 s2_threads=4 s1_cb=256 s2_cb=32 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=512 run=1 ...
+[batch=512 run=1] starting app_stage2.py
+[batch=512 run=1] starting app.py
+[batch=512 run=1] starting publisher_jetstream.py
+  done: publisher_fps=15814.64 stage1_fps=4870.20 stage2_fps=1146.80
+
+| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 512 | 8/4 | 10000 | 0.63 | 15814.64 | 2.05 | 4870.20 | 8.72 | 1146.80 | 9.42 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165551
+[global] stopping nats-server
+
+[8/8] batch=512 s1_threads=8 s2_threads=4 s1_cb=256 s2_cb=64 rate_hz=0.0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=512 run=1 ...
+[batch=512 run=1] starting app_stage2.py
+[batch=512 run=1] starting app.py
+[batch=512 run=1] starting publisher_jetstream.py
+
+Logs written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165614
+[global] stopping nats-server
+
+Recorded 1 failures in: /home/ashovon/drava/examples/ptychonn/tune_logs_two_stages/20260323_165334/failures.csv
+
+| Rank | Batch | Threads S1/S2 | Callback S1/S2 | Rate Hz | Publisher FPS | Stage1 FPS | Stage2 FPS | Pipeline E2E (s) | Summary |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 256 | 4/4 | 256/64 | 0.00 | 16844.53 | 4090.01 | 1726.54 | 6.41 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165356 |
+| 2 | 256 | 4/4 | 256/32 | 0.00 | 17140.16 | 3911.09 | 1703.22 | 6.45 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165334 |
+| 3 | 512 | 8/4 | 256/32 | 0.00 | 15814.64 | 4870.20 | 1146.80 | 9.42 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165551 |
+| 4 | 256 | 8/4 | 256/64 | 0.00 | 16936.74 | 4320.34 | 1066.13 | 10.06 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165439 |
+| 5 | 512 | 4/4 | 256/64 | 0.00 | 16285.13 | 5402.49 | 1016.21 | 10.48 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165528 |
+| 6 | 256 | 8/4 | 256/32 | 0.00 | 16056.66 | 4341.31 | 941.69 | 11.22 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165415 |
+| 7 | 512 | 4/4 | 256/32 | 0.00 | 16041.55 | 5560.56 | 828.03 | 12.67 | /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_165503 |
+
+Sorted by `pipeline_e2e_s`.
+
+Chart generation skipped: matplotlib unavailable (No module named 'matplotlib')
+
+Aggregate CSV written to: /home/ashovon/drava/examples/ptychonn/tune_logs_two_stages/20260323_165334/aggregate.csv
+Tuner logs written to: /home/ashovon/drava/examples/ptychonn/tune_logs_two_stages/20260323_165334
+```
 - async publish
 ```shell
 
