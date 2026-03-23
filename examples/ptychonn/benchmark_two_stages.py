@@ -36,6 +36,12 @@ def parse_args():
     p.add_argument("--batches", default="128,256,512", help="Comma-separated stage1 infer batch sizes.")
     p.add_argument("--timeout-ms", type=int, default=500, help="DRAVA_FETCH_TIMEOUT_MS.")
     p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
+    p.add_argument("--stage1-threads", type=int, default=None, help="Override DRAVA_THREADS for stage1.")
+    p.add_argument("--stage2-threads", type=int, default=None, help="Override DRAVA_THREADS for stage2.")
+    p.add_argument("--stage1-callback-batch", type=int, default=None,
+                   help="Override DRAVA_CALLBACK_BATCH for stage1.")
+    p.add_argument("--stage2-callback-batch", type=int, default=None,
+                   help="Override DRAVA_CALLBACK_BATCH for stage2.")
     p.add_argument("--xkaapi-verbose", type=int, default=4, help="XKAAPI_VERBOSE.")
     p.add_argument("--rate-hz", type=float, default=None, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
     p.add_argument("--num-frames", type=int, default=0, help="DRAVA_PUBLISH_NUM_FRAMES. Overrides duration mode.")
@@ -91,6 +97,47 @@ def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
             in_ingress = False
             continue
         if in_ingress and indent >= 6 and ":" in body:
+            key, value = body.split(":", 1)
+            if key.strip() == key_name:
+                return value.strip().strip("\"'")
+    return None
+
+
+def parse_stage_runtime_value(path: Path, stage_name: str, key_name: str):
+    if not path.exists():
+        return None
+    in_stages = False
+    in_target = False
+    in_runtime = False
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if body == "stages:":
+            in_stages = True
+            in_target = False
+            in_runtime = False
+            continue
+        if not in_stages:
+            continue
+        if indent == 2 and body.startswith("- "):
+            in_target = False
+            in_runtime = False
+            kv = body[2:]
+            if kv.startswith("name:") and kv.split(":", 1)[1].strip().strip("\"'") == stage_name:
+                in_target = True
+            continue
+        if not in_target:
+            continue
+        if indent == 4 and body == "runtime:":
+            in_runtime = True
+            continue
+        if indent == 4 and body.endswith(":") and body != "runtime:":
+            in_runtime = False
+            continue
+        if in_runtime and indent >= 6 and ":" in body:
             key, value = body.split(":", 1)
             if key.strip() == key_name:
                 return value.strip().strip("\"'")
@@ -195,18 +242,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     row = {
         "batch": batch_size,
         "run": run_idx,
-        "threads": args.threads,
+        "stage1_threads": None,
+        "stage2_threads": None,
         "timeout_ms": args.timeout_ms,
         "total_frames": None,
         "publisher_avg_fps": None,
         "publisher_time_s": None,
         "stage1_total_fps": None,
         "stage1_total_time_s": None,
-        "stage1_compute_time_s": None,
-        "stage1_publish_time_s": None,
         "stage2_total_fps": None,
         "stage2_total_time_s": None,
-        "stage2_callback_time_s": None,
         "stage2_side": None,
         "pipeline_e2e_s": None,
     }
@@ -226,6 +271,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
     yaml_rate_hz = parse_publisher_value(stage_config_path, "rate_hz")
     yaml_app_timeout_s = parse_section_value(stage_config_path, "benchmark", "app_timeout_s")
+    yaml_stage1_threads = parse_stage_runtime_value(stage_config_path, "stage1", "threads")
+    yaml_stage2_threads = parse_stage_runtime_value(stage_config_path, "stage2", "threads")
+    yaml_stage1_callback_batch = (
+            parse_stage_runtime_value(stage_config_path, "stage1", "callback_batch")
+            or parse_stage_ingress_value(stage_config_path, "stage1", "callback_batch")
+    )
+    yaml_stage2_callback_batch = (
+            parse_stage_runtime_value(stage_config_path, "stage2", "callback_batch")
+            or parse_stage_ingress_value(stage_config_path, "stage2", "callback_batch")
+    )
     configured_num_frames = (
         args.num_frames if args.num_frames > 0
         else (int(yaml_num_frames) if yaml_num_frames is not None else 0)
@@ -236,10 +291,35 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         else float(yaml_app_timeout_s) if yaml_app_timeout_s is not None
         else 45.0
     )
+    stage1_threads = (
+        args.stage1_threads
+        if args.stage1_threads is not None
+        else int(yaml_stage1_threads) if yaml_stage1_threads is not None
+        else args.threads
+    )
+    stage2_threads = (
+        args.stage2_threads
+        if args.stage2_threads is not None
+        else int(yaml_stage2_threads) if yaml_stage2_threads is not None
+        else args.threads
+    )
+    stage1_callback_batch = (
+        args.stage1_callback_batch
+        if args.stage1_callback_batch is not None
+        else int(yaml_stage1_callback_batch) if yaml_stage1_callback_batch is not None
+        else batch_size
+    )
+    stage2_callback_batch = (
+        args.stage2_callback_batch
+        if args.stage2_callback_batch is not None
+        else int(yaml_stage2_callback_batch) if yaml_stage2_callback_batch is not None
+        else batch_size
+    )
+    row["stage1_threads"] = stage1_threads
+    row["stage2_threads"] = stage2_threads
 
     env_common = dict(base_env)
     env_common["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
-    env_common["DRAVA_THREADS"] = str(args.threads)
     env_common["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
 
     run_tag = f"{run_dir.name}_b{batch_size}_r{run_idx}"
@@ -250,21 +330,23 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     stage1_job_id = str(abs(hash(run_tag)) % 2147483647 or 1)
 
     env_stage1 = dict(env_common)
+    env_stage1["DRAVA_THREADS"] = str(stage1_threads)
     env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_{run_tag}"
     env_stage1["DRAVA_STREAM"] = input_stream
     env_stage1["DRAVA_SUBJECT"] = input_subject
     env_stage1["DRAVA_OUTPUT_STREAM"] = output_stream
     env_stage1["DRAVA_OUTPUT_SUBJECT"] = output_subject
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
-    env_stage1["DRAVA_CALLBACK_BATCH"] = str(batch_size)
+    env_stage1["DRAVA_CALLBACK_BATCH"] = str(stage1_callback_batch)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
     env_stage1["STAGE1_JOB_ID"] = stage1_job_id
 
     env_stage2 = dict(env_common)
+    env_stage2["DRAVA_THREADS"] = str(stage2_threads)
     env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_{run_tag}"
     env_stage2["DRAVA_STREAM"] = output_stream
     env_stage2["DRAVA_SUBJECT"] = output_subject
-    env_stage2["DRAVA_CALLBACK_BATCH"] = str(batch_size)
+    env_stage2["DRAVA_CALLBACK_BATCH"] = str(stage2_callback_batch)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
 
     env_pub = dict(env_common)
@@ -421,15 +503,12 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     row["publisher_time_s"] = float(pub_done["time"])
     row["stage1_total_time_s"] = float(stage1_metrics["stage_total_s"])
     row["stage1_total_fps"] = float(stage1_metrics["stage_total_fps"])
-    row["stage1_compute_time_s"] = float(stage1_metrics["compute_total_s"])
-    row["stage1_publish_time_s"] = float(stage1_metrics["publish_total_s"])
     row["stage2_total_time_s"] = float(stage2_metrics["stage_total_s"])
     row["stage2_total_fps"] = (
         s2_frames / row["stage2_total_time_s"]
         if row["stage2_total_time_s"] and row["stage2_total_time_s"] > 0
         else None
     )
-    row["stage2_callback_time_s"] = float(stage2_metrics["cb_total_s"])
     row["stage2_side"] = int(stage2_final["side"])
 
     if marks["pub_start"] is not None and marks["stage2_final"] is not None:
@@ -441,17 +520,16 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | Stage2 Time (s) | Stage2 FPS | Stage2 Callback (s) | Pipeline E2E (s) |"
+        "| Batch | Threads S1/S2 | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
-            f"| {r['batch']} | {r['threads']} | {fmt(r['total_frames'], '{:.0f}')} | "
+            f"| {r['batch']} | {r['stage1_threads']}/{r['stage2_threads']} | {fmt(r['total_frames'], '{:.0f}')} | "
             f"{fmt(r['publisher_time_s'])} | {fmt(r['publisher_avg_fps'])} | "
             f"{fmt(r['stage1_total_time_s'])} | {fmt(r['stage1_total_fps'])} | "
-            f"{fmt(r['stage1_compute_time_s'])} | {fmt(r['stage1_publish_time_s'])} | "
             f"{fmt(r['stage2_total_time_s'])} | {fmt(r['stage2_total_fps'])} | "
-            f"{fmt(r['stage2_callback_time_s'])} | {fmt(r['pipeline_e2e_s'])} |"
+            f"{fmt(r['pipeline_e2e_s'])} |"
         )
 
 
@@ -508,16 +586,15 @@ def main():
             out_csv = run_dir / "summary.csv"
             with open(out_csv, "w", encoding="utf-8") as f:
                 f.write(
-                    "batch,run,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
-                    "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,stage1_publish_time_s,"
-                    "stage2_total_time_s,stage2_total_fps,stage2_callback_time_s,stage2_side,pipeline_e2e_s\n"
+                    "batch,run,stage1_threads,stage2_threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
+                    "stage1_total_time_s,stage1_total_fps,"
+                    "stage2_total_time_s,stage2_total_fps,stage2_side,pipeline_e2e_s\n"
                 )
                 for r in rows:
                     f.write(
-                        f"{r['batch']},{r['run']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
+                        f"{r['batch']},{r['run']},{r['stage1_threads']},{r['stage2_threads']},{r['timeout_ms']},{r['total_frames']},"
                         f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
-                        f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
-                        f"{r['stage2_total_time_s']},{r['stage2_total_fps']},{r['stage2_callback_time_s']},"
+                        f"{r['stage1_total_fps']},{r['stage2_total_time_s']},{r['stage2_total_fps']},"
                         f"{r['stage2_side']},"
                         f"{r['pipeline_e2e_s']}\n"
                     )

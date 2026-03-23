@@ -11,6 +11,9 @@ benchmark:
 
 stages:
   - name: stage1
+    runtime:
+      threads: 4
+      callback_batch: 256
     ingress:
       transport: nats
       url: nats://127.0.0.1:4222
@@ -18,13 +21,15 @@ stages:
       subject: frames.raw
       durable: drava_stage1
       fetch_batch: 256
-      callback_batch: 256
       fetch_timeout_ms: 200
     egress:
       stream: PREDICTIONS
       subject: frames.stage1
 
   - name: stage2
+    runtime:
+      threads: 4
+      callback_batch: 256
     ingress:
       transport: nats
       url: nats://127.0.0.1:4222
@@ -32,5 +37,4 @@ stages:
       subject: frames.stage1
       durable: drava_stage2
       fetch_batch: 256
-      callback_batch: 256
       fetch_timeout_ms: 500

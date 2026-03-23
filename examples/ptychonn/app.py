@@ -1,6 +1,7 @@
 import drava
 import numpy as np
 import tensorflow as tf
+import threading
 from keras.models import load_model
 
 from config import (
@@ -38,8 +39,13 @@ FRAME_BYTES = PATCH_SIDE * PATCH_SIDE * np.dtype(FRAME_DTYPE).itemsize
 EOS_PREFIX = b"DRAVA_EOS:"
 PUBLISH_CHUNK = 16
 
+_state_lock = threading.Lock()
 _next_start = 0
 _published_frames = 0
+_expected_frames = None
+_eos_seen = False
+_eos_forwarded = False
+_eos_raw = None
 
 
 def warmup_model(runs: int = 2, batch_size: int = DRAVA_INFER_BATCH) -> None:
@@ -50,7 +56,7 @@ def warmup_model(runs: int = 2, batch_size: int = DRAVA_INFER_BATCH) -> None:
 
 
 def func(frames) -> None:
-    global _next_start, _published_frames
+    global _next_start, _published_frames, _expected_frames, _eos_seen, _eos_forwarded, _eos_raw
     batch_raw = []
     eos_raw = None
     expected_frames = None
@@ -68,17 +74,39 @@ def func(frames) -> None:
             raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
         batch_raw.append(raw)
     if not batch_raw and eos_raw is not None:
-        rc = drava.publish_py(eos_raw)
-        if rc != drava.DRAVA_SUCCESS:
-            raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
+        should_forward = False
+        with _state_lock:
+            _eos_seen = True
+            _eos_raw = eos_raw
+            if expected_frames is not None:
+                if _expected_frames is None or expected_frames > _expected_frames:
+                    _expected_frames = expected_frames
+            if (
+                    not _eos_forwarded
+                    and _expected_frames is not None
+                    and _published_frames >= _expected_frames
+            ):
+                _eos_forwarded = True
+                should_forward = True
+        if should_forward:
+            rc = drava.publish_py(eos_raw)
+            if rc != drava.DRAVA_SUCCESS:
+                raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
         return
     if not batch_raw:
         return
 
     batch_size = len(batch_raw)
-    start = _next_start
-    end = start + batch_size
-    _next_start = end
+    with _state_lock:
+        start = _next_start
+        end = start + batch_size
+        _next_start = end
+        if eos_raw is not None:
+            _eos_seen = True
+            _eos_raw = eos_raw
+            if expected_frames is not None:
+                if _expected_frames is None or expected_frames > _expected_frames:
+                    _expected_frames = expected_frames
     expected_for_payload = expected_frames if expected_frames is not None else 0
 
     stacked = b"".join(batch_raw)
@@ -103,15 +131,24 @@ def func(frames) -> None:
         if rc != drava.DRAVA_SUCCESS:
             raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
 
-    _published_frames += batch_size
+    should_forward = False
+    eos_to_forward = None
+    with _state_lock:
+        _published_frames += batch_size
+        if (
+                _eos_seen
+                and not _eos_forwarded
+                and _expected_frames is not None
+                and _published_frames >= _expected_frames
+        ):
+            _eos_forwarded = True
+            should_forward = True
+            eos_to_forward = _eos_raw
 
-    if eos_raw is not None:
-        if expected_frames is None or _published_frames < expected_frames:
-            raise RuntimeError(
-                f"EOS forwarded before all frames were published: "
-                f"published={_published_frames} expected={expected_frames}"
-            )
-        rc = drava.publish_py(eos_raw)
+    if should_forward:
+        if eos_to_forward is None:
+            raise RuntimeError("EOS forwarding triggered without cached EOS payload")
+        rc = drava.publish_py(eos_to_forward)
         if rc != drava.DRAVA_SUCCESS:
             raise RuntimeError(f"drava.publish_py(EOS) failed with rc={rc}")
 
@@ -127,7 +164,7 @@ if rc != drava.DRAVA_SUCCESS:
 
 try:
     drava.set_callback_batch(DRAVA_INFER_BATCH)
-    drava.set_callback_serialize(1)
+    drava.set_callback_serialize(0)
     drava.set_callback_flush_timeout_ms(0)
     drava.register_routine_py(func)
     rc = drava.listen_py()

@@ -30,6 +30,12 @@ const char *output_stream_name =
 const char *output_subject_name =
         drava_env_get_str_default("DRAVA_OUTPUT_SUBJECT", "frames.stage1");
 
+static std::once_flag g_publish_init_once;
+static int g_publish_init_rc = DRAVA_SUCCESS;
+static natsConnection *g_publish_nc = nullptr;
+static jsCtx *g_publish_js = nullptr;
+static std::string g_publish_subject;
+
 static void
 drava_nats_ensure_stream(jsCtx *js, const char *name, const char *subject)
 {
@@ -59,48 +65,84 @@ int drava_transport_nats_publish(drava_t *drava,
     if (data == NULL || data_len == 0)
         return DRAVA_EINVAL;
 
-    static std::mutex out_mu;
-    static bool initialized = false;
-    static natsConnection *nc = nullptr;
-    static jsCtx *js = nullptr;
-    static std::string output_subject;
-
-    std::lock_guard<std::mutex> lock(out_mu);
-    if (!initialized) {
+    std::call_once(g_publish_init_once, [&]() {
         natsStatus s;
-        s = natsConnection_ConnectTo(&nc, nats_url);
+        s = natsConnection_ConnectTo(&g_publish_nc, nats_url);
         if (s != NATS_OK) {
             LOGGER_ERROR("NATS publish connect failed: %s",
                          natsStatus_GetText(s));
-            return DRAVA_ERROR;
+            g_publish_init_rc = DRAVA_ERROR;
+            return;
         }
 
         jsOptions jopts;
         jsOptions_Init(&jopts);
-        s = natsConnection_JetStream(&js, nc, &jopts);
+        s = natsConnection_JetStream(&g_publish_js, g_publish_nc, &jopts);
         if (s != NATS_OK) {
             LOGGER_ERROR("JetStream publish ctx failed: %s",
                          natsStatus_GetText(s));
-            return DRAVA_ERROR;
+            g_publish_init_rc = DRAVA_ERROR;
+            return;
         }
 
-        drava_nats_ensure_stream(js, output_stream_name, output_subject_name);
+        drava_nats_ensure_stream(g_publish_js, output_stream_name,
+                                 output_subject_name);
 
-        output_subject = output_subject_name;
-        initialized = true;
+        g_publish_subject = output_subject_name;
         LOGGER_INFO("NATS publish output ready: url=%s stream=%s subject=%s",
-                    nats_url, output_stream_name, output_subject.c_str());
-    }
+                    nats_url, output_stream_name, g_publish_subject.c_str());
+    });
 
-    jsPubAck *pa = nullptr;
-    natsStatus s =
-            js_Publish(&pa, js, output_subject.c_str(), (const void *)data,
-                       (int)data_len, nullptr, nullptr);
+    if (g_publish_init_rc != DRAVA_SUCCESS || g_publish_js == nullptr)
+        return DRAVA_ERROR;
+
+    natsStatus s;
+    const bool is_eos = drava_payload_is_eos(data, data_len);
+    if (is_eos) {
+        s = js_PublishAsync(g_publish_js, g_publish_subject.c_str(),
+                            (const void *)data, (int)data_len, nullptr);
+        if (s != NATS_OK) {
+            LOGGER_ERROR("NATS async publish failed: %s",
+                         natsStatus_GetText(s));
+            return DRAVA_ERROR;
+        }
+        jsPubOptions js_pub_opts;
+        jsPubOptions_Init(&js_pub_opts);
+        js_pub_opts.MaxWait = drava_env_get_int_default(
+                "DRAVA_NATS_ASYNC_DRAIN_TIMEOUT_MS", 30000);
+        s = js_PublishAsyncComplete(g_publish_js, &js_pub_opts);
+    } else {
+        s = js_PublishAsync(g_publish_js, g_publish_subject.c_str(),
+                            (const void *)data, (int)data_len, nullptr);
+    }
     if (s != NATS_OK) {
-        LOGGER_ERROR("NATS publish failed: %s", natsStatus_GetText(s));
+        LOGGER_ERROR("NATS async publish failed: %s", natsStatus_GetText(s));
         return DRAVA_ERROR;
     }
-    jsPubAck_Destroy(pa);
+    return DRAVA_SUCCESS;
+}
+
+int drava_transport_nats_shutdown(drava_t *drava)
+{
+    (void)drava;
+    if (g_publish_js != nullptr) {
+        jsPubOptions js_pub_opts;
+        jsPubOptions_Init(&js_pub_opts);
+        js_pub_opts.MaxWait = drava_env_get_int_default(
+                "DRAVA_NATS_ASYNC_DRAIN_TIMEOUT_MS", 30000);
+        natsStatus s = js_PublishAsyncComplete(g_publish_js, &js_pub_opts);
+        if (s != NATS_OK) {
+            LOGGER_WARN("NATS async drain failed during shutdown: %s",
+                        natsStatus_GetText(s));
+        }
+        jsCtx_Destroy(g_publish_js);
+        g_publish_js = nullptr;
+    }
+    if (g_publish_nc != nullptr) {
+        natsConnection_Destroy(g_publish_nc);
+        g_publish_nc = nullptr;
+    }
+    nats_Close();
     return DRAVA_SUCCESS;
 }
 

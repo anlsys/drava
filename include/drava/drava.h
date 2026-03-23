@@ -161,6 +161,8 @@ int drava_transport_nats_publish(drava_t *drava,
                                  const void *data,
                                  size_t data_len);
 
+int drava_transport_nats_shutdown(drava_t *drava);
+
 /* main for a thread on a given device */
 int drava_transport_main(drava_t *drava,
                          device_global_id_t device_global_id,

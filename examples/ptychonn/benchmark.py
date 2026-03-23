@@ -379,8 +379,6 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         row["stage1_frames"] = int(app_metrics["rx_items"])
         row["stage1_total_time_s"] = float(app_metrics["stage_total_s"])
         row["stage1_total_fps"] = float(app_metrics["stage_total_fps"])
-        row["stage1_compute_time_s"] = float(app_metrics["compute_total_s"])
-        row["stage1_publish_time_s"] = float(app_metrics["publish_total_s"])
         if row["total_frames"] is None:
             row["total_frames"] = row["stage1_frames"]
     else:
@@ -419,15 +417,14 @@ def fmt(x, f="{:.2f}"):
 def print_table(rows):
     print("")
     print(
-        "| Batch | Threads | Total Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage1 Compute (s) | Stage1 Publish (s) | GPU Avg (%) |")
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        "| Batch | Threads | Total Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | GPU Avg (%) |")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['batch']} | {r['threads']} | "
             f"{fmt(r['total_frames'], '{:.0f}')} | {fmt(r['publisher_time_s'])} | "
             f"{fmt(r['publisher_avg_fps'])} | {fmt(r['stage1_total_time_s'])} | "
-            f"{fmt(r['stage1_total_fps'])} | {fmt(r['stage1_compute_time_s'])} | "
-            f"{fmt(r['stage1_publish_time_s'])} | "
+            f"{fmt(r['stage1_total_fps'])} | "
             f"{fmt(r['gpu_avg_pct'])} |"
         )
 

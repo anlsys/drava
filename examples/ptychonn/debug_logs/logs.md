@@ -1,4 +1,59 @@
 ### A 100
+- async publish
+```shell
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 10000 | 0.59 | 16847.42 | 2.56 | 3904.28 | 5.57 | 1795.66 | 7.05 |
+| 256 | 20 | 10000 | 0.60 | 16650.72 | 2.52 | 3962.59 | 6.15 | 1626.81 | 7.50 |
+| 512 | 4 | 10000 | 0.61 | 16513.94 | 1.84 | 5439.77 | 11.30 | 885.06 | 13.43 |
+| 512 | 20 | 10000 | 0.62 | 16094.58 | 2.07 | 4821.92 | 11.15 | 897.07 | 12.77 |
+
+
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --threads 4 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --rate-hz 0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16847.42 stage1_fps=3904.28 stage2_fps=1795.66
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 10000 | 0.59 | 16847.42 | 2.56 | 3904.28 | 5.57 | 1795.66 | 7.05 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_151538
+[global] stopping nats-server
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \
+  --batches 256 \
+  --runs 1 \
+  --threads 20 \
+  --timeout-ms 200 \
+  --num-frames 10000 \
+  --rate-hz 0
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running batch=256 run=1 ...
+[batch=256 run=1] starting app_stage2.py
+[batch=256 run=1] starting app.py
+[batch=256 run=1] starting publisher_jetstream.py
+  done: publisher_fps=16650.72 stage1_fps=3962.59 stage2_fps=1626.81
+
+| Batch | Threads | Frames | Publisher Time (s) | Publisher FPS | Stage1 Time (s) | Stage1 FPS | Stage2 Time (s) | Stage2 FPS | Pipeline E2E (s) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 20 | 10000 | 0.60 | 16650.72 | 2.52 | 3962.59 | 6.15 | 1626.81 | 7.50 |
+
+Logs and summary written to: /home/ashovon/drava/examples/ptychonn/bench_logs_two_stages/20260323_151613
+[global] stopping nats-server
+
+```
 - Main file, publish memory
 ```shell
 (no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 benchmark_two_stages.py \

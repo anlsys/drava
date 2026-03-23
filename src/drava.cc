@@ -142,6 +142,10 @@ int drava_t::listen(void)
 
 int drava_t::deinit(void)
 {
+#ifdef DRAVA_HAS_NATS
+    if (this->transport_type == DRAVA_TRANSPORT_NATS)
+        (void)drava_transport_nats_shutdown(this);
+#endif
     this->runtime.deinit();
     return DRAVA_SUCCESS;
 }
