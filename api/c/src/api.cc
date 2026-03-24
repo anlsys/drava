@@ -39,6 +39,11 @@ int drava_listen(void)
     return drava.listen();
 }
 
+int drava_publish(const void *data, size_t data_len)
+{
+    return drava.publish(data, data_len);
+}
+
 int drava_deinit(void)
 {
     return drava.deinit();
@@ -47,4 +52,29 @@ int drava_deinit(void)
 int drava_log(const drava_verbose_t verbose_level, const char *msg)
 {
     return drava.log(verbose_level, msg);
+}
+
+int drava_stats_snapshot(drava_stats_t *out_stats)
+{
+    return drava.stats_snapshot(out_stats);
+}
+
+int drava_stats_reset(void)
+{
+    return drava.stats_reset();
+}
+
+int drava_set_callback_batch(size_t batch_size)
+{
+    return drava.set_callback_batch(batch_size);
+}
+
+int drava_set_callback_flush_timeout_ms(int timeout_ms)
+{
+    return drava.set_callback_flush_timeout_ms(timeout_ms);
+}
+
+int drava_set_callback_serialize(int enabled)
+{
+    return drava.set_callback_serialize(enabled != 0);
 }

@@ -12,7 +12,9 @@
 #define __DRAVA_H__
 
 #include <atomic>
+#include <cstdint>
 #include <drava/drava_c.h>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <xkrt/runtime.h>
@@ -47,8 +49,29 @@ struct drava_t {
 
     /* Batching and id allocation for callback dispatch */
     size_t callback_batch_size;
+    int callback_flush_timeout_ms;
+    bool callback_serialize;
+    std::mutex callback_mutex;
     std::atomic<uint64_t> next_batch_id;
     std::atomic<uint64_t> next_frame_id;
+    std::atomic<uint64_t> rx_msgs;
+    std::atomic<uint64_t> rx_items;
+    std::atomic<uint64_t> rx_bytes;
+    std::atomic<uint64_t> tx_msgs;
+    std::atomic<uint64_t> tx_bytes;
+    std::atomic<uint64_t> callback_batches;
+    std::atomic<uint64_t> callback_ns_sum;
+    std::atomic<uint64_t> callback_ns_max;
+    std::atomic<uint64_t> publish_ns_sum;
+    std::atomic<uint64_t> publish_ns_max;
+    std::atomic<uint64_t> stage_latency_samples;
+    std::atomic<uint64_t> stage_latency_ns_sum;
+    std::atomic<uint64_t> stage_latency_ns_max;
+    std::atomic<uint64_t> first_rx_ns;
+    std::atomic<uint64_t> last_stage_ns;
+    std::atomic<uint64_t> pending_callback_tasks;
+    std::atomic<uint64_t> pending_rx_eos_snapshot;
+    std::atomic<uint64_t> pending_tx_eos_snapshot;
 
     /***********/
     /* Methods */
@@ -63,18 +86,59 @@ struct drava_t {
     /* Read until the socket is closed */
     int listen(void);
 
+    /* Publish one payload through the configured transport backend */
+    int publish(const void *data, size_t data_len);
+
     /* Deinitialize drava */
     int deinit(void);
 
     /* Log a debug message */
     int log(const int verbose_level, const char *msg);
+
+    int stats_snapshot(drava_stats_t *out_stats) const;
+
+    int stats_reset(void);
+
+    int set_callback_batch(size_t batch_size);
+
+    int set_callback_flush_timeout_ms(int timeout_ms);
+
+    int set_callback_serialize(bool enabled);
 };
 
 int drava_parse_transport_from_env(drava_transport_t *out);
 
-const char *drava_env_get_str_default(const char *key, const char *default_value);
+const char *drava_env_get_str_default(const char *key,
+                                      const char *default_value);
 
 int drava_env_get_int_default(const char *key, int default_value);
+
+bool drava_payload_is_eos(const void *data, size_t data_len);
+
+uint64_t drava_monotonic_ns();
+
+void drava_stats_record_callback_batch(drava_t *drava,
+                                       size_t frame_count,
+                                       size_t total_bytes,
+                                       uint64_t first_recv_ns,
+                                       uint64_t last_recv_ns,
+                                       uint64_t callback_start_ns,
+                                       uint64_t callback_end_ns);
+
+void drava_stats_record_stage_latency_ns(drava_t *drava, uint64_t latency_ns);
+
+void drava_stats_record_tx(drava_t *drava,
+                           size_t data_len,
+                           uint64_t publish_ns,
+                           uint64_t publish_end_ns);
+
+void drava_stats_log_snapshot(drava_t *drava, const char *reason);
+
+uint64_t drava_callback_context_recv_ts_ns();
+
+void drava_callback_task_begin(drava_t *drava);
+
+void drava_callback_task_end(drava_t *drava, bool saw_eos);
 
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,
@@ -88,6 +152,16 @@ int drava_transport_socket_main(drava_t *drava,
 int drava_transport_nats_main(drava_t *drava,
                               device_global_id_t device_global_id,
                               thread_t *thread);
+
+int drava_transport_socket_publish(drava_t *drava,
+                                   const void *data,
+                                   size_t data_len);
+
+int drava_transport_nats_publish(drava_t *drava,
+                                 const void *data,
+                                 size_t data_len);
+
+int drava_transport_nats_shutdown(drava_t *drava);
 
 /* main for a thread on a given device */
 int drava_transport_main(drava_t *drava,

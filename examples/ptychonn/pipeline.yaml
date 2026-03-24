@@ -1,0 +1,40 @@
+pipeline:
+  name: ptychonn_two_stage
+
+publisher:
+  synthetic: true
+  num_frames: 10000
+  rate_hz: 1000
+
+benchmark:
+  app_timeout_s: 45
+
+stages:
+  - name: stage1
+    runtime:
+      threads: 4
+      callback_batch: 256
+    ingress:
+      transport: nats
+      url: nats://127.0.0.1:4222
+      stream: FRAMES
+      subject: frames.raw
+      durable: drava_stage1
+      fetch_batch: 256
+      fetch_timeout_ms: 200
+    egress:
+      stream: PREDICTIONS
+      subject: frames.stage1
+
+  - name: stage2
+    runtime:
+      threads: 4
+      callback_batch: 256
+    ingress:
+      transport: nats
+      url: nats://127.0.0.1:4222
+      stream: PREDICTIONS
+      subject: frames.stage1
+      durable: drava_stage2
+      fetch_batch: 256
+      fetch_timeout_ms: 500

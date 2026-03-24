@@ -1,28 +1,32 @@
 import asyncio
+import os
 import time
 from nats.aio.client import Client as NATS
-from publisher_util import load_publish_config, make_payload_generator
+from publisher_util import (
+    load_publish_config,
+    make_payload_generator,
+)
 
-STREAM = "FRAMES"
-SUBJECT = "frames.raw"
+NATS_URL = os.getenv("NATS_URL", "nats://0.0.0.0:4222")
+STREAM = os.getenv("DRAVA_STREAM", "FRAMES")
+SUBJECT = os.getenv("DRAVA_SUBJECT", "frames.raw")
 EOS_PREFIX = b"DRAVA_EOS:"
-RATE_HZ, SYNTHETIC_MODE, RUN_SECONDS = load_publish_config()
+RATE_HZ, SYNTHETIC_MODE, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 1024
 PUBLISH_INFLIGHT = 1024
 
 
 async def main():
     nc = NATS()
-    await nc.connect("nats://0.0.0.0:4222")
+    await nc.connect(NATS_URL)
     js = nc.jetstream()
 
     try:
-        await js.add_stream(name=STREAM, subjects=["frames.*"])
+        await js.add_stream(name=STREAM, subjects=[SUBJECT])
     except Exception:
         pass
 
     next_payload = make_payload_generator(SYNTHETIC_MODE)
-
     # Pacing setup
     pacing = RATE_HZ is not None and RATE_HZ > 0
     period = (1.0 / RATE_HZ) if pacing else None
@@ -46,10 +50,7 @@ async def main():
         if acks:
             last_ack_seq = acks[-1].seq
 
-    while True:
-        elapsed = time.perf_counter() - t0
-        if elapsed >= RUN_SECONDS:
-            break
+    while sent_count < TARGET_FRAMES:
         source_idx = sent_count
         payload = next_payload(source_idx)
         pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
@@ -83,10 +84,13 @@ async def main():
                 await asyncio.sleep(sleep_s)
             next_t += period
 
+    n_frames = sent_count
+    print(f"Fixed-frame completion: n_frames={n_frames}")
+
     await flush_pending()
 
     # End-of-stream marker with sent frame count
-    eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
+    eos_payload = EOS_PREFIX + str(n_frames).encode("ascii")
     eos_ack = await js.publish(SUBJECT, eos_payload)
     await nc.drain()
     t_end = time.perf_counter()

@@ -50,7 +50,11 @@ static void *drava_frame_routine_trampoline(const drava_frame_batch_t *batch,
     PyTuple_SetItem(args, 0, py_frames); /* steals py_frames */
     PyObject *ret = PyObject_CallObject(g_routine, args);
     Py_DECREF(args);
-    Py_XDECREF(ret);
+    if (ret == NULL) {
+        PyErr_Print();
+    } else {
+        Py_DECREF(ret);
+    }
 
 #ifndef PY_NO_GIL
     PyGILState_Release(gstate);
@@ -81,4 +85,49 @@ int drava_listen_py(void)
     PyEval_RestoreThread(_save);
 
     return rc;
+}
+
+int drava_publish_py(PyObject *payload)
+{
+    if (payload == NULL)
+        return DRAVA_EINVAL;
+
+    Py_buffer view;
+    if (PyObject_GetBuffer(payload, &view, PyBUF_CONTIG_RO) != 0)
+        return DRAVA_EINVAL;
+
+    int rc = drava_publish(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    return rc;
+}
+
+PyObject *drava_stats_snapshot_py(void)
+{
+    drava_stats_t s;
+    int rc = drava_stats_snapshot(&s);
+    if (rc != DRAVA_SUCCESS)
+        return Py_BuildValue("{s:i}", "rc", rc);
+
+    return Py_BuildValue(
+            "{s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:i}",
+            "rx_msgs", (unsigned long long)s.rx_msgs, "rx_items",
+            (unsigned long long)s.rx_items, "rx_bytes",
+            (unsigned long long)s.rx_bytes, "tx_msgs",
+            (unsigned long long)s.tx_msgs, "tx_bytes",
+            (unsigned long long)s.tx_bytes, "callback_batches",
+            (unsigned long long)s.callback_batches, "callback_ns_sum",
+            (unsigned long long)s.callback_ns_sum, "callback_ns_max",
+            (unsigned long long)s.callback_ns_max, "stage_latency_samples",
+            (unsigned long long)s.stage_latency_samples, "stage_latency_ns_sum",
+            (unsigned long long)s.stage_latency_ns_sum, "stage_latency_ns_max",
+            (unsigned long long)s.stage_latency_ns_max, "first_rx_ns",
+            (unsigned long long)s.first_rx_ns, "last_stage_ns",
+            (unsigned long long)s.last_stage_ns, "publish_ns_sum",
+            (unsigned long long)s.publish_ns_sum, "publish_ns_max",
+            (unsigned long long)s.publish_ns_max, "rc", rc);
+}
+
+int drava_stats_reset_py(void)
+{
+    return drava_stats_reset();
 }
