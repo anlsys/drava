@@ -14,6 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void set_socket_stage_config(void)
+{
+    setenv("DRAVA_STAGE_CONFIG", DRAVA_TEST_SRCDIR "/transport_socket.yaml", 1);
+    setenv("DRAVA_STAGE_NAME", "test_stage", 1);
+    unsetenv("DRAVA_TRANSPORT");
+}
+
 static void *frame_handler(const drava_frame_batch_t *batch, void *user_data)
 {
     (void)user_data;
@@ -30,7 +37,7 @@ START_TEST(test_socket_init_register_deinit)
         fprintf(stderr, "SKIP: set USE_SOCKET=1 to run socket check test\n");
         return;
     }
-    setenv("DRAVA_TRANSPORT", "socket", 1);
+    set_socket_stage_config();
     ck_assert_int_eq(drava_init(), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_register_frame_routine(frame_handler, NULL),
                      DRAVA_SUCCESS);
@@ -46,7 +53,7 @@ START_TEST(test_socket_register_frame_handler)
         fprintf(stderr, "SKIP: set USE_SOCKET=1 to run socket check test\n");
         return;
     }
-    setenv("DRAVA_TRANSPORT", "socket", 1);
+    set_socket_stage_config();
     ck_assert_int_eq(drava_init(), DRAVA_SUCCESS);
     ck_assert_int_eq(drava_register_frame_routine(frame_handler, NULL),
                      DRAVA_SUCCESS);

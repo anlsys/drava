@@ -1,0 +1,5 @@
+transport:
+  type: invalid_transport
+
+stages:
+  - name: test_stage

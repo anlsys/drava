@@ -1,0 +1,5 @@
+transport:
+  type: socket
+
+stages:
+  - name: test_stage

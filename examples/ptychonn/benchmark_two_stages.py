@@ -48,7 +48,7 @@ def parse_args():
     p.add_argument("--runs", type=int, default=1, help="Runs per batch.")
     p.add_argument("--python", default=sys.executable, help="Python executable.")
     p.add_argument("--reuse-nats", action="store_true", help="Use existing NATS server.")
-    p.add_argument("--nats-url", default="", help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
+    p.add_argument("--nats-url", default="", help="NATS URL. Defaults to transport.nats_url from --stage-config.")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs_two_stages", help="Output dir under examples/ptychonn.")
     p.add_argument("--app-timeout-s", type=float, default=None,
@@ -146,6 +146,10 @@ def parse_stage_runtime_value(path: Path, stage_name: str, key_name: str):
 
 def parse_publisher_value(path: Path, key_name: str):
     return parse_section_value(path, "publisher", key_name)
+
+
+def parse_transport_value(path: Path, key_name: str):
+    return parse_section_value(path, "transport", key_name)
 
 
 def parse_section_value(path: Path, section_name: str, key_name: str):
@@ -265,7 +269,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     base_output_subject = args.output_subject
     nats_url = (
             args.nats_url
-            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
     yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
@@ -547,7 +551,7 @@ def main():
         args.stage_config)
     nats_url = (
             args.nats_url
-            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
 

@@ -1,0 +1,6 @@
+transport:
+  type: nats
+  nats_url: nats://127.0.0.1:4222
+
+stages:
+  - name: test_stage

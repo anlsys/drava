@@ -11,7 +11,8 @@ setup() {
   command -v socat   >/dev/null 2>&1 || skip "socat not found"
 
   export PYTHONUNBUFFERED=1
-  export DRAVA_TRANSPORT="socket"
+  export DRAVA_STAGE_CONFIG="${ABS_TOP_SRCDIR}/tests/transport_socket.yaml"
+  export DRAVA_STAGE_NAME="test_stage"
 
   # Make 'import drava' resolve from build tree
   export PYTHONPATH="${ABS_TOP_BUILDDIR}:${PYTHONPATH:-}"

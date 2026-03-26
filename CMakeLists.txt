@@ -53,13 +53,13 @@ if (NATS_ROOT)
     else ()
         set(NATS_ENABLED TRUE)
         message(STATUS "NATS backend enabled (include=${NATS_INCLUDE_DIR}, lib=${NATS_LIBRARY})")
-    endif()
-else()
+    endif ()
+else ()
     message(STATUS "NATS_ROOT not set: building without NATS backend (socket only).\n
     If you want to use NATS specify NATS_ROOT as environment variable:\n
     export NATS_ROOT=/path/to/nats
     ")
-endif()
+endif ()
 # ------------------------------------------------------------------------
 
 ######################
@@ -77,7 +77,7 @@ set(SOURCE_FILES
 if (NATS_ENABLED)
     list(APPEND SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/transport_js.cc)
     find_package(Threads REQUIRED)
-endif()
+endif ()
 
 # C bindings to its own custom lib
 set(C_SOURCE_FILES
@@ -104,6 +104,13 @@ include_directories(${CMAKE_SOURCE_DIR}/include/)
 include_directories(${CMAKE_SOURCE_DIR}/src/)
 include_directories(${CMAKE_SOURCE_DIR}/api/c/include/)
 
+find_package(yaml-cpp REQUIRED)
+if (TARGET yaml-cpp::yaml-cpp)
+    target_link_libraries(${DRAVA_NAME} PRIVATE yaml-cpp::yaml-cpp)
+else ()
+    target_link_libraries(${DRAVA_NAME} PRIVATE yaml-cpp)
+endif ()
+
 # NATS-specific properties
 if (NATS_ENABLED)
     target_include_directories(${DRAVA_NAME} PRIVATE ${NATS_INCLUDE_DIR})
@@ -114,8 +121,8 @@ if (NATS_ENABLED)
     get_filename_component(_NATS_LIBDIR "${NATS_LIBRARY}" DIRECTORY)
     if (_NATS_LIBDIR)
         target_link_options(${DRAVA_NAME} PRIVATE "-Wl,-rpath,${_NATS_LIBDIR}")
-    endif()
-endif()
+    endif ()
+endif ()
 ###################
 # Python bindings #
 ###################
@@ -158,4 +165,4 @@ target_link_libraries(${DRAVA_NAME} PRIVATE XKRT::xkrt)
 ################
 if (USE_TESTS)
     add_subdirectory(tests)
-endif()
+endif ()

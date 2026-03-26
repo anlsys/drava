@@ -54,6 +54,10 @@ function(add_drava_check_test target_name source_file)
             m pthread rt
     )
 
+    target_compile_definitions(${target_name} PRIVATE
+            DRAVA_TEST_SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
     add_test(NAME ${target_name} COMMAND ${target_name})
 endfunction()
 

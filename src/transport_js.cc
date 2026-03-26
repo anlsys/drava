@@ -18,18 +18,6 @@
 
 #include <nats/nats.h> // Core + JetStream API (libnats 3.12.x)
 
-const char *nats_url =
-        drava_env_get_str_default("NATS_URL", "nats://127.0.0.1:4222");
-const char *stream_name = drava_env_get_str_default("DRAVA_STREAM", "FRAMES");
-const char *subject_name =
-        drava_env_get_str_default("DRAVA_SUBJECT", "frames.raw");
-const char *durable_name =
-        drava_env_get_str_default("DRAVA_DURABLE", "drava_consumer");
-const char *output_stream_name =
-        drava_env_get_str_default("DRAVA_OUTPUT_STREAM", "PREDICTIONS");
-const char *output_subject_name =
-        drava_env_get_str_default("DRAVA_OUTPUT_SUBJECT", "frames.stage1");
-
 static std::once_flag g_publish_init_once;
 static int g_publish_init_rc = DRAVA_SUCCESS;
 static natsConnection *g_publish_nc = nullptr;
@@ -61,13 +49,12 @@ int drava_transport_nats_publish(drava_t *drava,
                                  const void *data,
                                  size_t data_len)
 {
-    (void)drava;
     if (data == NULL || data_len == 0)
         return DRAVA_EINVAL;
 
     std::call_once(g_publish_init_once, [&]() {
         natsStatus s;
-        s = natsConnection_ConnectTo(&g_publish_nc, nats_url);
+        s = natsConnection_ConnectTo(&g_publish_nc, drava->nats_url.c_str());
         if (s != NATS_OK) {
             LOGGER_ERROR("NATS publish connect failed: %s",
                          natsStatus_GetText(s));
@@ -85,12 +72,13 @@ int drava_transport_nats_publish(drava_t *drava,
             return;
         }
 
-        drava_nats_ensure_stream(g_publish_js, output_stream_name,
-                                 output_subject_name);
+        drava_nats_ensure_stream(g_publish_js, drava->egress_cfg.stream.c_str(),
+                                 drava->egress_cfg.subject.c_str());
 
-        g_publish_subject = output_subject_name;
+        g_publish_subject = drava->egress_cfg.subject;
         LOGGER_INFO("NATS publish output ready: url=%s stream=%s subject=%s",
-                    nats_url, output_stream_name, g_publish_subject.c_str());
+                    drava->nats_url.c_str(), drava->egress_cfg.stream.c_str(),
+                    g_publish_subject.c_str());
     });
 
     if (g_publish_init_rc != DRAVA_SUCCESS || g_publish_js == nullptr)
@@ -108,8 +96,7 @@ int drava_transport_nats_publish(drava_t *drava,
         }
         jsPubOptions js_pub_opts;
         jsPubOptions_Init(&js_pub_opts);
-        js_pub_opts.MaxWait = drava_env_get_int_default(
-                "DRAVA_NATS_ASYNC_DRAIN_TIMEOUT_MS", 30000);
+        js_pub_opts.MaxWait = drava->nats_async_drain_timeout_ms;
         s = js_PublishAsyncComplete(g_publish_js, &js_pub_opts);
     } else {
         s = js_PublishAsync(g_publish_js, g_publish_subject.c_str(),
@@ -128,8 +115,7 @@ int drava_transport_nats_shutdown(drava_t *drava)
     if (g_publish_js != nullptr) {
         jsPubOptions js_pub_opts;
         jsPubOptions_Init(&js_pub_opts);
-        js_pub_opts.MaxWait = drava_env_get_int_default(
-                "DRAVA_NATS_ASYNC_DRAIN_TIMEOUT_MS", 30000);
+        js_pub_opts.MaxWait = drava->nats_async_drain_timeout_ms;
         natsStatus s = js_PublishAsyncComplete(g_publish_js, &js_pub_opts);
         if (s != NATS_OK) {
             LOGGER_WARN("NATS async drain failed during shutdown: %s",
@@ -158,9 +144,8 @@ int drava_transport_nats_main(drava_t *drava,
     /* thread 0: subscribe + fetch from JetStream, spawn a task per message */
     if (thread->tid == 0) {
         LOGGER_INFO("JetStream trying to connect");
-        int fetch_batch = drava_env_get_int_default("DRAVA_JS_FETCH_BATCH", 8);
-        int fetch_timeout_ms =
-                drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
+        int fetch_batch = drava->ingress_cfg.fetch_batch;
+        int fetch_timeout_ms = drava->ingress_cfg.fetch_timeout_ms;
         int callback_flush_timeout_ms = drava->callback_flush_timeout_ms;
 
         LOGGER_INFO(
@@ -174,7 +159,7 @@ int drava_transport_nats_main(drava_t *drava,
         natsSubscription *sub = nullptr;
 
         // Connect
-        s = natsConnection_ConnectTo(&nc, nats_url);
+        s = natsConnection_ConnectTo(&nc, drava->nats_url.c_str());
         if (s != NATS_OK)
             LOGGER_FATAL("NATS connect failed: %s", natsStatus_GetText(s));
 
@@ -186,29 +171,34 @@ int drava_transport_nats_main(drava_t *drava,
             LOGGER_FATAL("JetStream ctx failed: %s", natsStatus_GetText(s));
 
         // Ensure stream exists for the configured subject
-        drava_nats_ensure_stream(js, stream_name, subject_name);
+        drava_nats_ensure_stream(js, drava->ingress_cfg.stream.c_str(),
+                                 drava->ingress_cfg.subject.c_str());
 
         // Ensure durable consumer filtered to SUBJECT (explicit acks)
         jsConsumerConfig cc;
         std::memset(&cc, 0, sizeof(cc));
-        cc.Durable = durable_name;
+        cc.Durable = drava->ingress_cfg.durable.c_str();
         cc.AckPolicy = js_AckExplicit;
-        cc.FilterSubject = subject_name;
+        cc.FilterSubject = drava->ingress_cfg.subject.c_str();
 
         jsConsumerInfo *ci = nullptr;
-        (void)js_AddConsumer(&ci, js, stream_name, &cc, /*opts*/ nullptr,
+        (void)js_AddConsumer(&ci, js, drava->ingress_cfg.stream.c_str(), &cc,
+                             /*opts*/ nullptr,
                              /*err*/ nullptr);
         jsConsumerInfo_Destroy(ci);
 
         // Pull subscribe
-        s = js_PullSubscribe(&sub, js, subject_name, durable_name,
+        s = js_PullSubscribe(&sub, js, drava->ingress_cfg.subject.c_str(),
+                             drava->ingress_cfg.durable.c_str(),
                              /*opts*/ nullptr, /*subOpts*/ nullptr,
                              /*err*/ nullptr);
         if (s != NATS_OK)
             LOGGER_FATAL("PullSubscribe failed: %s", natsStatus_GetText(s));
 
         LOGGER_INFO("JetStream ready: url=%s stream=%s subject=%s durable=%s",
-                    nats_url, stream_name, subject_name, durable_name);
+                    drava->nats_url.c_str(), drava->ingress_cfg.stream.c_str(),
+                    drava->ingress_cfg.subject.c_str(),
+                    drava->ingress_cfg.durable.c_str());
 
         // Fetch loop — pull batches and spawn Drava tasks
         struct pending_msg_t {
@@ -247,8 +237,7 @@ int drava_transport_nats_main(drava_t *drava,
                     "] stage=%s",
                     batch_payloads.size(), eos_in_batch ? 1 : 0,
                     first_stream_seq, last_stream_seq, first_consumer_seq,
-                    last_consumer_seq,
-                    drava_env_get_str_default("DRAVA_STAGE_NAME", "unknown"));
+                    last_consumer_seq, drava->stage_name.c_str());
             if (drava->callback_serialize) {
                 drava_callback_task_begin(drava);
                 drava_dispatch_payload_batch(drava, device_global_id,
@@ -312,8 +301,7 @@ int drava_transport_nats_main(drava_t *drava,
                                 " consumer_seq=%" PRIu64
                                 " pending_before=%zu stage=%s",
                                 stream_seq, consumer_seq, pending.size(),
-                                drava_env_get_str_default("DRAVA_STAGE_NAME",
-                                                          "unknown"));
+                                drava->stage_name.c_str());
                 }
                 pending.push_back(
                         {std::move(line), stream_seq, consumer_seq, is_eos});

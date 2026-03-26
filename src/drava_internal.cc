@@ -22,6 +22,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 static const char *env_get(const char *k)
 {
@@ -31,39 +32,16 @@ static const char *env_get(const char *k)
 
 static thread_local uint64_t g_callback_recv_ts_ns = 0;
 
-static std::string trim_copy(const std::string &s)
-{
-    size_t b = 0;
-    while (b < s.size() && (s[b] == ' ' || s[b] == '\t'))
-        ++b;
-    size_t e = s.size();
-    while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t'))
-        --e;
-    return s.substr(b, e - b);
-}
-
-static std::string strip_quotes(const std::string &s)
-{
-    if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                          (s.front() == '\'' && s.back() == '\'')))
-        return s.substr(1, s.size() - 2);
-    return s;
-}
-
-static bool
-split_kv(const std::string &line, std::string *key, std::string *value)
-{
-    size_t pos = line.find(':');
-    if (pos == std::string::npos)
-        return false;
-    *key = trim_copy(line.substr(0, pos));
-    *value = strip_quotes(trim_copy(line.substr(pos + 1)));
-    return !key->empty();
-}
-
 struct stage_config_state_t {
     std::once_flag once;
-    std::unordered_map<std::string, std::string> overrides;
+    bool loaded = false;
+    drava_transport_t transport_type = DRAVA_TRANSPORT_SOCKET;
+    std::string stage_name = "unknown";
+    std::string nats_url = "nats://127.0.0.1:4222";
+    drava_stage_runtime_config_t runtime_cfg;
+    drava_stage_ingress_config_t ingress_cfg;
+    drava_stage_egress_config_t egress_cfg;
+    int nats_async_drain_timeout_ms = 30000;
 };
 
 static stage_config_state_t &stage_config_state()
@@ -72,175 +50,189 @@ static stage_config_state_t &stage_config_state()
     return st;
 }
 
-static const char *map_stage_field_to_env(const std::string &section,
-                                          const std::string &key)
+static const char *drava_transport_name(drava_transport_t type)
 {
-    if (section == "ingress") {
-        if (key == "transport")
-            return "DRAVA_TRANSPORT";
-        if (key == "url")
-            return "NATS_URL";
-        if (key == "stream")
-            return "DRAVA_STREAM";
-        if (key == "subject")
-            return "DRAVA_SUBJECT";
-        if (key == "durable")
-            return "DRAVA_DURABLE";
-        if (key == "fetch_batch")
-            return "DRAVA_JS_FETCH_BATCH";
-        if (key == "callback_batch")
-            return "DRAVA_CALLBACK_BATCH";
-        if (key == "fetch_timeout_ms")
-            return "DRAVA_FETCH_TIMEOUT_MS";
-    } else if (section == "egress") {
-        if (key == "stream")
-            return "DRAVA_OUTPUT_STREAM";
-        if (key == "subject")
-            return "DRAVA_OUTPUT_SUBJECT";
+    switch (type) {
+    case DRAVA_TRANSPORT_SOCKET:
+        return "socket";
+    case DRAVA_TRANSPORT_NATS:
+        return "nats";
+    default:
+        return "socket";
     }
-    return nullptr;
+}
+
+static bool drava_parse_transport_name(const std::string &value,
+                                       drava_transport_t *out)
+{
+    if (out == nullptr)
+        return false;
+    if (value == "socket") {
+        *out = DRAVA_TRANSPORT_SOCKET;
+        return true;
+    }
+    if (value == "nats") {
+        *out = DRAVA_TRANSPORT_NATS;
+        return true;
+    }
+    return false;
+}
+
+static bool
+yaml_read_string(const YAML::Node &node, const char *key, std::string *out)
+{
+    if (out == nullptr || !node || !node[key] || !node[key].IsScalar())
+        return false;
+    *out = node[key].as<std::string>();
+    return true;
+}
+
+static bool yaml_read_int(const YAML::Node &node, const char *key, int *out)
+{
+    if (out == nullptr || !node || !node[key] || !node[key].IsScalar())
+        return false;
+    *out = node[key].as<int>();
+    return true;
+}
+
+static bool
+yaml_read_size_t(const YAML::Node &node, const char *key, size_t *out)
+{
+    if (out == nullptr || !node || !node[key] || !node[key].IsScalar())
+        return false;
+    *out = node[key].as<size_t>();
+    return true;
+}
+
+static bool yaml_read_bool(const YAML::Node &node, const char *key, bool *out)
+{
+    if (out == nullptr || !node || !node[key] || !node[key].IsScalar())
+        return false;
+    *out = node[key].as<bool>();
+    return true;
 }
 
 static void load_stage_config_once()
 {
+    auto &st = stage_config_state();
     const char *cfg_path = env_get("DRAVA_STAGE_CONFIG");
     const char *stage_name = env_get("DRAVA_STAGE_NAME");
     if (cfg_path == nullptr || stage_name == nullptr)
         return;
 
-    std::ifstream in(cfg_path);
-    if (!in.good()) {
-        LOGGER_WARN("DRAVA_STAGE_CONFIG not readable: %s", cfg_path);
+    try {
+        YAML::Node root = YAML::LoadFile(cfg_path);
+        st.stage_name = stage_name;
+
+        YAML::Node transport = root["transport"];
+        if (transport) {
+            if (transport["type"] && transport["type"].IsScalar()) {
+                drava_transport_t parsed_type;
+                if (drava_parse_transport_name(
+                            transport["type"].as<std::string>(),
+                            &parsed_type)) {
+                    st.transport_type = parsed_type;
+                }
+            }
+            (void)yaml_read_string(transport, "nats_url", &st.nats_url);
+        }
+
+        YAML::Node stages = root["stages"];
+        if (stages && stages.IsSequence()) {
+            for (const YAML::Node &stage : stages) {
+                YAML::Node name_node = stage["name"];
+                if (!name_node || !name_node.IsScalar())
+                    continue;
+                if (name_node.as<std::string>() != st.stage_name)
+                    continue;
+
+                YAML::Node runtime = stage["runtime"];
+                if (runtime && runtime.IsMap()) {
+                    (void)yaml_read_int(runtime, "threads",
+                                        &st.runtime_cfg.threads);
+                    (void)yaml_read_size_t(runtime, "callback_batch",
+                                           &st.runtime_cfg.callback_batch);
+                    (void)yaml_read_int(
+                            runtime, "callback_flush_timeout_ms",
+                            &st.runtime_cfg.callback_flush_timeout_ms);
+                    (void)yaml_read_bool(runtime, "callback_serialize",
+                                         &st.runtime_cfg.callback_serialize);
+                    (void)yaml_read_int(runtime, "nats_async_drain_timeout_ms",
+                                        &st.nats_async_drain_timeout_ms);
+                }
+
+                YAML::Node ingress = stage["ingress"];
+                if (ingress && ingress.IsMap()) {
+                    (void)yaml_read_string(ingress, "stream",
+                                           &st.ingress_cfg.stream);
+                    (void)yaml_read_string(ingress, "subject",
+                                           &st.ingress_cfg.subject);
+                    (void)yaml_read_string(ingress, "durable",
+                                           &st.ingress_cfg.durable);
+                    (void)yaml_read_string(ingress, "socket_path",
+                                           &st.ingress_cfg.socket_path);
+                    (void)yaml_read_int(ingress, "fetch_batch",
+                                        &st.ingress_cfg.fetch_batch);
+                    (void)yaml_read_int(ingress, "fetch_timeout_ms",
+                                        &st.ingress_cfg.fetch_timeout_ms);
+                }
+
+                YAML::Node egress = stage["egress"];
+                if (egress && egress.IsMap()) {
+                    (void)yaml_read_string(egress, "stream",
+                                           &st.egress_cfg.stream);
+                    (void)yaml_read_string(egress, "subject",
+                                           &st.egress_cfg.subject);
+                    (void)yaml_read_string(egress, "output_fifo_path",
+                                           &st.egress_cfg.output_fifo_path);
+                }
+
+                st.loaded = true;
+                break;
+            }
+        }
+    } catch (const std::exception &exc) {
+        LOGGER_WARN("Failed to parse DRAVA_STAGE_CONFIG=%s: %s", cfg_path,
+                    exc.what());
         return;
     }
 
-    std::unordered_map<std::string, std::string> local;
-    bool in_stages = false;
-    bool in_target_stage = false;
-    std::string section;
-    std::string line;
-    while (std::getline(in, line)) {
-        size_t hash = line.find('#');
-        if (hash != std::string::npos)
-            line.resize(hash);
-        if (line.empty())
-            continue;
-
-        size_t indent = 0;
-        while (indent < line.size() && line[indent] == ' ')
-            ++indent;
-        std::string body = trim_copy(line.substr(indent));
-        if (body.empty())
-            continue;
-
-        if (body == "stages:") {
-            in_stages = true;
-            in_target_stage = false;
-            section.clear();
-            continue;
-        }
-        if (!in_stages)
-            continue;
-
-        if (indent == 2 && body.rfind("- ", 0) == 0) {
-            in_target_stage = false;
-            section.clear();
-            std::string key;
-            std::string value;
-            std::string kv = trim_copy(body.substr(2));
-            if (split_kv(kv, &key, &value) && key == "name" &&
-                value == stage_name) {
-                in_target_stage = true;
-            }
-            continue;
-        }
-        if (!in_target_stage)
-            continue;
-
-        if (indent == 4 && (body == "ingress:" || body == "egress:")) {
-            section = body.substr(0, body.size() - 1);
-            continue;
-        }
-
-        if (indent >= 6 && !section.empty()) {
-            std::string key;
-            std::string value;
-            if (!split_kv(body, &key, &value))
-                continue;
-            const char *env_key = map_stage_field_to_env(section, key);
-            if (env_key != nullptr)
-                local[env_key] = value;
-        }
-    }
-
-    if (!local.empty()) {
-        auto &st = stage_config_state();
-        st.overrides = std::move(local);
-        LOGGER_INFO("Loaded stage config: file=%s stage=%s overrides=%zu",
-                    cfg_path, stage_name, st.overrides.size());
+    if (st.loaded) {
+        LOGGER_INFO("Loaded stage config: file=%s stage=%s transport=%s",
+                    cfg_path, st.stage_name.c_str(),
+                    drava_transport_name(st.transport_type));
     }
 }
 
-static const char *stage_config_lookup(const char *key)
+static const stage_config_state_t &drava_stage_config()
 {
     auto &st = stage_config_state();
     std::call_once(st.once, load_stage_config_once);
-    auto it = st.overrides.find(std::string(key));
-    if (it == st.overrides.end())
-        return nullptr;
-    return it->second.c_str();
+    return st;
 }
 
-int drava_parse_transport_from_env(drava_transport_t *out)
+int drava_apply_stage_config(drava_t *drava)
 {
-    if (!out)
+    if (drava == nullptr)
         return DRAVA_EINVAL;
 
-    const char *t = drava_env_get_str_default("DRAVA_TRANSPORT", "auto");
-    if (strcmp(t, "auto") == 0) {
-        *out = DRAVA_TRANSPORT_SOCKET;
-        return DRAVA_SUCCESS;
-    }
-
-    if (strcmp(t, "socket") == 0) {
-        *out = DRAVA_TRANSPORT_SOCKET;
-        return DRAVA_SUCCESS;
-    }
-
-    if (strcmp(t, "nats") == 0) {
+    const auto &cfg = drava_stage_config();
+    if (cfg.transport_type == DRAVA_TRANSPORT_NATS) {
 #ifdef DRAVA_HAS_NATS
-        *out = DRAVA_TRANSPORT_NATS;
-        return DRAVA_SUCCESS;
+        drava->transport_type = cfg.transport_type;
 #else
         return DRAVA_ENOTSUP;
 #endif
+    } else {
+        drava->transport_type = cfg.transport_type;
     }
-
-    return DRAVA_EINVAL;
-}
-
-int drava_env_get_int_default(const char *key, int default_value)
-{
-    const char *s = env_get(key);
-    if (!s)
-        s = stage_config_lookup(key);
-    if (!s)
-        return default_value;
-    errno = 0;
-    char *end = nullptr;
-    long v = std::strtol(s, &end, 10);
-    if (errno != 0 || end == s || *end != '\0')
-        return default_value;
-    return (int)v;
-}
-
-const char *drava_env_get_str_default(const char *key,
-                                      const char *default_value)
-{
-    const char *s = env_get(key);
-    if (!s)
-        s = stage_config_lookup(key);
-    return s ? s : default_value;
+    drava->stage_name = cfg.stage_name;
+    drava->nats_url = cfg.nats_url;
+    drava->runtime_cfg = cfg.runtime_cfg;
+    drava->ingress_cfg = cfg.ingress_cfg;
+    drava->egress_cfg = cfg.egress_cfg;
+    drava->nats_async_drain_timeout_ms = cfg.nats_async_drain_timeout_ms;
+    return DRAVA_SUCCESS;
 }
 
 uint64_t drava_monotonic_ns()
@@ -355,8 +347,6 @@ void drava_stats_log_snapshot(drava_t *drava, const char *reason)
     const double tx_msg_fps = (s.tx_msgs > 0 && stage_total_s > 0.0) ?
                                       (double)s.tx_msgs / stage_total_s :
                                       0.0;
-    const char *stage_name =
-            drava_env_get_str_default("DRAVA_STAGE_NAME", "unknown");
     LOGGER_INFO(
             "[drava-metrics] reason=%s rx_msgs=%" PRIu64 " rx_items=%" PRIu64
             " rx_bytes=%" PRIu64 " tx_msgs=%" PRIu64 " tx_bytes=%" PRIu64
@@ -368,7 +358,7 @@ void drava_stats_log_snapshot(drava_t *drava, const char *reason)
             s.rx_bytes, s.tx_msgs, s.tx_bytes, s.callback_batches, cb_avg_ms,
             s.stage_latency_samples, stage_avg_ms, stage_max_ms, rx_item_fps,
             tx_msg_fps, cb_total_s, publish_total_s, compute_total_s,
-            stage_total_s, stage_total_fps, stage_name);
+            stage_total_s, stage_total_fps, drava->stage_name.c_str());
 }
 
 uint64_t drava_callback_context_recv_ts_ns()

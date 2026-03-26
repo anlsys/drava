@@ -1,6 +1,10 @@
 pipeline:
   name: ptychonn_two_stage
 
+transport:
+  type: nats
+  nats_url: nats://127.0.0.1:4222
+
 publisher:
   synthetic: true
   num_frames: 10000
@@ -15,8 +19,6 @@ stages:
       threads: 4
       callback_batch: 256
     ingress:
-      transport: nats
-      url: nats://127.0.0.1:4222
       stream: FRAMES
       subject: frames.raw
       durable: drava_stage1
@@ -25,16 +27,18 @@ stages:
     egress:
       stream: PREDICTIONS
       subject: frames.stage1
+      # For socket transport, use:
+      # output_fifo_path: /tmp/drava_stage1_out
 
   - name: stage2
     runtime:
       threads: 4
       callback_batch: 256
     ingress:
-      transport: nats
-      url: nats://127.0.0.1:4222
       stream: PREDICTIONS
       subject: frames.stage1
       durable: drava_stage2
       fetch_batch: 256
       fetch_timeout_ms: 500
+      # For socket transport, use:
+      # socket_path: /tmp/drava_stage2_in

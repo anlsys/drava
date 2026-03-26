@@ -13,7 +13,8 @@ setup() {
   command -v nats-server >/dev/null 2>&1 || skip "nats-server not found in PATH"
 
   export PYTHONUNBUFFERED=1
-  export DRAVA_TRANSPORT="nats"
+  export DRAVA_STAGE_CONFIG="${ABS_TOP_SRCDIR}/tests/transport_nats.yaml"
+  export DRAVA_STAGE_NAME="test_stage"
   export NATS_URL="nats://127.0.0.1:4222"
 
   # Make 'import drava' resolve from build tree

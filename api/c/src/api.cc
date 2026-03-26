@@ -15,16 +15,16 @@ static drava_t drava;
 
 int drava_init(void)
 {
-    drava_transport_t transport = DRAVA_TRANSPORT_SOCKET;
-    int rc = drava_parse_transport_from_env(&transport);
+    int rc = drava.init();
     if (rc != DRAVA_SUCCESS) {
-        LOGGER_ERROR("drava_init: invalid/unsupported DRAVA_TRANSPORT (rc=%d)",
+        LOGGER_ERROR("drava_init: invalid/unsupported transport config (rc=%d)",
                      rc);
         return rc;
     }
     LOGGER_INFO("drava_init: selected transport=%s",
-                transport == DRAVA_TRANSPORT_NATS ? "nats" : "socket");
-    return drava.init(transport);
+                drava.transport_type == DRAVA_TRANSPORT_NATS ? "nats" :
+                                                               "socket");
+    return DRAVA_SUCCESS;
 }
 
 int drava_register_frame_routine(drava_frame_routine_t routine, void *user_data)

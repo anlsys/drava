@@ -23,12 +23,6 @@
 #include <unistd.h>
 #include <vector>
 
-const char *sock_path =
-        drava_env_get_str_default("DRAVA_SOCKET_PATH", "/tmp/accel_2048.sock");
-
-const char *fifo_path = drava_env_get_str_default("DRAVA_OUTPUT_FIFO_PATH",
-                                                  "/tmp/drava_stage2_in");
-
 static bool read_exact(int fd, void *buf, size_t len)
 {
     char *p = static_cast<char *>(buf);
@@ -46,7 +40,6 @@ int drava_transport_socket_publish(drava_t *drava,
                                    const void *data,
                                    size_t data_len)
 {
-    (void)drava;
     if (data == NULL || data_len == 0)
         return DRAVA_EINVAL;
 
@@ -55,6 +48,7 @@ int drava_transport_socket_publish(drava_t *drava,
 
     std::lock_guard<std::mutex> lock(out_mu);
     if (out == NULL) {
+        const char *fifo_path = drava->egress_cfg.output_fifo_path.c_str();
         if (!std::filesystem::exists(fifo_path)) {
             LOGGER_ERROR("Output FIFO does not exist: %s", fifo_path);
             return DRAVA_ERROR;
@@ -88,6 +82,7 @@ int drava_transport_socket_main(drava_t *drava,
 
     /* the thread 0 reads from the socket and spawns task */
     if (thread->tid == 0) {
+        const char *sock_path = drava->ingress_cfg.socket_path.c_str();
         /* setup unix socket */
         if (!std::filesystem::exists(sock_path))
             LOGGER_FATAL("Socket %s does not exists", sock_path);
@@ -109,8 +104,7 @@ int drava_transport_socket_main(drava_t *drava,
         LOGGER_INFO("Connected to socket %s, reading framed binary payloads...",
                     sock_path);
 
-        int flush_timeout_ms =
-                drava_env_get_int_default("DRAVA_FETCH_TIMEOUT_MS", 1000);
+        int flush_timeout_ms = drava->ingress_cfg.fetch_timeout_ms;
         int callback_flush_timeout_ms = drava->callback_flush_timeout_ms;
         LOGGER_INFO(
                 "Socket fetch config: read_timeout_ms=%d callback_batch=%zu callback_flush_timeout_ms=%d",
