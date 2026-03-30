@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+import yaml
 
 DRAVA_METRICS_RE = re.compile(
     r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
@@ -175,6 +176,100 @@ def parse_section_value(path: Path, section_name: str, key_name: str):
     return None
 
 
+def load_yaml_config(path: Path):
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Top-level YAML config must be a mapping: {path}")
+    return data
+
+
+def write_yaml_config(path: Path, config: dict):
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, sort_keys=False)
+
+
+def _stage_by_name(config: dict, stage_name: str):
+    stages = config.get("stages", [])
+    if not isinstance(stages, list):
+        raise RuntimeError("Config field 'stages' must be a list")
+    for stage in stages:
+        if isinstance(stage, dict) and stage.get("name") == stage_name:
+            return stage
+    raise RuntimeError(f"Stage '{stage_name}' not found in config")
+
+
+def build_run_config(base_config: dict,
+                     run_tag: str,
+                     nats_url: str,
+                     input_stream: str,
+                     input_subject: str,
+                     output_stream: str,
+                     output_subject: str,
+                     configured_num_frames: int,
+                     rate_hz: float,
+                     effective_app_timeout_s: float,
+                     stage1_threads: int,
+                     stage2_threads: int,
+                     stage1_callback_batch: int,
+                     stage2_callback_batch: int,
+                     timeout_ms: int,
+                     stage1_durable: str,
+                     stage2_durable: str):
+    config = {
+        "pipeline": dict(base_config.get("pipeline", {})),
+        "transport": dict(base_config.get("transport", {})),
+        "publisher": dict(base_config.get("publisher", {})),
+        "benchmark": dict(base_config.get("benchmark", {})),
+        "stages": [dict(stage) for stage in base_config.get("stages", [])],
+    }
+
+    transport = config.setdefault("transport", {})
+    transport["nats_url"] = nats_url
+
+    publisher = config.setdefault("publisher", {})
+    publisher["rate_hz"] = rate_hz
+    publisher["synthetic"] = True
+    publisher["num_frames"] = configured_num_frames
+
+    benchmark = config.setdefault("benchmark", {})
+    benchmark["app_timeout_s"] = effective_app_timeout_s
+
+    stage1 = _stage_by_name(config, "stage1")
+    stage2 = _stage_by_name(config, "stage2")
+
+    stage1_runtime = dict(stage1.get("runtime", {}))
+    stage1_runtime["threads"] = stage1_threads
+    stage1_runtime["callback_batch"] = stage1_callback_batch
+    stage1["runtime"] = stage1_runtime
+
+    stage2_runtime = dict(stage2.get("runtime", {}))
+    stage2_runtime["threads"] = stage2_threads
+    stage2_runtime["callback_batch"] = stage2_callback_batch
+    stage2["runtime"] = stage2_runtime
+
+    stage1_ingress = dict(stage1.get("ingress", {}))
+    stage1_ingress["stream"] = input_stream
+    stage1_ingress["subject"] = input_subject
+    stage1_ingress["durable"] = stage1_durable
+    stage1_ingress["fetch_timeout_ms"] = timeout_ms
+    stage1["ingress"] = stage1_ingress
+
+    stage1_egress = dict(stage1.get("egress", {}))
+    stage1_egress["stream"] = output_stream
+    stage1_egress["subject"] = output_subject
+    stage1["egress"] = stage1_egress
+
+    stage2_ingress = dict(stage2.get("ingress", {}))
+    stage2_ingress["stream"] = output_stream
+    stage2_ingress["subject"] = output_subject
+    stage2_ingress["durable"] = stage2_durable
+    stage2_ingress["fetch_timeout_ms"] = timeout_ms
+    stage2["ingress"] = stage2_ingress
+
+    return config
+
+
 def stream_lines(proc, log_path, line_cb=None):
     with open(log_path, "w", encoding="utf-8") as f:
         for line in proc.stdout:
@@ -263,6 +358,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     root = Path(__file__).resolve().parent
     stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
         args.stage_config)
+    base_config = load_yaml_config(stage_config_path)
     base_input_stream = args.input_stream
     base_input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or args.input_subject
     base_output_stream = args.output_stream
@@ -324,7 +420,6 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     env_common = dict(base_env)
     env_common["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
-    env_common["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
 
     run_tag = f"{run_dir.name}_b{batch_size}_r{run_idx}"
     input_stream = f"{base_input_stream}_{run_tag}"
@@ -332,44 +427,42 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     output_stream = f"{base_output_stream}_{run_tag}"
     output_subject = f"{base_output_subject}.{run_tag}"
     stage1_job_id = str(abs(hash(run_tag)) % 2147483647 or 1)
+    stage1_durable = f"{args.stage1_durable_prefix}_{run_tag}"
+    stage2_durable = f"{args.stage2_durable_prefix}_{run_tag}"
+    run_config_path = run_dir / f"pipeline_b{batch_size}_r{run_idx}.yaml"
+    run_config = build_run_config(
+        base_config=base_config,
+        run_tag=run_tag,
+        nats_url=nats_url,
+        input_stream=input_stream,
+        input_subject=input_subject,
+        output_stream=output_stream,
+        output_subject=output_subject,
+        configured_num_frames=configured_num_frames,
+        rate_hz=float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0),
+        effective_app_timeout_s=effective_app_timeout_s,
+        stage1_threads=stage1_threads,
+        stage2_threads=stage2_threads,
+        stage1_callback_batch=stage1_callback_batch,
+        stage2_callback_batch=stage2_callback_batch,
+        timeout_ms=args.timeout_ms,
+        stage1_durable=stage1_durable,
+        stage2_durable=stage2_durable,
+    )
+    write_yaml_config(run_config_path, run_config)
 
     env_stage1 = dict(env_common)
-    env_stage1["DRAVA_THREADS"] = str(stage1_threads)
-    env_stage1["DRAVA_DURABLE"] = f"{args.stage1_durable_prefix}_{run_tag}"
-    env_stage1["DRAVA_STREAM"] = input_stream
-    env_stage1["DRAVA_SUBJECT"] = input_subject
-    env_stage1["DRAVA_OUTPUT_STREAM"] = output_stream
-    env_stage1["DRAVA_OUTPUT_SUBJECT"] = output_subject
+    env_stage1["DRAVA_STAGE_CONFIG"] = str(run_config_path)
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
-    env_stage1["DRAVA_CALLBACK_BATCH"] = str(stage1_callback_batch)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
     env_stage1["STAGE1_JOB_ID"] = stage1_job_id
 
     env_stage2 = dict(env_common)
-    env_stage2["DRAVA_THREADS"] = str(stage2_threads)
-    env_stage2["DRAVA_DURABLE"] = f"{args.stage2_durable_prefix}_{run_tag}"
-    env_stage2["DRAVA_STREAM"] = output_stream
-    env_stage2["DRAVA_SUBJECT"] = output_subject
-    env_stage2["DRAVA_CALLBACK_BATCH"] = str(stage2_callback_batch)
+    env_stage2["DRAVA_STAGE_CONFIG"] = str(run_config_path)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
 
     env_pub = dict(env_common)
-    env_pub["NATS_URL"] = nats_url
-    env_pub["DRAVA_STREAM"] = input_stream
-    env_pub["DRAVA_SUBJECT"] = input_subject
-    env_pub["DRAVA_PUBLISH_RATE_HZ"] = str(
-        float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0)
-    )
-    env_pub["DRAVA_PUBLISH_SYNTHETIC"] = "1"
-    if args.num_frames > 0:
-        env_pub["DRAVA_PUBLISH_NUM_FRAMES"] = str(args.num_frames)
-    elif yaml_num_frames is not None:
-        env_pub["DRAVA_PUBLISH_NUM_FRAMES"] = str(int(yaml_num_frames))
-    else:
-        raise RuntimeError(
-            "No publisher frame count configured. Set --num-frames or "
-            "publisher.num_frames in the stage config YAML."
-        )
+    env_pub["DRAVA_STAGE_CONFIG"] = str(run_config_path)
 
     stage1_log = run_dir / f"app_stage1_b{batch_size}_r{run_idx}.log"
     stage2_log = run_dir / f"app_stage2_b{batch_size}_r{run_idx}.log"

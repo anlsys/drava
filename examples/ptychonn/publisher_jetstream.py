@@ -4,12 +4,11 @@ import time
 from nats.aio.client import Client as NATS
 from publisher_util import (
     load_publish_config,
+    load_transport_config,
     make_payload_generator,
 )
 
-NATS_URL = os.getenv("NATS_URL", "nats://0.0.0.0:4222")
-STREAM = os.getenv("DRAVA_STREAM", "FRAMES")
-SUBJECT = os.getenv("DRAVA_SUBJECT", "frames.raw")
+NATS_URL, STREAM, SUBJECT = load_transport_config()
 EOS_PREFIX = b"DRAVA_EOS:"
 RATE_HZ, SYNTHETIC_MODE, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 1024
