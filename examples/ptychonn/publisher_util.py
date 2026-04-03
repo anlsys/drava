@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import numpy as np
+import yaml
 
 DATA_DIR = "PtychoNN_data_partial"
 FRAME_SHAPE = (64, 64, 1)
@@ -29,6 +30,49 @@ def _parse_yaml_scalar(path: Path, section: str, key_name: str):
             if key.strip() == key_name:
                 return value.strip().strip("\"'")
     return None
+
+
+def _load_yaml_config(path: Path | None):
+    if path is None or not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_transport_config():
+    cfg_path = os.getenv("DRAVA_STAGE_CONFIG", "")
+    cfg = _load_yaml_config(Path(cfg_path)) if cfg_path else {}
+    transport = cfg.get("transport", {})
+    if not isinstance(transport, dict):
+        transport = {}
+
+    stages = cfg.get("stages", [])
+    stage1_ingress = {}
+    if isinstance(stages, list):
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            if stage.get("name") != "stage1":
+                continue
+            ingress = stage.get("ingress", {})
+            if isinstance(ingress, dict):
+                stage1_ingress = ingress
+            break
+
+    nats_url = os.getenv(
+        "NATS_URL",
+        str(transport.get("nats_url", "nats://0.0.0.0:4222")),
+    )
+    stream = os.getenv(
+        "DRAVA_STREAM",
+        str(stage1_ingress.get("stream", "FRAMES")),
+    )
+    subject = os.getenv(
+        "DRAVA_SUBJECT",
+        str(stage1_ingress.get("subject", "frames.raw")),
+    )
+    return nats_url, stream, subject
 
 
 def load_publish_config():

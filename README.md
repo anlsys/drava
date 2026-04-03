@@ -37,6 +37,16 @@ module load swig/4.4.1
 module load python/3.14.3-no-gil
 ```
 
+### YAML CPP requirements
+- Build YAML CPP 
+```shell
+git clone git@github.com:jbeder/yaml-cpp.git
+mkdir build && cd build
+CC=clang CXX=clang++ cmake .. -DYAML_BUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=$HOME/opt/yaml-cpp-install
+make -j
+make install
+```
+
 ### (Optional) NATS requirements
 - Install NATS server
 ```shell

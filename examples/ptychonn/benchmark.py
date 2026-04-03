@@ -48,7 +48,7 @@ def parse_args():
     p.add_argument("--reuse-nats", action="store_true",
                    help="Use existing NATS server instead of launching one.")
     p.add_argument("--nats-url", default="",
-                   help="NATS URL. Defaults to stage1 ingress url from --stage-config.")
+                   help="NATS URL. Defaults to transport.nats_url from --stage-config.")
     p.add_argument("--stage-config", default="pipeline.yaml",
                    help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs",
@@ -101,6 +101,10 @@ def parse_stage_ingress_value(path: Path, stage_name: str, key_name: str):
 
 def parse_publisher_value(path: Path, key_name: str):
     return parse_section_value(path, "publisher", key_name)
+
+
+def parse_transport_value(path: Path, key_name: str):
+    return parse_section_value(path, "transport", key_name)
 
 
 def parse_section_value(path: Path, section_name: str, key_name: str):
@@ -227,7 +231,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or "frames.raw"
     nats_url = (
             args.nats_url
-            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
     yaml_num_frames = parse_publisher_value(stage_config_path, "num_frames")
@@ -443,7 +447,7 @@ def main():
         args.stage_config)
     nats_url = (
             args.nats_url
-            or parse_stage_ingress_value(stage_config_path, "stage1", "url")
+            or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
 

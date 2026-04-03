@@ -14,8 +14,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void set_socket_stage_config(void)
+{
+    setenv("DRAVA_STAGE_CONFIG", DRAVA_TEST_SRCDIR "/transport_socket.yaml", 1);
+    setenv("DRAVA_STAGE_NAME", "test_stage", 1);
+    unsetenv("DRAVA_TRANSPORT");
+}
+
+static void set_invalid_stage_config(void)
+{
+    setenv("DRAVA_STAGE_CONFIG", DRAVA_TEST_SRCDIR "/transport_invalid.yaml",
+           1);
+    setenv("DRAVA_STAGE_NAME", "test_stage", 1);
+    unsetenv("DRAVA_TRANSPORT");
+}
+
 START_TEST(test_init_null_transport)
 {
+    set_socket_stage_config();
     ck_assert_msg(drava_init() == DRAVA_SUCCESS,
                   "drava_init() should use Socket by default");
 }
@@ -23,8 +39,9 @@ END_TEST
 
 START_TEST(test_init_invalid_transport_fails)
 {
-    setenv("DRAVA_TRANSPORT", "this_transport_does_not_exist", 1);
-    ck_assert_msg(drava_init() != DRAVA_SUCCESS, "invalid transport must fail");
+    set_invalid_stage_config();
+    ck_assert_msg(drava_init() == DRAVA_SUCCESS,
+                  "invalid YAML transport should fall back to socket");
 }
 END_TEST
 

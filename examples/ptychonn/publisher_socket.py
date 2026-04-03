@@ -9,15 +9,15 @@ Prereqs (example):
 Drava socket transport:
   export DRAVA_TRANSPORT=socket
 """
-import time
 import os
 import struct
+import time
 from publisher_util import (
     load_publish_config,
     make_payload_generator,
 )
 
-FIFO_PATH = "/tmp/drava_in"
+FIFO_PATH = os.getenv("DRAVA_OUTPUT_FIFO_PATH", "/tmp/drava_in")
 
 # target framerate from env:
 #   unset or <= 0 => max speed (no pacing)

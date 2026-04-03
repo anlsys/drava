@@ -1,0 +1,8 @@
+transport:
+  type: socket
+
+stages:
+  - name: test_stage
+    runtime:
+      callback_batch: 128
+      callback_flush_timeout_ms: 100

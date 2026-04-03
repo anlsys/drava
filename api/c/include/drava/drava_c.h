@@ -45,6 +45,16 @@ typedef enum drava_transport_t {
 } drava_transport_t;
 
 /**
+ * Global transport configuration shared by the runtime.
+ * Stage-local routing/endpoints live under ingress/egress.
+ * For now the only global backend-specific field is the NATS server URL.
+ */
+typedef struct drava_transport_config_t {
+    drava_transport_t type;
+    const char *nats_url;
+} drava_transport_config_t;
+
+/**
  * Drava logger levels
  */
 typedef enum drava_verbose_t {

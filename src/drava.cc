@@ -55,21 +55,18 @@ static void *drava_main(team_t *team, thread_t *thread)
     return NULL;
 }
 
-int drava_t::init(drava_transport_t transport_type)
+int drava_t::init(void)
 {
-    /* Remember which backend to use (socket vs NATS) */
-    int cb = drava_env_get_int_default("DRAVA_CALLBACK_BATCH", 128);
-    int flush_timeout_ms =
-            drava_env_get_int_default("DRAVA_CALLBACK_FLUSH_TIMEOUT_MS", 0);
-    int serialize_callbacks =
-            drava_env_get_int_default("DRAVA_CALLBACK_SERIALIZE", 1);
-    this->transport_type = transport_type;
+    int rc = drava_apply_stage_config(this);
+    if (rc != DRAVA_SUCCESS)
+        return rc;
     this->runtime.init();
     this->frame_routine = NULL;
     this->frame_routine_user_data = NULL;
-    this->callback_batch_size = (size_t)cb;
-    this->callback_flush_timeout_ms = flush_timeout_ms;
-    this->callback_serialize = (serialize_callbacks != 0);
+    this->callback_batch_size = this->runtime_cfg.callback_batch;
+    this->callback_flush_timeout_ms =
+            this->runtime_cfg.callback_flush_timeout_ms;
+    this->callback_serialize = this->runtime_cfg.callback_serialize;
     this->next_batch_id.store(1);
     this->next_frame_id.store(1);
     this->stats_reset();
@@ -105,7 +102,7 @@ int drava_t::listen(void)
         team_t *team = &drava_device->team;
         team->desc.routine = drava_main;
         team->desc.args = arg;
-        team->desc.nthreads = drava_env_get_int_default("DRAVA_THREADS", 4);
+        team->desc.nthreads = this->runtime_cfg.threads;
         LOGGER_INFO("team->desc.nthreads: %d", team->desc.nthreads);
 
         team->desc.master_is_member = false;

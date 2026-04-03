@@ -29,6 +29,28 @@ struct drava_device_t {
     thread_place_t places_list;
 };
 
+struct drava_stage_runtime_config_t {
+    int threads = 4;
+    size_t callback_batch = 128;
+    int callback_flush_timeout_ms = 0;
+    bool callback_serialize = true;
+};
+
+struct drava_stage_ingress_config_t {
+    std::string stream = "FRAMES";
+    std::string subject = "frames.raw";
+    std::string durable = "drava_consumer";
+    std::string socket_path = "/tmp/accel_2048.sock";
+    int fetch_batch = 8;
+    int fetch_timeout_ms = 1000;
+};
+
+struct drava_stage_egress_config_t {
+    std::string stream = "PREDICTIONS";
+    std::string subject = "frames.stage1";
+    std::string output_fifo_path = "/tmp/drava_stage2_in";
+};
+
 struct drava_t {
     /***********/
     /* Members */
@@ -46,6 +68,12 @@ struct drava_t {
 
     /* which transport backend to use (socket or NATS) */
     drava_transport_t transport_type;
+    std::string stage_name;
+    std::string nats_url;
+    drava_stage_runtime_config_t runtime_cfg;
+    drava_stage_ingress_config_t ingress_cfg;
+    drava_stage_egress_config_t egress_cfg;
+    int nats_async_drain_timeout_ms;
 
     /* Batching and id allocation for callback dispatch */
     size_t callback_batch_size;
@@ -78,7 +106,7 @@ struct drava_t {
     /***********/
 
     /* Initialize drava */
-    int init(drava_transport_t transport_type);
+    int init(void);
 
     /* Register a batch-aware routine */
     int register_frame_routine(drava_frame_routine_t routine, void *user_data);
@@ -106,12 +134,7 @@ struct drava_t {
     int set_callback_serialize(bool enabled);
 };
 
-int drava_parse_transport_from_env(drava_transport_t *out);
-
-const char *drava_env_get_str_default(const char *key,
-                                      const char *default_value);
-
-int drava_env_get_int_default(const char *key, int default_value);
+int drava_apply_stage_config(drava_t *drava);
 
 bool drava_payload_is_eos(const void *data, size_t data_len);
 
