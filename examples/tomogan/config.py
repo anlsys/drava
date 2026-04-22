@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import h5py
+import imageio.v2 as imageio
 import numpy as np
 
 
@@ -64,15 +65,12 @@ DRAVA_INFER_BATCH = _get_int("DRAVA_INFER_BATCH", 16)
 LOG_EVERY = _get_int("DRAVA_LOG_EVERY", DRAVA_INFER_BATCH)
 
 
-def scale_to_uint8(image):
-    image = np.asarray(image, dtype=np.float32).copy()
-    np.nan_to_num(image, copy=False)
-    flat = image.reshape(-1)
-    lo = float(np.percentile(flat, 0.05))
-    hi = float(np.percentile(flat, 99.95))
-    clipped = image.clip(lo, hi)
-    if hi == lo:
-        clipped -= hi
+def save2img(image, path):
+    image = np.asarray(image, dtype=np.float32)
+    lo = float(image.min())
+    hi = float(image.max())
+    if abs(hi - lo) < 1e-4:
+        out = np.zeros(image.shape, dtype=np.uint8)
     else:
-        clipped = (clipped - lo) * 255.0 / (hi - lo)
-    return clipped.astype("uint8")
+        out = ((image - lo) * 255.0 / (hi - lo)).astype(np.uint8)
+    imageio.imwrite(path, out)

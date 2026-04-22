@@ -17,7 +17,7 @@ from config import (
     PNG_DIR,
     TEST_INPUT_KEY,
     TEST_TARGET_KEY,
-    scale_to_uint8,
+    save2img,
 )
 
 
@@ -103,21 +103,18 @@ def write_output(chunks, n_expected: int) -> None:
 
     saved_paths = [str(OUTPUT_PATH)]
     if noisy.shape[0] > 0:
+        save_idx = noisy.shape[0] - 1
         PNG_DIR.mkdir(parents=True, exist_ok=True)
         ns_png = PNG_DIR / "ns.png"
         dn_png = PNG_DIR / "it00500.png"
-        tf.keras.utils.save_img(ns_png, scale_to_uint8(noisy[0]), scale=False)
-        tf.keras.utils.save_img(dn_png, scale_to_uint8(denoised[0]), scale=False)
+        save2img(noisy[save_idx], ns_png)
+        save2img(denoised[save_idx], dn_png)
         saved_paths.extend([str(ns_png), str(dn_png)])
         if gt is not None and gt.shape[0] > 0:
             gt_png = PNG_DIR / "gt.png"
             err_png = PNG_DIR / "abs_err_dn_vs_gt.png"
-            tf.keras.utils.save_img(gt_png, scale_to_uint8(gt[0]), scale=False)
-            tf.keras.utils.save_img(
-                err_png,
-                scale_to_uint8(np.abs(denoised[0] - gt[0])),
-                scale=False,
-            )
+            save2img(gt[save_idx], gt_png)
+            save2img(np.abs(denoised[save_idx] - gt[save_idx]), err_png)
             saved_paths.extend([str(gt_png), str(err_png)])
 
     if gt is not None and gt.shape == denoised.shape:
