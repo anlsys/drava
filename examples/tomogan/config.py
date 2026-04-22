@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import h5py
+import numpy as np
 
 
 def _get_int(name: str, default: int) -> int:
@@ -31,6 +32,7 @@ OUTPUT_PATH = Path(
         str(EXAMPLE_DIR / "drava_tomogan_output.h5"),
     )
 )
+PNG_DIR = EXAMPLE_DIR
 
 TEST_INPUT_KEY = os.getenv("DRAVA_TOMOGAN_INPUT_KEY", "test_ns")
 TEST_TARGET_KEY = os.getenv("DRAVA_TOMOGAN_TARGET_KEY", "test_gt")
@@ -60,3 +62,17 @@ FRAME_BYTES = FRAME_HEIGHT * FRAME_WIDTH * 4
 
 DRAVA_INFER_BATCH = _get_int("DRAVA_INFER_BATCH", 16)
 LOG_EVERY = _get_int("DRAVA_LOG_EVERY", DRAVA_INFER_BATCH)
+
+
+def scale_to_uint8(image):
+    image = np.asarray(image, dtype=np.float32).copy()
+    np.nan_to_num(image, copy=False)
+    flat = image.reshape(-1)
+    lo = float(np.percentile(flat, 0.05))
+    hi = float(np.percentile(flat, 99.95))
+    clipped = image.clip(lo, hi)
+    if hi == lo:
+        clipped -= hi
+    else:
+        clipped = (clipped - lo) * 255.0 / (hi - lo)
+    return clipped.astype("uint8")

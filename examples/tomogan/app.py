@@ -14,8 +14,10 @@ from config import (
     FRAME_WIDTH,
     MODEL_PATH,
     OUTPUT_PATH,
+    PNG_DIR,
     TEST_INPUT_KEY,
     TEST_TARGET_KEY,
+    scale_to_uint8,
 )
 
 
@@ -99,18 +101,38 @@ def write_output(chunks, n_expected: int) -> None:
         if gt is not None:
             h5fd.create_dataset("gt", data=gt, dtype=np.float32)
 
+    saved_paths = [str(OUTPUT_PATH)]
+    if noisy.shape[0] > 0:
+        PNG_DIR.mkdir(parents=True, exist_ok=True)
+        ns_png = PNG_DIR / "ns.png"
+        dn_png = PNG_DIR / "it00500.png"
+        tf.keras.utils.save_img(ns_png, scale_to_uint8(noisy[0]), scale=False)
+        tf.keras.utils.save_img(dn_png, scale_to_uint8(denoised[0]), scale=False)
+        saved_paths.extend([str(ns_png), str(dn_png)])
+        if gt is not None and gt.shape[0] > 0:
+            gt_png = PNG_DIR / "gt.png"
+            err_png = PNG_DIR / "abs_err_dn_vs_gt.png"
+            tf.keras.utils.save_img(gt_png, scale_to_uint8(gt[0]), scale=False)
+            tf.keras.utils.save_img(
+                err_png,
+                scale_to_uint8(np.abs(denoised[0] - gt[0])),
+                scale=False,
+            )
+            saved_paths.extend([str(gt_png), str(err_png)])
+
     if gt is not None and gt.shape == denoised.shape:
         mse_noisy = float(np.mean((noisy - gt) ** 2))
         mse_denoised = float(np.mean((denoised - gt) ** 2))
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
             f"Wrote {OUTPUT_PATH} with {denoised.shape[0]} frames; "
-            f"MSE noisy={mse_noisy:.6f}, denoised={mse_denoised:.6f}",
+            f"MSE noisy={mse_noisy:.6f}, denoised={mse_denoised:.6f}; "
+            f"saved_files={saved_paths}",
         )
     else:
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
-            f"Wrote {OUTPUT_PATH} with {denoised.shape[0]} frames",
+            f"Wrote {OUTPUT_PATH} with {denoised.shape[0]} frames; saved_files={saved_paths}",
         )
 
 
