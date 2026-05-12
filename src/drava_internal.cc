@@ -392,10 +392,10 @@ void drava_callback_task_end(drava_t *drava, bool saw_eos)
 }
 
 static void drava_dispatch_execute(drava_t *drava,
-                                   device_global_id_t device_global_id,
+                                   device_unique_id_t device_unique_id,
                                    const std::vector<std::string> &payloads)
 {
-    (void)device_global_id;
+    (void)device_unique_id;
     if (!drava || payloads.empty())
         return;
 
@@ -457,8 +457,8 @@ static void drava_dispatch_execute(drava_t *drava,
 }
 
 void drava_dispatch_payload_batch(drava_t *drava,
-                                  device_global_id_t device_global_id,
+                                  device_unique_id_t device_unique_id,
                                   const std::vector<std::string> &payloads)
 {
-    drava_dispatch_execute(drava, device_global_id, payloads);
+    drava_dispatch_execute(drava, device_unique_id, payloads);
 }

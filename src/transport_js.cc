@@ -133,12 +133,12 @@ int drava_transport_nats_shutdown(drava_t *drava)
 }
 
 int drava_transport_nats_main(drava_t *drava,
-                              device_global_id_t device_global_id,
+                              device_unique_id_t device_unique_id,
                               thread_t *thread)
 {
     LOGGER_INFO("drava_transport_nats_main: device=%d tid=%u",
-                (int)device_global_id, (unsigned)thread->tid);
-    drava_device_t *drava_device = drava->devices + device_global_id;
+                (int)device_unique_id, (unsigned)thread->tid);
+    drava_device_t *drava_device = drava->devices + device_unique_id;
     team_t *team = &drava_device->team;
 
     /* thread 0: subscribe + fetch from JetStream, spawn a task per message */
@@ -240,23 +240,27 @@ int drava_transport_nats_main(drava_t *drava,
                     last_consumer_seq, drava->stage_name.c_str());
             if (drava->callback_serialize) {
                 drava_callback_task_begin(drava);
-                drava_dispatch_payload_batch(drava, device_global_id,
+                drava_dispatch_payload_batch(drava, device_unique_id,
                                              batch_payloads);
                 return;
             }
             drava_callback_task_begin(drava);
-            drava->runtime.team_task_spawn(
+
+            constexpr task_flags_t flags = TASK_FLAG_ZERO;
+            drava->runtime.team_task_spawn<flags>(
                     team,
-                    [drava, device_global_id,
-                     batch_payloads = std::move(batch_payloads)](task_t *task) {
-                        (void)task;
-                        drava_dispatch_payload_batch(drava, device_global_id,
+                    XKRT_UNSPECIFIED_DEVICE_UNIQUE_ID, 0, nullptr, nullptr,
+                    [drava, device_unique_id,
+                     batch_payloads = std::move(batch_payloads)](runtime_t * runtime, device_t * device, task_t *task) {
+                        (void)runtime;(void)device;(void)task;
+                        drava_dispatch_payload_batch(drava, device_unique_id,
                                                      batch_payloads);
                     });
         };
 
         while (true) {
-            natsMsgList list = {0};
+            natsMsgList list;
+            memset(&list, 0, sizeof(list));
             s = natsSubscription_Fetch(&list, sub, /*batch*/ fetch_batch,
                                        /*timeout ms*/ fetch_timeout_ms,
                                        /*err*/ nullptr);

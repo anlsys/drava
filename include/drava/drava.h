@@ -26,7 +26,7 @@ struct drava_device_t {
     team_t team;
 
     /* the list of places for that device (= 1x cpuset) */
-    thread_place_t places_list;
+    team_thread_place_t places_list;
 };
 
 struct drava_stage_runtime_config_t {
@@ -164,16 +164,16 @@ void drava_callback_task_begin(drava_t *drava);
 void drava_callback_task_end(drava_t *drava, bool saw_eos);
 
 void drava_dispatch_payload_batch(drava_t *drava,
-                                  device_global_id_t device_global_id,
+                                  device_unique_id_t device_unique_id,
                                   const std::vector<std::string> &payloads);
 
 /* Transport-specific entry points (implemented in transport_*.cc) */
 int drava_transport_socket_main(drava_t *drava,
-                                device_global_id_t device_global_id,
+                                device_unique_id_t device_unique_id,
                                 thread_t *thread);
 
 int drava_transport_nats_main(drava_t *drava,
-                              device_global_id_t device_global_id,
+                              device_unique_id_t device_unique_id,
                               thread_t *thread);
 
 int drava_transport_socket_publish(drava_t *drava,
@@ -188,7 +188,7 @@ int drava_transport_nats_shutdown(drava_t *drava);
 
 /* main for a thread on a given device */
 int drava_transport_main(drava_t *drava,
-                         device_global_id_t device_global_id,
+                         device_unique_id_t device_unique_id,
                          thread_t *thread);
 
 #endif /* __DRAVA_H__ */

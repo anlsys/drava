@@ -14,23 +14,23 @@
 
 struct drava_args_t {
     drava_t *drava;
-    device_global_id_t device_global_id;
+    device_unique_id_t device_unique_id;
 };
 
 /* dispatcher: choose transport at runtime */
 int drava_transport_main(drava_t *drava,
-                         device_global_id_t device_global_id,
+                         device_unique_id_t device_unique_id,
                          thread_t *thread)
 {
     switch (drava->transport_type) {
     case DRAVA_TRANSPORT_SOCKET:
         LOGGER_DEBUG("Drava transport: Socket");
-        return drava_transport_socket_main(drava, device_global_id, thread);
+        return drava_transport_socket_main(drava, device_unique_id, thread);
 
     case DRAVA_TRANSPORT_NATS:
 #ifdef DRAVA_HAS_NATS
         LOGGER_DEBUG("Drava transport: NATS");
-        return drava_transport_nats_main(drava, device_global_id, thread);
+        return drava_transport_nats_main(drava, device_unique_id, thread);
 #else
         LOGGER_FATAL("NATS transport selected at runtime but not compiled in");
         return -1;
@@ -43,14 +43,16 @@ int drava_transport_main(drava_t *drava,
 }
 
 /* The routine executed by each thread of each team of each device */
-static void *drava_main(team_t *team, thread_t *thread)
+static void *drava_main(runtime_t * runtime, team_t * team, thread_t * thread)
 {
+    (void) runtime;
+
     drava_args_t *args = (drava_args_t *)team->desc.args;
     assert(args);
 
     LOGGER_INFO("Starting thread %u on device %d", thread->tid,
-                args->device_global_id);
-    drava_transport_main(args->drava, args->device_global_id, thread);
+                args->device_unique_id);
+    drava_transport_main(args->drava, args->device_unique_id, thread);
 
     return NULL;
 }
@@ -86,21 +88,21 @@ int drava_t::listen(void)
     /* Fork a team of threads for each device */
     drava_args_t args[XKRT_DEVICES_MAX];
 
-    for (device_global_id_t i = 0; i < this->runtime.get_ndevices(); ++i) {
-        if (i == HOST_DEVICE_GLOBAL_ID)
+    for (device_unique_id_t i = 0; i < this->runtime.get_ndevices(); ++i) {
+        if (i == XKRT_HOST_DEVICE_UNIQUE_ID)
             continue;
 
         /* save team information */
         drava_args_t *arg = args + i;
         arg->drava = this;
-        arg->device_global_id = i;
+        arg->device_unique_id = i;
 
         /* drava device */
         drava_device_t *drava_device = this->devices + i;
 
         /* setup the team */
         team_t *team = &drava_device->team;
-        team->desc.routine = drava_main;
+        team->desc.routine = (team_routine_t) drava_main;
         team->desc.args = arg;
         team->desc.nthreads = this->runtime_cfg.threads;
         LOGGER_INFO("team->desc.nthreads: %d", team->desc.nthreads);
@@ -130,7 +132,7 @@ int drava_t::listen(void)
     }
 
     /* Wait for all teams completion */
-    for (device_global_id_t i = 0; i < this->runtime.get_ndevices(); ++i)
+    for (device_unique_id_t i = 0; i < this->runtime.get_ndevices(); ++i)
         this->runtime.team_join(&this->devices[i].team);
     LOGGER_INFO("drava.listen: enter, ndevices=%u",
                 (unsigned)this->runtime.get_ndevices());

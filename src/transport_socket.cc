@@ -74,10 +74,10 @@ int drava_transport_socket_publish(drava_t *drava,
 }
 
 int drava_transport_socket_main(drava_t *drava,
-                                device_global_id_t device_global_id,
+                                device_unique_id_t device_unique_id,
                                 thread_t *thread)
 {
-    drava_device_t *drava_device = drava->devices + device_global_id;
+    drava_device_t *drava_device = drava->devices + device_unique_id;
     team_t *team = &drava_device->team;
 
     /* the thread 0 reads from the socket and spawns task */
@@ -122,17 +122,20 @@ int drava_transport_socket_main(drava_t *drava,
             pending.reserve(drava->callback_batch_size);
             if (drava->callback_serialize) {
                 drava_callback_task_begin(drava);
-                drava_dispatch_payload_batch(drava, device_global_id,
+                drava_dispatch_payload_batch(drava, device_unique_id,
                                              batch_payloads);
                 return;
             }
             drava_callback_task_begin(drava);
-            drava->runtime.team_task_spawn(
+
+            constexpr task_flags_t flags = TASK_FLAG_ZERO;
+            drava->runtime.team_task_spawn<flags>(
                     team,
-                    [drava, device_global_id,
-                     batch_payloads = std::move(batch_payloads)](task_t *task) {
-                        (void)task;
-                        drava_dispatch_payload_batch(drava, device_global_id,
+                    XKRT_UNSPECIFIED_DEVICE_UNIQUE_ID, 0, nullptr, nullptr,
+                    [drava, device_unique_id,
+                     batch_payloads = std::move(batch_payloads)](runtime_t * runtime, device_t * device, task_t *task) {
+                        (void)runtime;(void)device;(void)task;
+                        drava_dispatch_payload_batch(drava, device_unique_id,
                                                      batch_payloads);
                     });
         };
