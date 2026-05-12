@@ -15,6 +15,7 @@ from config import (
     MODEL_PATH,
     OUTPUT_PATH,
     PNG_DIR,
+    SAVE_OUTPUT,
     TEST_INPUT_KEY,
     TEST_TARGET_KEY,
     save2img,
@@ -133,6 +134,17 @@ def write_output(chunks, n_expected: int) -> None:
         )
 
 
+def finalize_without_output(n_expected: int, processed_frames: int) -> None:
+    if n_expected and processed_frames != n_expected:
+        raise RuntimeError(
+            f"received {processed_frames} frames but EOS declared {n_expected}"
+        )
+    drava.log(
+        drava.DRAVA_VERBOSE_INFO,
+        f"Benchmark finalize without output: processed_frames={processed_frames}",
+    )
+
+
 configure_gpu_memory_growth()
 drava.log(drava.DRAVA_VERBOSE_INFO, f"Built with CUDA: {tf.test.is_built_with_cuda()}")
 MODEL = load_model_or_raise()
@@ -166,8 +178,12 @@ def _maybe_finalize():
             return
         _finalized = True
         chunks = list(_chunks)
+        processed_frames = int(_processed_frames)
         n_expected = int(_expected_frames)
-    write_output(chunks, n_expected)
+    if SAVE_OUTPUT:
+        write_output(chunks, n_expected)
+    else:
+        finalize_without_output(n_expected, processed_frames)
 
 
 def func(frames) -> None:
@@ -208,11 +224,11 @@ def func(frames) -> None:
     if pred.ndim != 4 or pred.shape[-1] != 1:
         raise RuntimeError(f"unexpected model output shape: {pred.shape}")
 
-    noisy = tensor[..., 0].copy()
-    denoised = pred[..., 0].copy()
-
     with _state_lock:
-        _chunks.append((start, noisy, denoised))
+        if SAVE_OUTPUT:
+            noisy = tensor[..., 0].copy()
+            denoised = pred[..., 0].copy()
+            _chunks.append((start, noisy, denoised))
         _processed_frames += batch_size
 
     _maybe_finalize()

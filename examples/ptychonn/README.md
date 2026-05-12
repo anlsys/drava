@@ -191,6 +191,8 @@ python3 benchmark_two_stages.py \
   --input-subject frames.raw \
   --output-stream PREDICTIONS \
   --output-subject frames.stage1
+  
+  python tune_two_stage_ytopt.py --max-evals 6 --initial-points 8 --batches 256,512 --stage1-threads 4,8,16 --stage2-threads 2,4,8 --stage1-callback-batches 256,512 --stage2-callback-batches 64,128,256 --objective pipeline_e2e_s
 
 
 ```

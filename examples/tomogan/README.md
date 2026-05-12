@@ -156,3 +156,44 @@ source venv/bin/activate
 export DRAVA_TRANSPORT=socket
 python app.py
 ```
+
+### Benchmark runtime and energy
+
+`benchmark.py` runs the same JetStream workflow as the manual example, but automates repeated runs,
+generates a fresh per-run pipeline config to avoid stale JetStream state, and writes paper-friendly
+CSV results.
+
+Run it from the TomoGAN example directory:
+
+```shell
+source drava_nvidia.sh
+source ~/venvs/no-gil-3.13/bin/activate
+cd drava/build
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+cd ../examples/tomogan
+python benchmark.py --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats --batches 1,2,4,8,16 --runs 3
+```
+
+The benchmark writes logs and `summary.csv` under `bench_logs/<timestamp>/`. The CSV includes
+stage runtime/FPS, end-to-end publisher-to-final-metrics time, GPU utilization, GPU average power,
+GPU energy, GPU joules per frame, optional Intel RAPL CPU/package energy, and total joules per
+frame when both sources are available.
+
+The benchmark uses `pipeline.yaml` as the base config. For each run it writes a derived YAML file
+under the run log directory with a unique JetStream stream, subject, and durable, plus the current
+batch size. CLI options such as `--threads`, `--timeout-ms`, `--rate-hz`, and `--num-frames`
+override the YAML only when you pass them. If you omit `--num-frames`, the publisher uses
+`publisher.num_frames` from YAML; if that is absent, it publishes the dataset size from
+`dataset/demo-dataset-real.h5:test_ns`.
+
+For longer paper runs that repeat the dataset frames, add `--num-frames`:
+
+```shell
+python benchmark.py --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats --batches 1,2,4,8,16 --num-frames 256 --runs 3
+```
+
+For a fixed-rate experiment, add for example:
+
+```shell
+python benchmark.py --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats --batches 16 --num-frames 256 --runs 3 --rate-hz 8
+```

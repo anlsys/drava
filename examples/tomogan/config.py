@@ -13,6 +13,13 @@ def _get_int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DATASET_PATH = Path(
     os.getenv(
@@ -63,6 +70,7 @@ FRAME_BYTES = FRAME_HEIGHT * FRAME_WIDTH * 4
 
 DRAVA_INFER_BATCH = _get_int("DRAVA_INFER_BATCH", 16)
 LOG_EVERY = _get_int("DRAVA_LOG_EVERY", DRAVA_INFER_BATCH)
+SAVE_OUTPUT = _get_bool("DRAVA_TOMOGAN_SAVE_OUTPUT", True)
 
 
 def save2img(image, path):

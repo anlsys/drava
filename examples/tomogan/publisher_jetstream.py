@@ -1,7 +1,9 @@
 import asyncio
+import os
 import time
 
 from nats.aio.client import Client as NATS
+from nats.js.errors import APIError
 
 from publisher_util import (
     load_dataset_payloads,
@@ -13,7 +15,21 @@ NATS_URL, STREAM, SUBJECT = load_transport_config()
 EOS_PREFIX = b"DRAVA_EOS:"
 RATE_HZ, TARGET_FRAMES = load_publish_config()
 LOG_EVERY = 128
-PUBLISH_INFLIGHT = 1024
+PUBLISH_INFLIGHT = int(os.getenv("DRAVA_PUBLISH_INFLIGHT", "64"))
+PUBLISH_RETRIES = int(os.getenv("DRAVA_PUBLISH_RETRIES", "8"))
+PUBLISH_RETRY_DELAY_S = float(os.getenv("DRAVA_PUBLISH_RETRY_DELAY_S", "0.05"))
+
+
+async def publish_with_retry(js, subject, payload):
+    delay_s = PUBLISH_RETRY_DELAY_S
+    for attempt in range(PUBLISH_RETRIES + 1):
+        try:
+            return await js.publish(subject, payload)
+        except APIError as exc:
+            if getattr(exc, "err_code", None) != 10167 or attempt >= PUBLISH_RETRIES:
+                raise
+            await asyncio.sleep(delay_s)
+            delay_s *= 2.0
 
 
 async def main():
@@ -51,7 +67,7 @@ async def main():
 
     while sent_count < TARGET_FRAMES:
         payload = payloads[sent_count % n_payloads]
-        pending.append(asyncio.create_task(js.publish(SUBJECT, payload)))
+        pending.append(asyncio.create_task(publish_with_retry(js, SUBJECT, payload)))
         if len(pending) >= PUBLISH_INFLIGHT:
             await flush_pending()
 
@@ -82,7 +98,7 @@ async def main():
     await flush_pending()
 
     eos_payload = EOS_PREFIX + str(sent_count).encode("ascii")
-    eos_ack = await js.publish(SUBJECT, eos_payload)
+    eos_ack = await publish_with_retry(js, SUBJECT, eos_payload)
     await nc.drain()
 
     t_end = time.perf_counter()
