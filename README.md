@@ -8,6 +8,7 @@ Runtime and end-to-end simulation for BIA systems and simulations
 - xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
 - swig if generating Python bindings
 - NATS server if run with Jetstream
+- YAML cpp - https://github.com/jbeder/yaml-cpp.git
 
 ### On JLSE
 Requirements are preinstalled:
@@ -28,13 +29,23 @@ module load cuda/12.3.0
 module load hwloc
 
 # XKRT
-module load xkaapi/502226c375a8/Debug-cuda  #  if using A40/A100/H100 nodes
+module load xkrt/v1.0.2/Debug-cuda #  if using A40/A100/H100 nodes
 
 # if using swig
 module load swig/4.4.1
 
 # if using python 3.14.3, compiled with `--disable-gil`
 module load python/3.14.3-no-gil
+```
+
+### On Chimera
+```
+# Load pre-installed dependences
+module use /home/rpereira/.modules
+module load nats yaml-cpp xkrt/release/v1.0.2-cuda-hip swig/4.4.1 python/3.14.5-no-gil
+
+# Build Drava
+CC=clang-19 CXX=clang++-19 cmake -DCMAKE_BUILD_TYPE=Debug -DNATS_ENABLED=ON ..
 ```
 
 ### YAML CPP requirements
@@ -84,7 +95,7 @@ export DRAVA_OUTPUT_SUBJECT=frames.stage1
 export DRAVA_INFER_BATCH=512
 export DRAVA_JS_FETCH_BATCH=512
 export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
+export XKRT_VERBOSE=4
 export DRAVA_THREADS=24
 
 # app stage 2
@@ -97,7 +108,7 @@ export DRAVA_LOG_EVERY=512
 export DRAVA_INFER_BATCH=512
 export DRAVA_JS_FETCH_BATCH=512
 export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
+export XKRT_VERBOSE=4
 export DRAVA_THREADS=24
 # export DRAVA_TRANSPORT=socket
 # publisher
