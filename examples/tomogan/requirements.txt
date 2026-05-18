@@ -1,0 +1,5 @@
+h5py
+nats-py
+numpy
+PyYAML
+tensorflow

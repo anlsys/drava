@@ -1,4 +1,62 @@
 ### A 100
+- Ytopt
+```shell
+(no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/tomogan) ✗ python tune_two_stage_ytopt.py \
+  --max-evals 6 \
+  --initial-points 8 \
+  --batches 256,512 \
+  --stage1-threads 4,8,16 \
+  --stage2-threads 2,4,8 \
+  --stage1-callback-batches 256,512 \
+  --stage2-callback-batches 64,128,256 \
+  --objective pipeline_e2e_s
+ytopt tuning logs: /home/ashovon/drava/examples/ptychonn/tune_logs_two_stages_ytopt/20260504_205428
+Running up to 6 benchmark evaluations.
+
+[1/6] batch=256 s1_threads=4 s2_threads=2 s1_cb=256 s2_cb=64 rate_hz=0.0
+  objective=7.01941 publisher_fps=13674.27 stage1_fps=4035.47 stage2_fps=1564.71 pipeline_e2e_s=7.02
+
+[2/6] batch=256 s1_threads=4 s2_threads=2 s1_cb=512 s2_cb=256 rate_hz=0.0
+  objective=7.55022 publisher_fps=13763.54 stage1_fps=4067.01 stage2_fps=1564.20 pipeline_e2e_s=7.55
+
+[3/6] batch=512 s1_threads=8 s2_threads=8 s1_cb=256 s2_cb=64 rate_hz=0.0
+  objective=12.6297 publisher_fps=14865.35 stage1_fps=5002.38 stage2_fps=838.16 pipeline_e2e_s=12.63
+
+[4/6] batch=256 s1_threads=16 s2_threads=8 s1_cb=512 s2_cb=64 rate_hz=0.0
+Uncaught exception <class 'ValueError'>: fill_value=nan (of type <class 'float'>) cannot be cast to the input data that is dtype('int64'). If fill_value is a Python scalar, instead pass  a numpy scalar (e.g. fill_value=np.uint8(0) if your data is of type np.uint8). Make sure that both dtypes are of the same kind.Traceback (most recent call last):
+  File "/home/ashovon/drava/examples/ptychonn/tune_two_stage_ytopt.py", line 417, in <module>
+    main()
+    ~~~~^^
+  File "/home/ashovon/drava/examples/ptychonn/tune_two_stage_ytopt.py", line 331, in main
+    forget_ytopt_point(ytoptimizer, point)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/ashovon/drava/examples/ptychonn/tune_two_stage_ytopt.py", line 178, in forget_ytopt_point
+    rebuild_ytopt_model(ytoptimizer)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/ashovon/drava/examples/ptychonn/tune_two_stage_ytopt.py", line 170, in rebuild_ytopt_model
+    ytoptimizer._optimizer.tell(xx, yy)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/ashovon/ytopt_libs/scikit-optimize/skopt/optimizer/optimizer.py", line 611, in tell
+    return self._tell(x, y, fit=fit)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/ashovon/ytopt_libs/scikit-optimize/skopt/optimizer/optimizer.py", line 738, in _tell
+    self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ashovon/ytopt_libs/scikit-optimize/skopt/space/space.py", line 1301, in inverse_transform
+    Xt = self.imp_const_inv.fit_transform(Xt)
+  File "/home/ashovon/venvs/no-gil-3.13/lib/python3.13/site-packages/sklearn/utils/_set_output.py", line 316, in wrapped
+    data_to_wrap = f(self, X, *args, **kwargs)
+  File "/home/ashovon/venvs/no-gil-3.13/lib/python3.13/site-packages/sklearn/base.py", line 907, in fit_transform
+    return self.fit(X, **fit_params).transform(X)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/ashovon/venvs/no-gil-3.13/lib/python3.13/site-packages/sklearn/base.py", line 1336, in wrapper
+    return fit_method(estimator, *args, **kwargs)
+  File "/home/ashovon/venvs/no-gil-3.13/lib/python3.13/site-packages/sklearn/impute/_base.py", line 447, in fit
+    X = self._validate_input(X, in_fit=True)
+  File "/home/ashovon/venvs/no-gil-3.13/lib/python3.13/site-packages/sklearn/impute/_base.py", line 425, in _validate_input
+    raise ValueError(err_msg)
+ValueError: fill_value=nan (of type <class 'float'>) cannot be cast to the input data that is dtype('int64'). If fill_value is a Python scalar, instead pass  a numpy scalar (e.g. fill_value=np.uint8(0) if your data is of type np.uint8). Make sure that both dtypes are of the same kind.
+```
 - Tuner
 ```shell
 (no-gil-3.13) (base) ➜  ~/drava/examples/ptychonn git:(feature/multi-stage) ✗ python3 tune_two_stage.py \

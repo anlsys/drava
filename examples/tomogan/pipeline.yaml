@@ -1,0 +1,21 @@
+pipeline:
+  name: tomogan_single_stage
+
+transport:
+  type: nats
+  nats_url: nats://127.0.0.1:4222
+
+publisher:
+  rate_hz: 0
+
+stages:
+  - name: stage1
+    runtime:
+      threads: 4
+      callback_batch: 16
+    ingress:
+      stream: FRAMES
+      subject: frames.raw
+      durable: drava_tomogan_stage1
+      fetch_batch: 16
+      fetch_timeout_ms: 200

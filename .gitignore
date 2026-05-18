@@ -220,3 +220,6 @@ commit_config.txt
 
 # Ptychonn data
 examples/ptychonn/PtychoNN_data_partial/
+
+# Tomogan data
+examples/tomogan/dataset/
