@@ -1,5 +1,50 @@
 - Benchmark
 ```shell
+(no-gil-3.13) (base) ➜  ~/drava/examples/tomogan git:(feature/tomogan) ✗ python benchmark.py --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats --stage-config pipeline.yaml 
+[global] starting nats-server
+[global] nats ready (nats://127.0.0.1:4222)
+Running threads=yaml batch=1 run=1 ...
+[batch=1 run=1] starting app.py
+[batch=1 run=1] starting publisher_jetstream.py
+  done: stage_fps=23.47 overhead_pct=62.05 gpu_j_per_frame=4.9274
+Running threads=yaml batch=2 run=1 ...
+[batch=2 run=1] starting app.py
+[batch=2 run=1] starting publisher_jetstream.py
+  done: stage_fps=31.99 overhead_pct=68.52 gpu_j_per_frame=4.2840
+Running threads=yaml batch=4 run=1 ...
+[batch=4 run=1] starting app.py
+[batch=4 run=1] starting publisher_jetstream.py
+  done: stage_fps=35.82 overhead_pct=70.86 gpu_j_per_frame=4.6201
+Running threads=yaml batch=8 run=1 ...
+[batch=8 run=1] starting app.py
+[batch=8 run=1] starting publisher_jetstream.py
+  done: stage_fps=94.19 overhead_pct=88.53 gpu_j_per_frame=5.9433
+Running threads=yaml batch=16 run=1 ...
+[batch=16 run=1] starting app.py
+[batch=16 run=1] starting publisher_jetstream.py
+  done: stage_fps=37.84 overhead_pct=73.78 gpu_j_per_frame=5.6122
+
+| Batch | Threads | Frames | Stage Time (s) | Stage FPS | E2E (s) | Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | CPU RAPL (J) | Total J/frame |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 4 | 16 | 0.68 | 23.47 | 1.80 | 1.11 | 62.05 | 50.64 | 78.84 | 4.9274 | n/a | 4.9274 |
+| 2 | 4 | 16 | 0.50 | 31.99 | 1.59 | 1.09 | 68.52 | 53.81 | 68.54 | 4.2840 | n/a | 4.2840 |
+| 4 | 4 | 16 | 0.45 | 35.82 | 1.53 | 1.09 | 70.86 | 59.58 | 73.92 | 4.6201 | n/a | 4.6201 |
+| 8 | 4 | 16 | 0.17 | 94.19 | 1.48 | 1.31 | 88.53 | 80.60 | 95.09 | 5.9433 | n/a | 5.9433 |
+| 16 | 4 | 16 | 0.42 | 37.84 | 1.61 | 1.19 | 73.78 | 71.82 | 89.79 | 5.6122 | n/a | 5.6122 |
+
+| Batch | Threads | Runs | Frames | Stage FPS mean +/- std | E2E mean (s) | Overhead mean (%) | Total J/frame mean |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 4 | 1 | 16 | 23.47 +/- 0.00 | 1.80 | 62.05 | 4.9274 |
+| 2 | 4 | 1 | 16 | 31.99 +/- 0.00 | 1.59 | 68.52 | 4.2840 |
+| 4 | 4 | 1 | 16 | 35.82 +/- 0.00 | 1.53 | 70.86 | 4.6201 |
+| 8 | 4 | 1 | 16 | 94.19 +/- 0.00 | 1.48 | 88.53 | 5.9433 |
+| 16 | 4 | 1 | 16 | 37.84 +/- 0.00 | 1.61 | 73.78 | 5.6122 |
+
+Logs and summary written to: /home/ashovon/drava/examples/tomogan/bench_logs/20260513_211728
+[global] stopping nats-server
+
+
+
 python benchmark.py --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats --batches 1,2,4,8 --runs 2
 
 

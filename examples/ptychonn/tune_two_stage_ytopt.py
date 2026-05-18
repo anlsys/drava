@@ -31,9 +31,12 @@ def parse_args():
     p.add_argument("--stage2-callback-batches", default="64,128,256",
                    help="Comma-separated stage2 callback batch sizes to search.")
     p.add_argument("--rates", default="0",
-                   help="Comma-separated publisher rate_hz values to search.")
+                   help="Comma-separated integer publisher rate_hz values to search.")
     p.add_argument("--runs", type=int, default=1, help="Runs per benchmark evaluation.")
-    p.add_argument("--timeout-ms", type=int, default=200, help="DRAVA_FETCH_TIMEOUT_MS.")
+    p.add_argument("--timeout-ms", type=int, default=200,
+                   help="Fixed DRAVA_FETCH_TIMEOUT_MS used when --timeouts-ms is not set.")
+    p.add_argument("--timeouts-ms", default=None,
+                   help="Comma-separated DRAVA_FETCH_TIMEOUT_MS values to search.")
     p.add_argument("--num-frames", type=int, default=10000, help="Frame count per run.")
     p.add_argument("--max-evals", type=int, default=24, help="Maximum ytopt evaluations.")
     p.add_argument("--initial-points", type=int, default=8,
@@ -65,13 +68,6 @@ def parse_int_list(raw: str):
     return vals
 
 
-def parse_float_list(raw: str):
-    vals = [float(x.strip()) for x in raw.split(",") if x.strip()]
-    if not vals:
-        raise SystemExit(f"Expected at least one float in: {raw!r}")
-    return vals
-
-
 def fmt(x, spec="{:.2f}"):
     if x is None:
         return "n/a"
@@ -87,7 +83,8 @@ def normalize_point(point):
         "stage2_threads": int(point["stage2_threads"]),
         "stage1_callback_batch": int(point["stage1_callback_batch"]),
         "stage2_callback_batch": int(point["stage2_callback_batch"]),
-        "rate_hz": float(point["rate_hz"]),
+        "rate_hz": int(point["rate_hz"]),
+        "timeout_ms": int(point["timeout_ms"]),
     }
 
 
@@ -141,18 +138,22 @@ def build_search_space(args):
     CS, CSH, _ = import_ytopt_bits()
     cs = CS.ConfigurationSpace(seed=args.seed)
     hyperparameters = [
-        CSH.CategoricalHyperparameter("batch", choices=[str(v) for v in parse_int_list(args.batches)]),
-        CSH.CategoricalHyperparameter("stage1_threads", choices=[str(v) for v in parse_int_list(args.stage1_threads)]),
-        CSH.CategoricalHyperparameter("stage2_threads", choices=[str(v) for v in parse_int_list(args.stage2_threads)]),
+        CSH.CategoricalHyperparameter("batch", choices=parse_int_list(args.batches)),
+        CSH.CategoricalHyperparameter("stage1_threads", choices=parse_int_list(args.stage1_threads)),
+        CSH.CategoricalHyperparameter("stage2_threads", choices=parse_int_list(args.stage2_threads)),
         CSH.CategoricalHyperparameter(
             "stage1_callback_batch",
-            choices=[str(v) for v in parse_int_list(args.stage1_callback_batches)],
+            choices=parse_int_list(args.stage1_callback_batches),
         ),
         CSH.CategoricalHyperparameter(
             "stage2_callback_batch",
-            choices=[str(v) for v in parse_int_list(args.stage2_callback_batches)],
+            choices=parse_int_list(args.stage2_callback_batches),
         ),
-        CSH.CategoricalHyperparameter("rate_hz", choices=[str(v) for v in parse_float_list(args.rates)]),
+        CSH.CategoricalHyperparameter("rate_hz", choices=parse_int_list(args.rates)),
+        CSH.CategoricalHyperparameter(
+            "timeout_ms",
+            choices=parse_int_list(args.timeouts_ms) if args.timeouts_ms else [args.timeout_ms],
+        ),
     ]
     if hasattr(cs, "add"):
         cs.add(hyperparameters)
@@ -161,13 +162,23 @@ def build_search_space(args):
     return cs
 
 
-def rebuild_ytopt_model(ytoptimizer):
-    ytoptimizer._optimizer.Xi = []
-    ytoptimizer._optimizer.yi = []
-    xx = list(ytoptimizer.evals.keys())
-    yy = [ytoptimizer.evals[x] for x in xx]
-    if xx:
-        ytoptimizer._optimizer.tell(xx, yy)
+def patch_skopt_categorical_imputer(ytoptimizer):
+    """Work around skopt/sklearn categorical int imputation on newer sklearn.
+
+    ytopt stores ConfigSpace categorical choices in skopt. With integer
+    categorical values, skopt's inverse-transform path can ask sklearn to
+    impute an int64 array using fill_value=np.nan, which newer sklearn rejects.
+    This search space has no conditional inactive dimensions, so a zero fill
+    value is enough to keep skopt's internal bookkeeping from crashing while
+    preserving the categorical values that ytopt returns.
+    """
+    skopt_space = getattr(getattr(ytoptimizer, "_optimizer", None), "space", None)
+    if skopt_space is None:
+        return
+    for attr in ("imp_const", "imp_const_inv"):
+        imputer = getattr(skopt_space, attr, None)
+        if imputer is not None and hasattr(imputer, "fill_value"):
+            imputer.fill_value = 0
 
 
 def forget_ytopt_point(ytoptimizer, point):
@@ -175,7 +186,6 @@ def forget_ytopt_point(ytoptimizer, point):
     if key in ytoptimizer.evals:
         del ytoptimizer.evals[key]
         ytoptimizer.counter -= 1
-        rebuild_ytopt_model(ytoptimizer)
 
 
 def run_benchmark(root: Path, benchmark_script: Path, tuner_dir: Path, args, point, eval_idx: int):
@@ -184,7 +194,7 @@ def run_benchmark(root: Path, benchmark_script: Path, tuner_dir: Path, args, poi
     run_log = tuner_dir / (
         f"eval{eval_idx:04d}_b{point['batch']}_s1t{point['stage1_threads']}_"
         f"s2t{point['stage2_threads']}_s1cb{point['stage1_callback_batch']}_"
-        f"s2cb{point['stage2_callback_batch']}_r{rate_slug}.log"
+        f"s2cb{point['stage2_callback_batch']}_r{rate_slug}_to{point['timeout_ms']}.log"
     )
     cmd = [
               args.python,
@@ -195,7 +205,7 @@ def run_benchmark(root: Path, benchmark_script: Path, tuner_dir: Path, args, poi
               "--stage2-threads", str(point["stage2_threads"]),
               "--stage1-callback-batch", str(point["stage1_callback_batch"]),
               "--stage2-callback-batch", str(point["stage2_callback_batch"]),
-              "--timeout-ms", str(args.timeout_ms),
+              "--timeout-ms", str(point["timeout_ms"]),
               "--num-frames", str(args.num_frames),
               "--rate-hz", str(point["rate_hz"]),
           ] + shlex.split(args.extra_args)
@@ -255,15 +265,15 @@ def write_csv(path: Path, rows, fieldnames):
 def print_results_table(rows, objective, top_k):
     print("")
     print(
-        "| Rank | Eval | Batch | Threads S1/S2 | Callback S1/S2 | Rate Hz | Publisher FPS | Stage1 FPS | Stage2 FPS | Pipeline E2E (s) | Summary |"
+        "| Rank | Eval | Batch | Threads S1/S2 | Callback S1/S2 | Rate Hz | Timeout ms | Publisher FPS | Stage1 FPS | Stage2 FPS | Pipeline E2E (s) | Summary |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
     for idx, row in enumerate(rows[:top_k], start=1):
         print(
             f"| {idx} | {row['eval']} | {row['batch']} | "
             f"{row['stage1_threads']}/{row['stage2_threads']} | "
             f"{row['stage1_callback_batch']}/{row['stage2_callback_batch']} | "
-            f"{fmt(row['rate_hz'])} | {fmt(row.get('publisher_avg_fps'))} | "
+            f"{fmt(row['rate_hz'])} | {row['timeout_ms']} | {fmt(row.get('publisher_avg_fps'))} | "
             f"{fmt(row.get('stage1_total_fps'))} | {fmt(row.get('stage2_total_fps'))} | "
             f"{fmt(row.get('pipeline_e2e_s'))} | {row['summary_path']} |"
         )
@@ -297,6 +307,7 @@ def main():
         set_SEED=args.seed,
         set_NI=args.initial_points,
     )
+    patch_skopt_categorical_imputer(ytoptimizer)
 
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     tuner_dir = root / "tune_logs_two_stages_ytopt" / stamp
@@ -322,7 +333,8 @@ def main():
                 f"batch={normalized['batch']} s1_threads={normalized['stage1_threads']} "
                 f"s2_threads={normalized['stage2_threads']} "
                 f"s1_cb={normalized['stage1_callback_batch']} "
-                f"s2_cb={normalized['stage2_callback_batch']} rate_hz={normalized['rate_hz']}",
+                f"s2_cb={normalized['stage2_callback_batch']} rate_hz={normalized['rate_hz']} "
+                f"timeout_ms={normalized['timeout_ms']}",
                 flush=True,
             )
             row, failure = run_benchmark(root, benchmark_script, tuner_dir, args, normalized, eval_idx)
@@ -341,12 +353,13 @@ def main():
                     f"pipeline_e2e_s={fmt(row.get('pipeline_e2e_s'))}"
                 )
 
-        if tell_batch:
-            ytoptimizer.tell(tell_batch)
-
         remaining = args.max_evals - eval_idx
         if remaining <= 0:
             break
+
+        if tell_batch:
+            ytoptimizer.tell(tell_batch)
+
         next_count = min(args.batch_size, remaining)
         asked = list(ytoptimizer.ask(n_points=next_count))
         points = asked[0] if asked else []
@@ -400,6 +413,7 @@ def main():
                 "stage1_callback_batch",
                 "stage2_callback_batch",
                 "rate_hz",
+                "timeout_ms",
                 "elapsed_s",
                 "log",
                 "error",
