@@ -7,6 +7,7 @@ from keras.models import load_model
 from config import (
     DATA_DIR,
     DRAVA_INFER_BATCH,
+    DRAVA_STAGE1_CALLBACK_BATCH,
     PATCH_SIDE,
     STAGE1_JOB_ID,
     WT_DIR,
@@ -96,10 +97,10 @@ def func(frames) -> None:
     if not batch_raw:
         return
 
-    batch_size = len(batch_raw)
+    callback_batch_size = len(batch_raw)
     with _state_lock:
         start = _next_start
-        end = start + batch_size
+        end = start + callback_batch_size
         _next_start = end
         if eos_raw is not None:
             _eos_seen = True
@@ -109,32 +110,38 @@ def func(frames) -> None:
                     _expected_frames = expected_frames
     expected_for_payload = expected_frames if expected_frames is not None else 0
 
-    stacked = b"".join(batch_raw)
-    tensor = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
-        (batch_size, PATCH_SIDE, PATCH_SIDE, 1), order="C"
-    )
-    pred_amp, pred_phi = model.predict(tensor, verbose=0)
-
-    pred_amp_3d = pred_amp[..., 0]
-    pred_phi_3d = pred_phi[..., 0]
-    for off in range(0, batch_size, PUBLISH_CHUNK):
-        chunk_end = min(off + PUBLISH_CHUNK, batch_size)
-        payload = encode_stage1_prediction(
-            job_id=STAGE1_JOB_ID,
-            start=start + off,
-            end=start + chunk_end,
-            n_total=expected_for_payload,
-            pred_amp=pred_amp_3d[off:chunk_end],
-            pred_phi=pred_phi_3d[off:chunk_end],
+    for infer_off in range(0, callback_batch_size, DRAVA_INFER_BATCH):
+        infer_end = min(infer_off + DRAVA_INFER_BATCH, callback_batch_size)
+        infer_raw = batch_raw[infer_off:infer_end]
+        infer_size = len(infer_raw)
+        stacked = b"".join(infer_raw)
+        tensor = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
+            (infer_size, PATCH_SIDE, PATCH_SIDE, 1), order="C"
         )
-        rc = drava.publish_py(payload)
-        if rc != drava.DRAVA_SUCCESS:
-            raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
+        pred_amp, pred_phi = model.predict(tensor, verbose=0)
+
+        pred_amp_3d = pred_amp[..., 0]
+        pred_phi_3d = pred_phi[..., 0]
+        for off in range(0, infer_size, PUBLISH_CHUNK):
+            chunk_end = min(off + PUBLISH_CHUNK, infer_size)
+            global_off = infer_off + off
+            global_chunk_end = infer_off + chunk_end
+            payload = encode_stage1_prediction(
+                job_id=STAGE1_JOB_ID,
+                start=start + global_off,
+                end=start + global_chunk_end,
+                n_total=expected_for_payload,
+                pred_amp=pred_amp_3d[off:chunk_end],
+                pred_phi=pred_phi_3d[off:chunk_end],
+            )
+            rc = drava.publish_py(payload)
+            if rc != drava.DRAVA_SUCCESS:
+                raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
 
     should_forward = False
     eos_to_forward = None
     with _state_lock:
-        _published_frames += batch_size
+        _published_frames += callback_batch_size
         if (
                 _eos_seen
                 and not _eos_forwarded
@@ -163,9 +170,13 @@ if rc != drava.DRAVA_SUCCESS:
     )
 
 try:
-    drava.set_callback_batch(DRAVA_INFER_BATCH)
+    drava.set_callback_batch(DRAVA_STAGE1_CALLBACK_BATCH)
     drava.set_callback_serialize(0)
     drava.set_callback_flush_timeout_ms(0)
+    drava.log(
+        drava.DRAVA_VERBOSE_INFO,
+        f"[stage1] callback_batch={DRAVA_STAGE1_CALLBACK_BATCH} infer_batch={DRAVA_INFER_BATCH}",
+    )
     drava.register_routine_py(func)
     rc = drava.listen_py()
     if rc != drava.DRAVA_SUCCESS:
