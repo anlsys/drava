@@ -44,7 +44,7 @@ def parse_args():
     p.add_argument("--stage2-callback-batch", type=int, default=None,
                    help="Override DRAVA_CALLBACK_BATCH for stage2.")
     p.add_argument("--xkaapi-verbose", type=int, default=4, help="XKAAPI_VERBOSE.")
-    p.add_argument("--rate-hz", type=float, default=None, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
+    p.add_argument("--rate-hz", type=int, default=None, help="DRAVA_PUBLISH_RATE_HZ (<=0 means max speed).")
     p.add_argument("--num-frames", type=int, default=0, help="DRAVA_PUBLISH_NUM_FRAMES. Overrides duration mode.")
     p.add_argument("--runs", type=int, default=1, help="Runs per batch.")
     p.add_argument("--python", default=sys.executable, help="Python executable.")
@@ -439,7 +439,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         output_stream=output_stream,
         output_subject=output_subject,
         configured_num_frames=configured_num_frames,
-        rate_hz=float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0),
+        rate_hz=int(args.rate_hz) if args.rate_hz is not None else int(yaml_rate_hz or 0),
         effective_app_timeout_s=effective_app_timeout_s,
         stage1_threads=stage1_threads,
         stage2_threads=stage2_threads,
