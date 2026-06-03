@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import signal
@@ -50,6 +51,8 @@ def parse_args():
     p.add_argument("--python", default=sys.executable, help="Python executable.")
     p.add_argument("--reuse-nats", action="store_true", help="Use existing NATS server.")
     p.add_argument("--nats-url", default="", help="NATS URL. Defaults to transport.nats_url from --stage-config.")
+    p.add_argument("--nats-config", default="nats.conf",
+                   help="NATS server config path used when starting a local nats-server.")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs_two_stages", help="Output dir under examples/ptychonn.")
     p.add_argument("--app-timeout-s", type=float, default=None,
@@ -290,12 +293,50 @@ def fail_with_logs(run_dir: Path, message: str):
     raise RuntimeError(f"{message}\n--- logs ---\n{run_dir}")
 
 
-def start_nats(run_dir: Path, nats_url: str):
+def parse_nats_host_port(nats_url: str):
     host_port = nats_url.replace("nats://", "")
     if ":" not in host_port:
         raise RuntimeError(f"Invalid --nats-url: {nats_url}")
-    host, port = host_port.rsplit(":", 1)
-    cmd = ["nats-server", "-js", "-a", host, "-p", port]
+    return host_port.rsplit(":", 1)
+
+
+def replace_top_level_config_value(text: str, key: str, value: str):
+    pattern = re.compile(rf"(?m)^(\s*{re.escape(key)}\s*[:=]\s*).*$")
+    if pattern.search(text):
+        return pattern.sub(rf"\g<1>{value}", text, count=1)
+    return f"{key}: {value}\n{text}"
+
+
+def replace_jetstream_store_dir(text: str, store_dir: Path):
+    value = json.dumps(str(store_dir))
+    pattern = re.compile(r"(?m)^(\s*store_dir\s*[:=]\s*).*$")
+    if pattern.search(text):
+        return pattern.sub(rf"\g<1>{value}", text, count=1)
+    block_pattern = re.compile(r"(jetstream\s*\{)")
+    if block_pattern.search(text):
+        return block_pattern.sub(rf"\1\n    store_dir: {value}", text, count=1)
+    return f"{text.rstrip()}\n\njetstream {{\n    store_dir: {value}\n}}\n"
+
+
+def write_effective_nats_config(template_path: Path,
+                                output_path: Path,
+                                nats_url: str,
+                                store_dir: Path):
+    if not template_path.exists():
+        raise RuntimeError(f"NATS config not found: {template_path}")
+    _host, port = parse_nats_host_port(nats_url)
+    text = template_path.read_text(encoding="utf-8")
+    text = replace_top_level_config_value(text, "port", port)
+    text = replace_jetstream_store_dir(text, store_dir)
+    output_path.write_text(text, encoding="utf-8")
+
+
+def start_nats(run_dir: Path, nats_url: str, nats_config_path: Path):
+    store_dir = run_dir / "nats-store"
+    effective_config_path = run_dir / "nats.generated.conf"
+    write_effective_nats_config(nats_config_path, effective_config_path,
+                                nats_url, store_dir)
+    cmd = ["nats-server", "-c", str(effective_config_path)]
     log_path = run_dir / "nats.log"
     f = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
@@ -643,6 +684,8 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
         args.stage_config)
+    nats_config_path = (root / args.nats_config).resolve() if not Path(args.nats_config).is_absolute() else Path(
+        args.nats_config)
     nats_url = (
             args.nats_url
             or parse_transport_value(stage_config_path, "nats_url")
@@ -655,7 +698,7 @@ def main():
 
     if not args.reuse_nats:
         print("[global] starting nats-server")
-        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, nats_url)
+        nats_proc, nats_log_file, nats_log_path = start_nats(run_dir, nats_url, nats_config_path)
         ok = wait_for_log_line(nats_log_path, "Listening for client connections", 20)
         if not ok:
             terminate_proc(nats_proc)
