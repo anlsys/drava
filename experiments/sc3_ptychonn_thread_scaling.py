@@ -139,7 +139,7 @@ def parse_args():
                    help="Fixed Stage 2 callback batch in prediction messages. "
                         "Default maps Stage 1 C frames to ceil(C/16) messages.")
     p.add_argument("--timeout-ms", type=int, default=200)
-    p.add_argument("--rate-hz", type=float, default=0.0)
+    p.add_argument("--rate-hz", type=int, default=0)
     p.add_argument("--num-frames", type=int, default=10000)
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--python", default=sys.executable)

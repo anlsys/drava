@@ -140,7 +140,7 @@ def parse_args():
     p.add_argument("--stage1-threads", type=int, default=4)
     p.add_argument("--stage2-threads", type=int, default=4)
     p.add_argument("--timeout-ms", type=int, default=200)
-    p.add_argument("--rate-hz", type=float, default=0.0)
+    p.add_argument("--rate-hz", type=int, default=0)
     p.add_argument("--num-frames", type=int, default=10000)
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--python", default=sys.executable)

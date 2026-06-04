@@ -1,5 +1,46 @@
 # Drava Runtime Characterization Experiments
 
+## SC direct PtychoNN experiments
+
+The SC paper evaluation should use the direct PtychoNN drivers below.  These
+scripts do not import `_common.py`, do not parse `[drava-metrics]`, and do not
+reconstruct latency components.  They use only the values already produced by
+`examples/ptychonn/benchmark_two_stages.py` in `summary.csv`: end-to-end
+pipeline latency, Stage 1 throughput, Stage 2 throughput, publisher throughput,
+and per-stage elapsed time.
+
+```bash
+# 1. Callback batching with fixed TensorFlow inference batch.
+python experiments/sc1_ptychonn_callback_batching.py \
+    --callback-batches 128,256,512 --infer-batch 128 --runs 1
+
+# 2. TensorFlow model.predict batching with fixed Drava callback batch.
+python experiments/sc2_ptychonn_inference_batching.py \
+    --infer-batches 64,128,256,512 --stage1-callback-batch 512 --runs 1
+
+# 3. Stage 1 / Stage 2 thread scaling with batching fixed.
+python experiments/sc3_ptychonn_thread_scaling.py \
+    --stage1-threads-list 1,2,4,8 --stage2-threads-list 1,2,4,8 --runs 1
+```
+
+By default, the Stage 2 callback batch is frame-equivalent to Stage 1:
+Stage 1 publishes prediction messages in 16-frame chunks, so a Stage 1
+callback batch of `C` raw frames maps to `ceil(C/16)` Stage 2 prediction
+messages.  To override this policy, pass `--stage2-callback-batch`.
+
+Optional plotting:
+
+```bash
+python experiments/plot_sc_ptychonn_results.py --kind callback \
+    --csv experiments/results/<run>/sc1_callback_batching_summary.csv
+python experiments/plot_sc_ptychonn_results.py --kind inference \
+    --csv experiments/results/<run>/sc2_inference_batching_summary.csv
+python experiments/plot_sc_ptychonn_results.py --kind threads \
+    --csv experiments/results/<run>/sc3_thread_scaling_summary.csv
+```
+
+## Legacy decomposition experiments
+
 This directory contains five experiment drivers used in the Drava paper to
 characterize runtime mechanisms (rather than tune workloads). Each driver
 sweeps one runtime axis, captures `[drava-metrics]` lines from the existing
