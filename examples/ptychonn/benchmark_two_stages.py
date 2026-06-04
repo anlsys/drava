@@ -179,6 +179,30 @@ def parse_section_value(path: Path, section_name: str, key_name: str):
     return None
 
 
+def parse_nats_config_value(path: Path, key_name: str):
+    if not path.exists():
+        return None
+    pattern = re.compile(rf"^\s*{re.escape(key_name)}\s*[:=]\s*(.*?)\s*$")
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        m = pattern.match(line)
+        if m:
+            return m.group(1).strip().strip("\"'")
+    return None
+
+
+def nats_url_from_config(path: Path):
+    host = parse_nats_config_value(path, "host") or parse_nats_config_value(path, "addr")
+    port = parse_nats_config_value(path, "port")
+    if port is None:
+        return None
+    if host is None or host in ("0.0.0.0", "::", "[::]"):
+        host = "127.0.0.1"
+    return f"nats://{host}:{port}"
+
+
 def load_yaml_config(path: Path):
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
@@ -293,6 +317,28 @@ def fail_with_logs(run_dir: Path, message: str):
     raise RuntimeError(f"{message}\n--- logs ---\n{run_dir}")
 
 
+def fail_stage_startup(run_dir: Path,
+                       message: str,
+                       stage1_proc: subprocess.Popen,
+                       stage2_proc: subprocess.Popen,
+                       stage1_log: Path,
+                       stage2_log: Path,
+                       nats_log: Path | None = None):
+    stage1_rc = stage1_proc.poll()
+    stage2_rc = stage2_proc.poll()
+    terminate_proc(stage1_proc)
+    terminate_proc(stage2_proc)
+    details = (
+        f"{message}\n"
+        f"stage1_rc={stage1_rc} stage2_rc={stage2_rc}\n"
+        f"--- stage1 tail ---\n{tail_text(stage1_log)}\n"
+        f"--- stage2 tail ---\n{tail_text(stage2_log)}"
+    )
+    if nats_log is not None:
+        details += f"\n--- nats tail ---\n{tail_text(nats_log)}"
+    fail_with_logs(run_dir, details)
+
+
 def parse_nats_host_port(nats_url: str):
     host_port = nats_url.replace("nats://", "")
     if ":" not in host_port:
@@ -399,6 +445,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     root = Path(__file__).resolve().parent
     stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
         args.stage_config)
+    nats_config_path = (root / args.nats_config).resolve() if not Path(args.nats_config).is_absolute() else Path(
+        args.nats_config)
     base_config = load_yaml_config(stage_config_path)
     base_input_stream = args.input_stream
     base_input_subject = parse_stage_ingress_value(stage_config_path, "stage1", "subject") or args.input_subject
@@ -406,6 +454,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     base_output_subject = args.output_subject
     nats_url = (
             args.nats_url
+            or nats_url_from_config(nats_config_path)
             or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
@@ -579,10 +628,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
             break
         time.sleep(0.2)
 
+    nats_log = run_dir / "nats.log"
     if stage1_proc.poll() is not None:
-        fail_with_logs(run_dir, f"stage1 exited early\n--- stage1 tail ---\n{tail_text(stage1_log)}")
+        fail_stage_startup(run_dir, "stage1 exited early", stage1_proc,
+                           stage2_proc, stage1_log, stage2_log, nats_log)
     if stage2_proc.poll() is not None:
-        fail_with_logs(run_dir, f"stage2 exited early\n--- stage2 tail ---\n{tail_text(stage2_log)}")
+        fail_stage_startup(run_dir, "stage2 exited early", stage1_proc,
+                           stage2_proc, stage1_log, stage2_log, nats_log)
+    if not (stage1_ready.is_set() and stage2_ready.is_set()):
+        fail_stage_startup(run_dir, "stage startup timed out before JetStream ready",
+                           stage1_proc, stage2_proc, stage1_log, stage2_log,
+                           nats_log)
 
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     marks["pub_start"] = time.monotonic()
@@ -688,6 +744,7 @@ def main():
         args.nats_config)
     nats_url = (
             args.nats_url
+            or nats_url_from_config(nats_config_path)
             or parse_transport_value(stage_config_path, "nats_url")
             or "nats://127.0.0.1:4222"
     )
