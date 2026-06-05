@@ -39,6 +39,45 @@ python experiments/plot_sc_ptychonn_results.py --kind threads \
     --csv experiments/results/<run>/sc3_thread_scaling_summary.csv
 ```
 
+
+## SC bare runtime ceiling experiment
+
+The bare runtime ceiling driver removes dataset loading and model inference
+while preserving the normal publisher, JetStream, Drava listen/callback, EOS,
+and metrics cycle.  The publisher reuses one cached payload, and the callback
+launches configurable blank GPU work using CuPy, Torch CUDA, or a CPU no-op
+fallback.  Use this experiment to report Drava's maximum application-cycle
+throughput and callback/latency behavior without application data processing.
+
+```bash
+python experiments/sc5_bare_runtime_ceiling.py \
+    --batches 1,8,32,128,256,512 \
+    --thread-list 1,2,4,8 \
+    --payload-bytes 1 \
+    --gpu-backend auto \
+    --kernel-launches 1 \
+    --num-frames 100000 \
+    --runs 3
+```
+
+Outputs:
+
+* `sc5_bare_runtime_ceiling_summary.csv`: one row per
+  `(batch, threads, payload_bytes, serialize, run)`.
+* `sc5_bare_runtime_ceiling_aggregate.csv`: means/stddevs for throughput,
+  end-to-end time, callback time, and stage latency.
+
+Useful variants:
+
+```bash
+# Pure runtime/Python callback path, with no GPU launch.
+python experiments/sc5_bare_runtime_ceiling.py --gpu-backend none --kernel-launches 0 --runs 1
+
+# Exercise egress as well by publishing one cached output payload per input.
+python experiments/sc5_bare_runtime_ceiling.py --publish-mode one_per_frame --runs 1
+```
+
+
 ## Legacy decomposition experiments
 
 This directory contains five experiment drivers used in the Drava paper to

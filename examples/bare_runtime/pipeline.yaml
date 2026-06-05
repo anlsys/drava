@@ -1,0 +1,30 @@
+pipeline:
+  name: bare_runtime_single_stage
+
+transport:
+  type: nats
+  nats_url: nats://127.0.0.1:4222
+
+publisher:
+  num_frames: 10000
+  rate_hz: 0
+  payload_bytes: 1
+
+benchmark:
+  app_timeout_s: 45
+
+stages:
+  - name: stage1
+    runtime:
+      threads: 4
+      callback_batch: 256
+      callback_serialize: false
+    ingress:
+      stream: FRAMES
+      subject: frames.raw
+      durable: drava_bare_stage1
+      fetch_batch: 256
+      fetch_timeout_ms: 200
+    egress:
+      stream: OUTPUT
+      subject: frames.out
