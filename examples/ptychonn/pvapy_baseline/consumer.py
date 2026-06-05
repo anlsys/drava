@@ -140,6 +140,8 @@ class PtychoNNPvaConsumer:
 
         if is_eos:
             self.flush_pending()
+            if self.expected_frames is not None:
+                self.missed_frames = max(self.missed_frames, self.expected_frames - self.rx_items)
             self.publish_eos()
             self.t_final = time.perf_counter()
             self.done.set()
@@ -279,9 +281,15 @@ def main() -> int:
             consumer.stop()
 
     print(consumer.metrics_line(), flush=True)
-    if consumer.expected_frames and consumer.rx_items != consumer.expected_frames:
-        return 2
-    return 0
+    exit_code = 2 if consumer.expected_frames and consumer.rx_items != consumer.expected_frames else 0
+
+    # Some EPICS/pvaPy builds abort during interpreter shutdown after PVA
+    # server/monitor teardown even after all benchmark metrics have been
+    # printed. Exit directly so the harness sees the benchmark status instead
+    # of a late cleanup signal.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":

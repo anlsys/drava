@@ -58,7 +58,7 @@ python benchmark.py \
   --batches 128,256,512 \
   --runs 1 \
   --num-frames 3600 \
-  --rate-hz 0 \
+  --rate-hz 100 \
   --monitor-queue 1024
 ```
 
@@ -70,9 +70,12 @@ prediction payloads.
 
 ### Notes
 
-The default low-level PVA monitor path can overrun at high publication rates. That is useful as a
-baseline signal because `missed_frames` captures gaps in the `uniqueId` sequence. Increasing
-`--monitor-queue` enables pvaPy's client monitor queue.
+The default low-level PVA monitor path can overrun at high publication rates because this simple
+publisher updates one PV record repeatedly. At `--rate-hz 0`, the consumer may observe only the
+final EOS update. That is useful as a loss/overrun signal, but it is not an apples-to-apples
+max-rate comparison with Drava. Use a paced `--rate-hz` value for a loss-free model baseline and
+increase it until `missed_frames` becomes non-zero. Increasing `--monitor-queue` enables pvaPy's
+client monitor queue, but it cannot recover updates that were overwritten before delivery.
 
 The design follows pvaPy's documented `PvaServer` and `Channel` APIs rather than the pvaPy HPC
 CLI so that the PtychoNN Keras model path stays explicit and directly comparable to Drava.

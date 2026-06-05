@@ -199,14 +199,20 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
 
     if pub_proc.returncode != 0:
         raise RuntimeError(f"publisher failed with rc={pub_proc.returncode}\n--- publisher log ---\n{tail_text(pub_log)}")
-    if consumer_proc.returncode not in (0, 2):
-        raise RuntimeError(
-            f"consumer failed with rc={consumer_proc.returncode}\n--- consumer log ---\n{tail_text(app_log)}"
-        )
     if not pub_done:
         raise RuntimeError(f"publisher final line not found.\n--- publisher log ---\n{tail_text(pub_log)}")
     if not metrics:
+        if consumer_proc.returncode not in (0, 2):
+            raise RuntimeError(
+                f"consumer failed with rc={consumer_proc.returncode}\n--- consumer log ---\n{tail_text(app_log)}"
+            )
         raise RuntimeError(f"consumer metrics not found.\n--- consumer log ---\n{tail_text(app_log)}")
+    if consumer_proc.returncode not in (0, 2):
+        print(
+            f"[warn] consumer exited with rc={consumer_proc.returncode} after emitting metrics; "
+            "continuing with parsed metrics",
+            flush=True,
+        )
 
     row["publisher_time_s"] = float(pub_done["time"])
     row["publisher_avg_fps"] = float(pub_done["fps"])
@@ -214,6 +220,16 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         row[int_key] = int(metrics[int_key])
     for float_key in ("stage_total_s", "stage_total_fps", "infer_total_s", "publish_total_s"):
         row[float_key] = float(metrics[float_key])
+    if row["expected_frames"] and row["rx_items"] != row["expected_frames"]:
+        raise RuntimeError(
+            "pvaPy monitor lost frame updates: "
+            f"received={row['rx_items']} expected={row['expected_frames']} "
+            f"missed={row['missed_frames']} publisher_avg_fps={row['publisher_avg_fps']:.2f}. "
+            "The simple PvaServer record path overwrites the current PV value at this rate. "
+            "Use a lower --rate-hz for a loss-free model baseline, or use the pvaPy HPC "
+            "queued/distributor path for max-rate transport comparison.\n"
+            f"--- consumer log ---\n{tail_text(app_log)}"
+        )
     return row
 
 
