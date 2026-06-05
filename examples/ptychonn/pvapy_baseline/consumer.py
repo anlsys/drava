@@ -228,10 +228,12 @@ class PtychoNNPvaConsumer:
             total_s = max(0.0, end - self.t0)
         fps = self.rx_items / total_s if total_s > 0 else 0.0
         cb_avg_ms = (self.callback_total_s / self.callback_batches * 1000.0) if self.callback_batches else 0.0
+        expected = self.expected_frames or 0
+        total_missing = max(self.missed_frames, expected - self.rx_items) if expected else self.missed_frames
         return (
             "[pvapy-metrics] "
             f"rx_items={self.rx_items} rx_bytes={self.rx_bytes} "
-            f"expected_frames={self.expected_frames or 0} missed_frames={self.missed_frames} "
+            f"expected_frames={expected} missed_frames={total_missing} "
             f"output_msgs={self.output_msgs} cb_batches={self.callback_batches} "
             f"cb_avg_ms={cb_avg_ms:.3f} infer_total_s={self.infer_total_s:.6f} "
             f"publish_total_s={self.publish_total_s:.6f} stage_total_s={total_s:.6f} "

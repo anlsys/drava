@@ -39,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--channel", default="ptychonn:frames")
     parser.add_argument("--output-channel", default="ptychonn:stage1")
     parser.add_argument("--monitor-queue", type=int, default=0)
+    parser.add_argument(
+        "--start-settle-s",
+        type=float,
+        default=2.0,
+        help="Delay after consumer readiness before releasing the publisher.",
+    )
     parser.add_argument("--consumer-timeout-s", type=float, default=180.0)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--out-dir", default="bench_logs")
@@ -191,6 +197,8 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         terminate_proc(pub_proc)
         raise RuntimeError(f"consumer did not become ready.\n--- consumer log ---\n{tail_text(app_log)}")
 
+    if args.start_settle_s > 0:
+        time.sleep(args.start_settle_s)
     control_file.touch()
     pub_proc.wait(timeout=max(args.consumer_timeout_s, 60.0))
     pub_thread.join(timeout=5)
@@ -221,6 +229,8 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
     for float_key in ("stage_total_s", "stage_total_fps", "infer_total_s", "publish_total_s"):
         row[float_key] = float(metrics[float_key])
     if row["expected_frames"] and row["rx_items"] != row["expected_frames"]:
+        total_missing = int(row["expected_frames"]) - int(row["rx_items"])
+        row["missed_frames"] = max(int(row["missed_frames"]), total_missing)
         raise RuntimeError(
             "pvaPy monitor lost frame updates: "
             f"received={row['rx_items']} expected={row['expected_frames']} "

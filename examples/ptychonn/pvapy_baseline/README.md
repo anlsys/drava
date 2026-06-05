@@ -59,7 +59,8 @@ python benchmark.py \
   --runs 1 \
   --num-frames 3600 \
   --rate-hz 100 \
-  --monitor-queue 1024
+  --monitor-queue 1024 \
+  --start-settle-s 2
 ```
 
 The benchmark writes per-run logs and `summary.csv` under `bench_logs/<timestamp>/`.
@@ -75,7 +76,9 @@ publisher updates one PV record repeatedly. At `--rate-hz 0`, the consumer may o
 final EOS update. That is useful as a loss/overrun signal, but it is not an apples-to-apples
 max-rate comparison with Drava. Use a paced `--rate-hz` value for a loss-free model baseline and
 increase it until `missed_frames` becomes non-zero. Increasing `--monitor-queue` enables pvaPy's
-client monitor queue, but it cannot recover updates that were overwritten before delivery.
+client monitor queue, but it cannot recover updates that were overwritten before delivery. The
+benchmark waits briefly after consumer readiness before releasing the publisher; tune
+`--start-settle-s` if the first frames are intermittently missed.
 
 The design follows pvaPy's documented `PvaServer` and `Channel` APIs rather than the pvaPy HPC
 CLI so that the PtychoNN Keras model path stays explicit and directly comparable to Drava.
