@@ -28,6 +28,18 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
+# Typography tuned for single-column paper inclusion.
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.labelsize": 16,
+    "axes.titlesize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 12,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
+
 # ── Colors (kept consistent with visualize_baseline.py) ───────────────────────
 
 C_BEST = "#EF4444"        # red - best-so-far
@@ -81,37 +93,37 @@ def numeric_col(rows: Sequence[Dict[str, str]], col: str) -> np.ndarray:
 # ── 1. Convergence curve ─────────────────────────────────────────────────────
 
 def plot_convergence(rows: Sequence[Dict[str, str]], out_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
 
     evals = np.asarray([int(r["eval"]) for r in rows])
     obj = numeric_col(rows, OBJ)
     best = np.minimum.accumulate(obj)
 
-    ax.scatter(evals, obj, s=28, color=C_EVAL, alpha=0.55,
+    ax.scatter(evals, obj, s=48, color=C_EVAL, alpha=0.6,
                edgecolors="white", linewidth=0.5, label="Per-evaluation $J$",
                zorder=3)
-    ax.plot(evals, best, color=C_BEST, linewidth=2.0,
+    ax.plot(evals, best, color=C_BEST, linewidth=3.0,
             label=r"Best-so-far $J^{\star}_k$", zorder=4)
 
     # Mark final best.
     k_star = int(np.argmin(obj))
-    ax.scatter([evals[k_star]], [obj[k_star]], s=110, color=C_BEST,
+    ax.scatter([evals[k_star]], [obj[k_star]], s=150, color=C_BEST,
                edgecolors="white", linewidth=1.2, zorder=5)
     ax.annotate(f"$J^{{\\star}} = {obj[k_star]:.2f}$ s\n@ eval {evals[k_star]}",
                 (evals[k_star], obj[k_star]),
                 xytext=(10, 18), textcoords="offset points",
-                fontsize=10, color=C_BEST, fontweight="bold",
+                fontsize=13, color=C_BEST, fontweight="bold",
                 arrowprops=dict(arrowstyle="-", color=C_BEST, lw=0.8))
 
-    ax.set_xlabel("Evaluation index $k$", fontsize=12)
-    ax.set_ylabel("End-to-end latency $J$ (s)", fontsize=12)
-    ax.set_title("Agentic Configuration Search Convergence",
-                 fontsize=13, fontweight="bold")
+    ax.set_xlabel("Evaluation index $k$")
+    ax.set_ylabel("End-to-end latency $J$ (s)")
+    ax.set_title("Agentic configuration search convergence",
+                 fontweight="bold")
     ax.grid(alpha=0.3)
     ax.set_axisbelow(True)
-    ax.legend(fontsize=10, loc="upper right")
+    ax.legend(loc="upper right", frameon=True)
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.7)
     for ext in ("pdf", "png"):
         fig.savefig(out_dir / f"convergence.{ext}", dpi=300, bbox_inches="tight")
     plt.close(fig)

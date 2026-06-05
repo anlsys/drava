@@ -17,6 +17,18 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
+# Typography tuned for single-column paper inclusion.
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.labelsize": 16,
+    "axes.titlesize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 12,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
+
 # ── Data ──────────────────────────────────────────────────────────────────────
 
 DATA = [
@@ -40,7 +52,7 @@ C_E2E = "#EF4444"     # red
 def config_label(row):
     """Multi-line label for x-axis."""
     _, batch, s1t, s2t, cb1, cb2, *_ = row
-    return f"Batch {batch}\nThreads {s1t}/{s2t}\nCallbacks {cb1}/{cb2}"
+    return f"{batch}\n{s1t}/{s2t}\n{cb1}/{cb2}"
 
 
 def config_label_short(row):
@@ -51,7 +63,7 @@ def config_label_short(row):
 # ── Combined figure: throughput bars + E2E line ──────────────────────────────
 
 def plot_combined(out_dir: Path):
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig, ax1 = plt.subplots(figsize=(7.2, 4.8))
 
     labels = [config_label(r) for r in DATA]
     x = np.arange(len(DATA))
@@ -62,38 +74,40 @@ def plot_combined(out_dir: Path):
     e2e = [r[10] for r in DATA]
 
     # Throughput bars (left y-axis)
-    ax1.bar(x - w / 2, s1_fps, w, label="Stage 1 (Inference)", color=C_S1, alpha=0.85)
-    ax1.bar(x + w / 2, s2_fps, w, label="Stage 2 (Stitching)", color=C_S2, alpha=0.85)
+    ax1.bar(x - w / 2, s1_fps, w, label="Stage 1 inference", color=C_S1, alpha=0.85)
+    ax1.bar(x + w / 2, s2_fps, w, label="Stage 2 stitching", color=C_S2, alpha=0.85)
 
-    ax1.set_ylabel("Throughput (frames/s)", fontsize=14)
+    ax1.set_ylabel("Throughput (frames/s)")
+    ax1.set_xlabel(r"Configuration: $B_{\mathrm{pred}}$; $N_1/N_2$; $B^{cb}_1/B^{cb}_2$",
+                   labelpad=8)
     ax1.set_xticks(x)
-    ax1.set_xticklabels(labels, fontsize=10)
-    ax1.tick_params(axis="y", labelsize=12)
+    ax1.set_xticklabels(labels)
+    ax1.tick_params(axis="x", pad=8)
     ax1.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:,.0f}"))
     ax1.grid(axis="y", alpha=0.3)
     ax1.set_axisbelow(True)
 
     # E2E latency line (right y-axis)
     ax2 = ax1.twinx()
-    ax2.plot(x, e2e, color=C_E2E, marker="o", linewidth=2.5, markersize=7,
-             label="E2E Latency", zorder=5)
+    ax2.plot(x, e2e, color=C_E2E, marker="o", linewidth=3.0, markersize=8,
+             label="E2E latency", zorder=5)
 
     for i, val in enumerate(e2e):
-        ax2.text(i, val + 0.2, f"{val:.2f}s", ha="center", fontsize=10,
+        ax2.text(i, val + 0.25, f"{val:.2f}s", ha="center", fontsize=13,
                  color=C_E2E, fontweight="bold")
 
-    ax2.set_ylabel("End-to-End Latency (s)", fontsize=14, color=C_E2E)
-    ax2.tick_params(axis="y", labelsize=12, colors=C_E2E)
+    ax2.set_ylabel("End-to-end latency (s)", color=C_E2E)
+    ax2.tick_params(axis="y", colors=C_E2E)
+    ax2.set_ylim(0, max(e2e) + 1.5)
 
     # Combined legend
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, fontsize=11, loc="upper left")
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left", frameon=True)
 
-    ax1.set_title("Stage Throughput vs. End-to-End Latency Across Configurations",
-                   fontsize=14, fontweight="bold", pad=12)
+    ax1.set_title("Stage throughput vs. end-to-end latency", fontweight="bold", pad=12)
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.7)
     for ext in ("pdf", "png"):
         path = out_dir / f"throughput_vs_latency.{ext}"
         fig.savefig(path, dpi=300, bbox_inches="tight")
