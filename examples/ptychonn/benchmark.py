@@ -218,10 +218,14 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         "publisher_time_s": None,
         "publisher_avg_fps": None,
         "stage1_frames": None,
+        "stage1_output_msgs": None,
+        "stage1_cb_batches": None,
+        "stage1_cb_avg_ms": None,
         "stage1_total_time_s": None,
         "stage1_total_fps": None,
         "stage1_compute_time_s": None,
         "stage1_publish_time_s": None,
+        "missed_frames": None,
         "gpu_avg_pct": None,
     }
 
@@ -381,13 +385,19 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     if app_metrics:
         row["stage1_frames"] = int(app_metrics["rx_items"])
+        row["stage1_output_msgs"] = int(app_metrics["tx_msgs"])
+        row["stage1_cb_batches"] = int(app_metrics["cb_batches"])
+        row["stage1_cb_avg_ms"] = float(app_metrics["cb_avg_ms"])
         row["stage1_total_time_s"] = float(app_metrics["stage_total_s"])
         row["stage1_total_fps"] = float(app_metrics["stage_total_fps"])
+        row["stage1_compute_time_s"] = float(app_metrics["compute_total_s"])
+        row["stage1_publish_time_s"] = float(app_metrics["publish_total_s"])
         if row["total_frames"] is None:
             row["total_frames"] = row["stage1_frames"]
     else:
         raise RuntimeError(f"[batch={batch_size} run={run_idx}] drava metrics line not found")
 
+    row["missed_frames"] = max(0, row["publisher_frames"] - row["stage1_frames"])
     if row["publisher_frames"] != row["stage1_frames"]:
         raise RuntimeError(
             f"[batch={batch_size} run={run_idx}] frame mismatch: "
@@ -431,6 +441,43 @@ def print_table(rows):
             f"{fmt(r['stage1_total_fps'])} | "
             f"{fmt(r['gpu_avg_pct'])} |"
         )
+
+
+def write_summary_csv(path: Path, rows):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            "batch,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
+            "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,"
+            "stage1_publish_time_s,stage1_output_msgs,stage1_cb_batches,"
+            "stage1_cb_avg_ms,missed_frames,gpu_avg_pct\n"
+        )
+        for r in rows:
+            f.write(
+                f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
+                f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
+                f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
+                f"{r['stage1_output_msgs']},{r['stage1_cb_batches']},{r['stage1_cb_avg_ms']},"
+                f"{r['missed_frames']},{r['gpu_avg_pct']}\n"
+            )
+
+
+def write_comparison_summary_csv(path: Path, rows):
+    """Write a pvaPy-baseline-shaped CSV for side-by-side comparisons."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            "batch,run,num_frames,monitor_queue,publisher_time_s,publisher_avg_fps,"
+            "rx_items,expected_frames,missed_frames,output_msgs,stage_total_s,"
+            "stage_total_fps,infer_total_s,publish_total_s\n"
+        )
+        for r in rows:
+            f.write(
+                f"{r['batch']},{r['run']},{r['total_frames']},,"
+                f"{r['publisher_time_s']},{r['publisher_avg_fps']},"
+                f"{r['stage1_frames']},{r['publisher_frames']},{r['missed_frames']},"
+                f"{r['stage1_output_msgs']},{r['stage1_total_time_s']},"
+                f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},"
+                f"{r['stage1_publish_time_s']}\n"
+            )
 
 
 def main():
@@ -483,18 +530,11 @@ def main():
 
             print_table(rows)
             out_csv = run_dir / "summary.csv"
-            with open(out_csv, "w", encoding="utf-8") as f:
-                f.write(
-                    "batch,threads,timeout_ms,total_frames,publisher_time_s,publisher_avg_fps,"
-                    "stage1_total_time_s,stage1_total_fps,stage1_compute_time_s,stage1_publish_time_s,gpu_avg_pct\n")
-                for r in rows:
-                    f.write(
-                        f"{r['batch']},{r['threads']},{r['timeout_ms']},{r['total_frames']},"
-                        f"{r['publisher_time_s']},{r['publisher_avg_fps']},{r['stage1_total_time_s']},"
-                        f"{r['stage1_total_fps']},{r['stage1_compute_time_s']},{r['stage1_publish_time_s']},"
-                        f"{r['gpu_avg_pct']}\n"
-                    )
+            write_summary_csv(out_csv, rows)
+            comparison_csv = run_dir / "comparison_summary.csv"
+            write_comparison_summary_csv(comparison_csv, rows)
             print(f"\nLogs and summary written to: {run_dir}")
+            print(f"pvaPy-style comparison summary written to: {comparison_csv}")
         except BaseException:
             print(f"\nLogs written to: {run_dir}")
             raise
