@@ -25,7 +25,7 @@ python experiments/sc5_bare_runtime_ceiling.py \
   --thread-list 2,4,8 \
   --payload-bytes 1 \
   --gpu-backend none \
-  --kernel-launches 0 \
+  --kernel-launches 1 \
   --num-frames 100000 \
   --runs 1
 ```
