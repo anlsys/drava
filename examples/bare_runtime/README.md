@@ -21,6 +21,12 @@ python experiments/sc5_bare_runtime_ceiling.py \
     --runs 3
 ```
 
+Paper artifacts:
+
+- Experiment index: [../../experiments.md](../../experiments.md)
+- Preserved run log: [../../experiments/logs/sc5_bare_runtime_ceiling.md](../../experiments/logs/sc5_bare_runtime_ceiling.md)
+- Figure package: [../../experiments/figures/sc5_bare_runtime_ceiling](../../experiments/figures/sc5_bare_runtime_ceiling)
+
 Useful callback modes:
 
 * `DRAVA_BARE_GPU_BACKEND=auto|cupy|torch|none`

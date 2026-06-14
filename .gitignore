@@ -193,6 +193,9 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Local plotting cache
+.matplotlib-cache/
+
 # PyPI configuration file
 .pypirc
 

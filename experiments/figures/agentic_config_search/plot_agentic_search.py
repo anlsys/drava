@@ -11,8 +11,9 @@ figures for the paper:
   4. e2e_distribution.{pdf,png}   - Histogram of all successful evaluations vs. best
 
 Usage:
-  python visualize_agentic_search.py <aggregate.csv> [--out-dir agentic_figures/] \
-                                                     [--top-n 10]
+  python experiments/figures/agentic_config_search/plot_agentic_search.py \
+      <aggregate.csv> [--out-dir experiments/figures/agentic_config_search] \
+      [--top-n 10]
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+
+HERE = Path(__file__).resolve().parent
 
 # Typography tuned for single-column paper inclusion.
 plt.rcParams.update({
@@ -320,7 +323,7 @@ def _fmt(v: float) -> str:
 def main() -> None:
     p = argparse.ArgumentParser(description="Visualize agentic configuration search results")
     p.add_argument("aggregate", type=Path, help="Path to aggregate.csv")
-    p.add_argument("--out-dir", type=Path, default=Path("agentic_figures"),
+    p.add_argument("--out-dir", type=Path, default=HERE,
                    help="Output directory for figures")
     p.add_argument("--top-n", type=int, default=10,
                    help="Number of top configurations to plot in parallel coordinates")

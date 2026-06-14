@@ -11,9 +11,9 @@ runtime counters, and stage service-rate balance. Multiple runs per
 (stage, batch) are averaged; standard error is drawn when n > 1.
 
 Usage:
-  python3 experiments/visualize_exp1_runtime_observability.py \
+  python3 experiments/figures/exp1_runtime_observability/plot_exp1_runtime_observability.py \
       experiments/results/exp1_20260513_205018/exp1_summary.csv \
-      --out-dir figs/exp1
+      --out-dir experiments/figures/exp1_runtime_observability
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ C_MARK = "#6B7280"
 X_LABEL = "Batch size $B$ (callback = inference)"
 
 Row = Dict[str, str]
+HERE = Path(__file__).resolve().parent
 
 
 def load_summary(path: Path, workload: str) -> List[Row]:
@@ -214,7 +215,7 @@ def plot_runtime_observability(grouped: Dict[Tuple[str, int], List[Row]],
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate Experiment 1 figure")
     parser.add_argument("summary", type=Path, help="Path to exp1_summary.csv")
-    parser.add_argument("--out-dir", type=Path, default=Path("figs/exp1"),
+    parser.add_argument("--out-dir", type=Path, default=HERE,
                         help="Directory for generated PDF and PNG figures")
     parser.add_argument("--workload", default="ptychonn", choices=("ptychonn", "tomogan"),
                         help="Workload rows to plot")

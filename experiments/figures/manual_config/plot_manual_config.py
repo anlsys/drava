@@ -5,7 +5,8 @@ Generate baseline pipeline characterization visualizations.
 Produces figures from the initial grid search data for paper and presentation.
 
 Usage:
-  python visualize_baseline.py [--out-dir figures/]
+  python experiments/figures/manual_config/plot_manual_config.py \
+      [--out-dir experiments/figures/manual_config]
 """
 
 import argparse
@@ -16,6 +17,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
+
+HERE = Path(__file__).resolve().parent
 
 # Typography tuned for single-column paper inclusion.
 plt.rcParams.update({
@@ -278,11 +281,11 @@ def plot_bottleneck_stacked(out_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate baseline visualizations")
-    parser.add_argument("--out-dir", default="baseline_figures",
+    parser.add_argument("--out-dir", type=Path, default=HERE,
                         help="Output directory for figures")
     args = parser.parse_args()
 
-    out_dir = Path(args.out_dir)
+    out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Generating visualizations in: {out_dir}/")
