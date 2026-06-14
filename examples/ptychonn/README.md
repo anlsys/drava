@@ -150,6 +150,14 @@ python app.py
 ```
 
 ### Benchmark
+
+Paper experiment logs and figure-generation scripts are organized from the
+repository root:
+
+- Experiment index: [../../experiments.md](../../experiments.md)
+- Preserved logs: [../../experiments/logs](../../experiments/logs)
+- Figure packages: [../../experiments/figures](../../experiments/figures)
+
 - In JLSE compute node
 ```shell
 source ~/drava_nvidia.sh

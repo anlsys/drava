@@ -15,10 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "tomogan_energy_efficiency_data.csv"
-OUT_DIR = ROOT / "figures"
+OUT_DIR = HERE
 OUT_BASE = OUT_DIR / "tomogan_energy_efficiency"
 
 

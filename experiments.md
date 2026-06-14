@@ -1,20 +1,37 @@
-### Runtime message-rate ceiling
-- Experiment code and docs: [experiments/sc5_bare_runtime_ceiling.py](experiments/sc5_bare_runtime_ceiling.py)
-- App code, docs, logs: [examples/bare_runtime](examples/bare_runtime)
-- Logs: [examples/bare_runtime/logs/bare.md](examples/bare_runtime/logs/bare.md)
-- Chart generation: [experiments/figures/sc5_bare_runtime_ceiling](experiments/figures/sc5_bare_runtime_ceiling)
-- Bare runtime (no-op)
+# Drava Paper Experiment Index
+
+This file is the top-level map for reproducing and auditing the submitted-paper
+experiments. Experiment drivers live in `experiments/`, application code lives
+under `examples/`, captured command/output logs live in `experiments/logs/`,
+and figure-generation packages live in `experiments/figures/`.
+
+Final submitted figures are collected in `figs/paper_figs/`. Drafts,
+presentation-only assets, and older exploratory material are preserved under
+`figs/archive/` and `experiments/archive/`.
+
+## Runtime Message-Rate Ceiling
+
+- Driver: `experiments/sc5_bare_runtime_ceiling.py`
+- App: `examples/bare_runtime/`
+- Captured log: `experiments/logs/sc5_bare_runtime_ceiling.md`
+- Figure package: `experiments/figures/sc5_bare_runtime_ceiling/`
+- Submitted figure: `figs/paper_figs/bare_runtime_ceiling.pdf`
+
+Bare runtime, CPU/no-op callback path:
+
 ```shell
 python experiments/sc5_bare_runtime_ceiling.py \
   --batches 8,32,128,256,512 \
   --thread-list 2,4,8 \
   --payload-bytes 1 \
-  --gpu-backend auto \
+  --gpu-backend none \
   --kernel-launches 1 \
   --num-frames 100000 \
   --runs 1
 ```
-- Bare runtime (cupy)
+
+Bare runtime with blank GPU work:
+
 ```shell
 python experiments/sc5_bare_runtime_ceiling.py \
   --batches 8,32,128,256,512 \
@@ -25,15 +42,23 @@ python experiments/sc5_bare_runtime_ceiling.py \
   --num-frames 100000 \
   --runs 1
 ```
-- Figure: [figs/paper_figs/bare_runtime_ceiling.pdf](figs/paper_figs/bare_runtime_ceiling.pdf)
 
+Regenerate the figure:
 
-### Baseline comparison with PvaPy
-- Logs: [examples/ptychonn/debug_logs/pvapy_logs.md](examples/ptychonn/debug_logs/pvapy_logs.md)
-- App code: [examples/ptychonn/pvapy_baseline/benchmark.py](examples/ptychonn/pvapy_baseline/benchmark.py)
-- Example benchmark from [examples/ptychonn/pvapy_baseline/](examples/ptychonn/pvapy_baseline/) folder:
-- Chart generation: [experiments/figures/pvapy_drava_comparison](experiments/figures/pvapy_drava_comparison)
-- Example benchmark
+```shell
+python experiments/figures/sc5_bare_runtime_ceiling/plot_bare_runtime_ceiling.py
+```
+
+## Baseline Comparison With PvaPy
+
+- Drava benchmark: `examples/ptychonn/benchmark.py`
+- PvaPy benchmark: `examples/ptychonn/pvapy_baseline/benchmark.py`
+- Captured log: `experiments/logs/pvapy_drava_comparison.md`
+- Figure package: `experiments/figures/pvapy_drava_comparison/`
+- Submitted figure: `figs/paper_figs/pvapy_drava_ptychonn.pdf`
+
+Example PvaPy benchmark from `examples/ptychonn/pvapy_baseline/`:
+
 ```shell
 python benchmark.py \
   --batches 128,256,512 \
@@ -43,30 +68,65 @@ python benchmark.py \
   --monitor-queue 1024 \
   --start-settle-s 2
 ```
-- Figure: [figs/paper_figs/pvapy_drava_ptychonn.pdf](figs/paper_figs/pvapy_drava_ptychonn.pdf)
 
-### Manual configurations throughput-latency trade-off
-- Chart generation: [examples/ptychonn/visualize_manual_config.py](examples/ptychonn/visualize_manual_config.py)
-- Figure: [figs/paper_figs/throughput_vs_latency.pdf](figs/paper_figs/throughput_vs_latency.pdf)
+Regenerate the comparison figure:
 
-### Observability guided runtime tuning
-- Logs: [examples/ptychonn/debug_logs/exp_logs.md](examples/ptychonn/debug_logs/exp_logs.md)
-- Benchmark code: [experiments/exp1_runtime_overhead.py](experiments/exp1_runtime_overhead.py)
-- Example benchmark:
 ```shell
-python experiments/exp1_runtime_overhead.py --workload ptychonn --runs 1 --ptychonn-num-frames 10000
+python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_ptychonn.py
 ```
-- Chart generation: [experiments/visualize_exp1_runtime_observability.py](experiments/visualize_exp1_runtime_observability.py)
-- Figure: [figs/paper_figs/exp1_runtime_observability.pdf](figs/paper_figs/exp1_runtime_observability.pdf)
 
+## Manual Configuration Throughput-Latency Trade-Off
 
-### Agentic configuration search
-- Logs: [examples/ptychonn/debug_logs/ytopt_logs.md](examples/ptychonn/debug_logs/ytopt_logs.md)
-- App code: [examples/ptychonn/tune_two_stage_ytopt.py](examples/ptychonn/tune_two_stage_ytopt.py)
-- Example benchmark:
+- Captured log: `experiments/logs/manual_config_throughput_latency.md`
+- Figure package: `experiments/figures/manual_config/`
+- Submitted figure: `figs/paper_figs/throughput_vs_latency.pdf`
+
+Regenerate the figure package:
+
 ```shell
-cd examples/ptychonn
-python tune_two_stage_ytopt.py \                                                                  
+python experiments/figures/manual_config/plot_manual_config.py
+```
+
+The plotting script embeds the selected manual-configuration rows used for the
+submitted figure.
+
+## Observability-Guided Runtime Tuning
+
+- Driver: `experiments/exp1_runtime_overhead.py`
+- App benchmark: `examples/ptychonn/benchmark_two_stages.py`
+- Captured log: `experiments/logs/exp1_runtime_observability.md`
+- Result CSV: `experiments/results/exp1_20260513_205018/exp1_summary.csv`
+- Figure package: `experiments/figures/exp1_runtime_observability/`
+- Submitted figure: `figs/paper_figs/exp1_runtime_observability.pdf`
+
+Example benchmark:
+
+```shell
+python experiments/exp1_runtime_overhead.py \
+  --workload ptychonn \
+  --runs 1 \
+  --ptychonn-num-frames 10000
+```
+
+Regenerate the figure:
+
+```shell
+python experiments/figures/exp1_runtime_observability/plot_exp1_runtime_observability.py \
+  experiments/results/exp1_20260513_205018/exp1_summary.csv
+```
+
+## Agentic Configuration Search
+
+- Tuning driver: `examples/ptychonn/tune_two_stage_ytopt.py`
+- Captured log: `experiments/logs/agentic_config_search.md`
+- Figure package: `experiments/figures/agentic_config_search/`
+- Submitted figure: `figs/paper_figs/convergence.pdf`
+- Older agent prototype archive: `experiments/archive/ptychonn_agents_old/`
+
+Example benchmark from `examples/ptychonn/`:
+
+```shell
+python tune_two_stage_ytopt.py \
   --max-evals 64 \
   --initial-points 12 \
   --batch-size 1 \
@@ -81,20 +141,39 @@ python tune_two_stage_ytopt.py \
   --runs 1 \
   --num-frames 10000
 ```
-- Chart generation: [examples/ptychonn/visualize_agentic_search.py](examples/ptychonn/visualize_agentic_search.py)
-- Figure: [figs/paper_figs/convergence.pdf](figs/paper_figs/convergence.pdf)
 
+Regenerate search figures from an `aggregate.csv`:
 
-### Energy efficiency
-- Logs: [examples/tomogan/debug_logs/energy_logs.md](examples/tomogan/debug_logs/energy_logs.md)
-- Example benchmark:
 ```shell
-python experiments/sc4_tomogan_gpu_energy.py \
---batches 2,4,8,16 \
---thread-list 2,4,8 \
---num-frames 512 \
---runs 3 \
---rate-hz 0
+python experiments/figures/agentic_config_search/plot_agentic_search.py \
+  examples/ptychonn/tune_logs_two_stages_ytopt/<timestamp>/aggregate.csv
 ```
-- Chart generation: [experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py](experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py)
-- Figure: [figs/paper_figs/tomogan_energy_efficiency.pdf](figs/paper_figs/tomogan_energy_efficiency.pdf)
+
+## TomoGAN GPU Energy Efficiency
+
+- App benchmark: `examples/tomogan/benchmark.py`
+- Captured energy log: `experiments/logs/tomogan_energy.md`
+- Captured baseline log: `experiments/logs/tomogan_baseline.md`
+- Figure package: `experiments/figures/tomogan_energy/`
+- Submitted figure: `figs/paper_figs/tomogan_energy_efficiency.pdf`
+
+The captured log records a previous run through a top-level
+`experiments/sc4_tomogan_gpu_energy.py` wrapper. That wrapper is not present in
+this clean checkout, so rerun through the tracked TomoGAN benchmark directly:
+
+```shell
+cd examples/tomogan
+python benchmark.py \
+  --batches 2,4,8,16 \
+  --thread-list 2,4,8 \
+  --num-frames 512 \
+  --runs 3 \
+  --rate-hz 0 \
+  --gpu-sample-interval-s 0.2
+```
+
+Regenerate the figure:
+
+```shell
+python experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py
+```

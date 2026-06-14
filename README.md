@@ -117,8 +117,17 @@ Example applications are located in [examples](examples) directory.
 Each application contains its own README with instructions for running it.
 Available applications:
 - [PtychoNN](examples/ptychonn)
-- [Iris Inferrence](examples/iris_knn)
+- [TomoGAN](examples/tomogan)
+- [Bare runtime ceiling](examples/bare_runtime)
+- [Iris Inference](examples/iris_knn)
 - [Dataflow](examples/dataflow)
+
+## Paper Experiments
+
+The submitted-paper experiment index is in [experiments.md](experiments.md).
+Experiment drivers, preserved logs, result CSVs, and figure-generation packages
+are organized under [experiments](experiments). Final submitted figure copies
+are in [figs/paper_figs](figs/paper_figs).
 
 ## Tests
 ### Dependency

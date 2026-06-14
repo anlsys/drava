@@ -12,9 +12,8 @@ from matplotlib.ticker import FuncFormatter
 
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[2]
 CSV_PATH = HERE / "bare_runtime_comparison.csv"
-OUT_DIR = REPO_ROOT / "figs" / "sc5_bare_runtime_ceiling"
+OUT_DIR = HERE
 
 
 def load_rows():
