@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import numpy as np
@@ -92,6 +93,25 @@ def load_publish_config():
         f" DRAVA_PUBLISH_NUM_FRAMES: {num_frames}"
     )
     return rate_hz, num_frames
+
+
+def write_publisher_metrics(frames, duration_s, avg_fps, eos_seq=None):
+    """Write a single JSON object of publisher-side metrics to the path in
+    DRAVA_PUBLISHER_METRICS_FILE, if set. Mirrors the runtime's file-based
+    metrics so orchestrators read files instead of scraping stdout. No-op when
+    the env var is unset."""
+    path = os.getenv("DRAVA_PUBLISHER_METRICS_FILE")
+    if not path:
+        return
+    obj = {
+        "frames": int(frames),
+        "duration_s": float(duration_s),
+        "avg_fps": float(avg_fps),
+    }
+    if eos_seq is not None:
+        obj["eos_seq"] = int(eos_seq)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f)
 
 
 def load_dataset_payloads():

@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <drava/drava.h>
@@ -41,6 +42,7 @@ struct stage_config_state_t {
     drava_stage_runtime_config_t runtime_cfg;
     drava_stage_ingress_config_t ingress_cfg;
     drava_stage_egress_config_t egress_cfg;
+    drava_stage_metrics_config_t metrics_cfg;
     int nats_async_drain_timeout_ms = 30000;
 };
 
@@ -185,6 +187,14 @@ static void load_stage_config_once()
                                            &st.egress_cfg.subject);
                     (void)yaml_read_string(egress, "output_fifo_path",
                                            &st.egress_cfg.output_fifo_path);
+                    (void)yaml_read_bool(egress, "forward_eos",
+                                         &st.egress_cfg.forward_eos);
+                }
+
+                YAML::Node metrics = stage["metrics"];
+                if (metrics && metrics.IsMap()) {
+                    (void)yaml_read_string(metrics, "output_path",
+                                           &st.metrics_cfg.output_path);
                 }
 
                 st.loaded = true;
@@ -231,7 +241,15 @@ int drava_apply_stage_config(drava_t *drava)
     drava->runtime_cfg = cfg.runtime_cfg;
     drava->ingress_cfg = cfg.ingress_cfg;
     drava->egress_cfg = cfg.egress_cfg;
+    drava->metrics_cfg = cfg.metrics_cfg;
     drava->nats_async_drain_timeout_ms = cfg.nats_async_drain_timeout_ms;
+    /* Only auto-forward EOS when a stage config was actually loaded and it opts
+     * in. Apps without a pipeline config (no egress) never forward. */
+    drava->egress_cfg.forward_eos = cfg.loaded && cfg.egress_cfg.forward_eos;
+    /* DRAVA_METRICS_FILE overrides the YAML metrics.output_path. */
+    const char *metrics_env = env_get("DRAVA_METRICS_FILE");
+    if (metrics_env != nullptr)
+        drava->metrics_cfg.output_path = metrics_env;
     return DRAVA_SUCCESS;
 }
 
@@ -248,6 +266,30 @@ bool drava_payload_is_eos(const void *data, size_t data_len)
         return false;
     static const char *prefix = "DRAVA_EOS:";
     return std::memcmp(data, prefix, 10) == 0;
+}
+
+bool drava_payload_parse_eos_count(const void *data,
+                                   size_t data_len,
+                                   uint64_t *out_count)
+{
+    if (out_count != nullptr)
+        *out_count = 0;
+    if (!drava_payload_is_eos(data, data_len))
+        return false;
+    const char *p = (const char *)data + 10;
+    size_t n = data_len - 10;
+    uint64_t count = 0;
+    bool any_digit = false;
+    for (size_t i = 0; i < n; ++i) {
+        char c = p[i];
+        if (c < '0' || c > '9')
+            break;
+        count = count * 10 + (uint64_t)(c - '0');
+        any_digit = true;
+    }
+    if (any_digit && out_count != nullptr)
+        *out_count = count;
+    return true;
 }
 
 void drava_stats_record_callback_batch(drava_t *drava,
@@ -270,8 +312,12 @@ void drava_stats_record_callback_batch(drava_t *drava,
     drava->callback_batches.fetch_add(1);
     drava->callback_ns_sum.fetch_add(callback_ns);
     uint64_t zero = 0;
-    if (first_recv_ns > 0)
-        (void)drava->first_rx_ns.compare_exchange_strong(zero, first_recv_ns);
+    if (first_recv_ns > 0 &&
+        drava->first_rx_ns.compare_exchange_strong(zero, first_recv_ns)) {
+        /* First data frame of the stream: capture the energy baseline so energy
+         * aligns with the same window as first_rx_ns/last_stage_ns. */
+        drava_energy_capture_baseline(drava->energy_sampler);
+    }
     if (callback_end_ns > 0)
         drava->last_stage_ns.store(callback_end_ns);
     uint64_t prev = drava->callback_ns_max.load();
@@ -359,6 +405,65 @@ void drava_stats_log_snapshot(drava_t *drava, const char *reason)
             s.stage_latency_samples, stage_avg_ms, stage_max_ms, rx_item_fps,
             tx_msg_fps, cb_total_s, publish_total_s, compute_total_s,
             stage_total_s, stage_total_fps, drava->stage_name.c_str());
+
+    /* Read energy consumed over the stage window (exact counters, not sampled).
+     * Fields are only emitted when their source is available. */
+    drava_energy_reading_t energy;
+    const bool have_energy = drava_energy_read(drava->energy_sampler, &energy);
+
+    /* Structured sink: append one JSON object per snapshot so benchmarks can
+     * read metrics from a file instead of scraping this console line. Emits the
+     * same raw counters and derived fields as the log line above, plus the raw
+     * max-latency counters that the console line omits, plus energy when
+     * available. */
+    if (!drava->metrics_cfg.output_path.empty()) {
+        const char *safe_reason = (reason != nullptr) ? reason : "snapshot";
+        std::lock_guard<std::mutex> lock(drava->metrics_file_mutex);
+        FILE *mf = std::fopen(drava->metrics_cfg.output_path.c_str(), "a");
+        if (mf != nullptr) {
+            std::fprintf(
+                    mf,
+                    "{\"reason\":\"%s\",\"stage\":\"%s\","
+                    "\"rx_msgs\":%" PRIu64 ",\"rx_items\":%" PRIu64
+                    ",\"rx_bytes\":%" PRIu64 ",\"tx_msgs\":%" PRIu64
+                    ",\"tx_bytes\":%" PRIu64 ",\"cb_batches\":%" PRIu64
+                    ",\"stage_samples\":%" PRIu64
+                    ",\"callback_ns_max\":%" PRIu64 ",\"publish_ns_max\":%" PRIu64
+                    ",\"cb_avg_ms\":%.6f,\"stage_avg_ms\":%.6f"
+                    ",\"stage_max_ms\":%.6f,\"rx_item_fps\":%.6f"
+                    ",\"tx_msg_fps\":%.6f,\"cb_total_s\":%.6f"
+                    ",\"publish_total_s\":%.6f,\"compute_total_s\":%.6f"
+                    ",\"stage_total_s\":%.6f,\"stage_total_fps\":%.6f",
+                    safe_reason, drava->stage_name.c_str(), s.rx_msgs, s.rx_items,
+                    s.rx_bytes, s.tx_msgs, s.tx_bytes, s.callback_batches,
+                    s.stage_latency_samples, s.callback_ns_max, s.publish_ns_max,
+                    cb_avg_ms, stage_avg_ms, stage_max_ms, rx_item_fps,
+                    tx_msg_fps, cb_total_s, publish_total_s, compute_total_s,
+                    stage_total_s, stage_total_fps);
+            if (have_energy) {
+                double total_j = 0.0;
+                if (energy.gpu_valid) {
+                    std::fprintf(mf, ",\"gpu_energy_j\":%.6f", energy.gpu_joules);
+                    total_j += energy.gpu_joules;
+                }
+                if (energy.cpu_valid) {
+                    std::fprintf(mf, ",\"cpu_energy_j\":%.6f", energy.cpu_joules);
+                    total_j += energy.cpu_joules;
+                }
+                std::fprintf(mf, ",\"total_energy_j\":%.6f", total_j);
+                if (s.rx_items > 0) {
+                    std::fprintf(mf, ",\"total_energy_j_per_frame\":%.9f",
+                                 total_j / (double)s.rx_items);
+                }
+            }
+            std::fprintf(mf, "}\n");
+            std::fclose(mf);
+        } else {
+            LOGGER_WARN("Failed to open metrics file %s: %s",
+                        drava->metrics_cfg.output_path.c_str(),
+                        std::strerror(errno));
+        }
+    }
 }
 
 uint64_t drava_callback_context_recv_ts_ns()
@@ -373,6 +478,36 @@ void drava_callback_task_begin(drava_t *drava)
     drava->pending_callback_tasks.fetch_add(1);
 }
 
+/* Finalize the stream exactly once: run the app's EOS routine (if any) and
+ * forward the EOS marker downstream (if enabled). Called when the stream has
+ * drained (all data callbacks complete and the EOS marker was seen). */
+static void drava_finalize_stream(drava_t *drava)
+{
+    if (drava == nullptr)
+        return;
+
+    std::string marker;
+    uint64_t expected = 0;
+    {
+        std::lock_guard<std::mutex> lock(drava->eos_mutex);
+        if (!drava->eos_seen || drava->eos_finalized)
+            return;
+        drava->eos_finalized = true;
+        marker = drava->eos_payload;
+        expected = drava->eos_expected_frames;
+    }
+
+    if (drava->eos_routine)
+        drava->eos_routine(expected, drava->eos_routine_user_data);
+
+    if (drava->forward_eos && !marker.empty()) {
+        int rc = drava->publish(marker.data(), marker.size());
+        if (rc != DRAVA_SUCCESS)
+            LOGGER_ERROR("EOS forward failed: rc=%d stage=%s", rc,
+                         drava->stage_name.c_str());
+    }
+}
+
 void drava_callback_task_end(drava_t *drava, bool saw_eos)
 {
     if (drava == nullptr)
@@ -384,6 +519,12 @@ void drava_callback_task_end(drava_t *drava, bool saw_eos)
     const uint64_t remaining = drava->pending_callback_tasks.fetch_sub(1) - 1;
     if (remaining != 0)
         return;
+
+    /* All in-flight callbacks have drained. If we have seen EOS, this is the
+     * point at which every data frame has been processed, so it is safe to
+     * finalize the stream and forward EOS exactly once. */
+    if (drava->eos_seen)
+        drava_finalize_stream(drava);
 
     if (drava->pending_rx_eos_snapshot.exchange(0) != 0)
         drava_stats_log_snapshot(drava, "rx_eos");
@@ -409,17 +550,30 @@ static void drava_dispatch_execute(drava_t *drava,
         return;
     }
 
-    std::vector<drava_frame_t> frames(payloads.size());
+    /* Split the batch into data frames and the EOS marker (if present). The
+     * runtime owns the EOS lifecycle, so the marker is stripped here and never
+     * handed to the app callback. */
+    std::vector<drava_frame_t> frames;
+    frames.reserve(payloads.size());
     uint64_t batch_id = drava->next_batch_id.fetch_add(1);
     size_t total_bytes = 0;
     bool saw_eos = false;
-    size_t data_frame_count = 0;
+    const std::string *eos_payload = nullptr;
+    uint64_t eos_count = 0;
     uint64_t first_recv_ns = 0;
     uint64_t last_recv_ns = 0;
 
     for (size_t i = 0; i < payloads.size(); ++i) {
         const std::string &payload = payloads[i];
-        drava_frame_t &frame = frames[i];
+        uint64_t count = 0;
+        if (drava_payload_parse_eos_count(payload.data(), payload.size(),
+                                          &count)) {
+            saw_eos = true;
+            eos_payload = &payload;
+            eos_count = count;
+            continue;
+        }
+        drava_frame_t frame;
         frame.frame_id = drava->next_frame_id.fetch_add(1);
         frame.recv_ts_ns = drava_monotonic_ns();
         if (first_recv_ns == 0)
@@ -428,31 +582,46 @@ static void drava_dispatch_execute(drava_t *drava,
         frame.data = payload.data();
         frame.data_len = payload.size();
         total_bytes += payload.size();
-        if (drava_payload_is_eos(payload.data(), payload.size())) {
-            saw_eos = true;
-        } else {
-            data_frame_count += 1;
-        }
+        frames.push_back(frame);
     }
 
-    drava_frame_batch_t batch;
-    batch.batch_id = batch_id;
-    batch.count = (uint32_t)frames.size();
-    batch.frames = frames.data();
-    const uint64_t prev_recv_ts = g_callback_recv_ts_ns;
-    g_callback_recv_ts_ns = frames.empty() ? 0 : frames[0].recv_ts_ns;
-    const uint64_t cb_t0 = drava_monotonic_ns();
-    if (drava->callback_serialize) {
-        std::lock_guard<std::mutex> lock(drava->callback_mutex);
-        drava->frame_routine(&batch, drava->frame_routine_user_data);
-    } else {
-        drava->frame_routine(&batch, drava->frame_routine_user_data);
+    const size_t data_frame_count = frames.size();
+
+    /* Record the EOS marker so the drain path can finalize/forward it. */
+    if (saw_eos) {
+        std::lock_guard<std::mutex> lock(drava->eos_mutex);
+        drava->eos_seen = true;
+        drava->eos_payload.assign(eos_payload->data(), eos_payload->size());
+        if (eos_count > drava->eos_expected_frames)
+            drava->eos_expected_frames = eos_count;
     }
-    const uint64_t cb_t1 = drava_monotonic_ns();
-    g_callback_recv_ts_ns = prev_recv_ts;
-    drava_stats_record_callback_batch(drava, data_frame_count, total_bytes,
-                                      first_recv_ns, last_recv_ns, cb_t0,
-                                      cb_t1);
+
+    /* Invoke the app callback only when there are data frames to process. */
+    if (data_frame_count > 0) {
+        const uint64_t base_index =
+                drava->next_data_index.fetch_add(data_frame_count);
+
+        drava_frame_batch_t batch;
+        batch.batch_id = batch_id;
+        batch.count = (uint32_t)frames.size();
+        batch.base_index = base_index;
+        batch.frames = frames.data();
+        const uint64_t prev_recv_ts = g_callback_recv_ts_ns;
+        g_callback_recv_ts_ns = frames[0].recv_ts_ns;
+        const uint64_t cb_t0 = drava_monotonic_ns();
+        if (drava->callback_serialize) {
+            std::lock_guard<std::mutex> lock(drava->callback_mutex);
+            drava->frame_routine(&batch, drava->frame_routine_user_data);
+        } else {
+            drava->frame_routine(&batch, drava->frame_routine_user_data);
+        }
+        const uint64_t cb_t1 = drava_monotonic_ns();
+        g_callback_recv_ts_ns = prev_recv_ts;
+        drava_stats_record_callback_batch(drava, data_frame_count, total_bytes,
+                                          first_recv_ns, last_recv_ns, cb_t0,
+                                          cb_t1);
+    }
+
     drava_callback_task_end(drava, saw_eos);
 }
 

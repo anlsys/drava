@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as dt
+import json
 import math
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -13,21 +13,42 @@ from pathlib import Path
 
 import yaml
 
-DRAVA_METRICS_RE = re.compile(
-    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
-    r"rx_items=(?P<rx_items>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
-    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
-    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
-    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_item_fps=(?P<rx_item_fps>[0-9.]+)\s+"
-    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+cb_total_s=(?P<cb_total_s>[0-9.]+)\s+"
-    r"publish_total_s=(?P<publish_total_s>[0-9.]+)\s+compute_total_s=(?P<compute_total_s>[0-9.]+)\s+"
-    r"stage_total_s=(?P<stage_total_s>[0-9.]+)\s+stage_total_fps=(?P<stage_total_fps>[0-9.]+)\s+"
-    r"stage=(?P<stage>\S+)"
-)
-PUB_DONE_RE = re.compile(
-    r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
-    r"\(avg_fps=(?P<fps>[0-9.]+)\)"
-)
+# Drava runtime metrics are read from the JSONL file the runtime writes
+# (DRAVA_METRICS_FILE), and publisher metrics from the JSON file the publisher
+# writes (DRAVA_PUBLISHER_METRICS_FILE). Nothing is scraped from stdout.
+
+
+def read_publisher_metrics(path: Path):
+    """Return the publisher's single JSON metrics object, or None if the file is
+    not present/complete yet."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def read_metrics_record(path: Path, stage=None, reasons=("rx_eos", "tx_eos")):
+    """Return the last JSON metrics record in the runtime's metrics file that
+    matches the given stage and reason, or None if not present yet."""
+    if not path.exists():
+        return None
+    record = None
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if reasons is not None and obj.get("reason") not in reasons:
+            continue
+        if stage is not None and obj.get("stage") != stage:
+            continue
+        record = obj
+    return record
 
 
 def parse_args():
@@ -52,10 +73,11 @@ def parse_args():
     p.add_argument("--stage-config", default="pipeline.yaml", help="Base stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs", help="Output directory under examples/tomogan.")
     p.add_argument("--app-timeout-s", type=float, default=None, help="Max wait for app metrics after publisher exits.")
-    p.add_argument("--gpu-sample-interval-s", type=float, default=0.2, help="nvidia-smi sampling interval.")
-    p.add_argument("--no-gpu-energy", action="store_true", help="Disable nvidia-smi power sampling.")
-    p.add_argument("--rapl-glob", default="/sys/class/powercap/intel-rapl:*/energy_uj",
-                   help="RAPL energy_uj glob. Use '' to disable CPU/package energy sampling.")
+    p.add_argument("--gpu-sample-interval-s", type=float, default=0.2,
+                   help="nvidia-smi sampling interval for GPU power/util/memory telemetry.")
+    p.add_argument("--no-gpu-telemetry", action="store_true",
+                   help="Disable nvidia-smi power/util/memory sampling. "
+                        "Energy still comes from the runtime metrics file.")
     return p.parse_args()
 
 
@@ -212,54 +234,9 @@ def gpu_power_sampler(stop_evt: threading.Event, samples: list, interval_s: floa
         stop_evt.wait(interval_s)
 
 
-def integrate_power_j(samples, start_t, end_t):
-    window = [(t, p) for (t, p, _u, _m) in samples if start_t <= t <= end_t]
-    if len(window) < 2:
-        return None
-    joules = 0.0
-    for (t0, p0), (t1, p1) in zip(window, window[1:]):
-        joules += ((p0 + p1) * 0.5) * (t1 - t0)
-    return joules
-
-
 def average_window(samples, start_t, end_t, index):
     values = [sample[index] for sample in samples if start_t <= sample[0] <= end_t]
     return sum(values) / len(values) if values else None
-
-
-def read_rapl_domains(pattern: str):
-    if not pattern:
-        return {}
-    domains = {}
-    for energy_path in Path("/").glob(pattern.lstrip("/")):
-        try:
-            base = energy_path.parent
-            max_path = base / "max_energy_range_uj"
-            name_path = base / "name"
-            name = name_path.read_text(encoding="utf-8").strip() if name_path.exists() else base.name
-            domains[str(energy_path)] = (
-                name,
-                int(energy_path.read_text(encoding="utf-8").strip()),
-                int(max_path.read_text(encoding="utf-8").strip()) if max_path.exists() else None,
-            )
-        except Exception:
-            pass
-    return domains
-
-
-def rapl_delta_j(before: dict, after: dict):
-    total_uj = 0
-    matched = False
-    for path, (_name, start, max_range) in before.items():
-        if path not in after:
-            continue
-        matched = True
-        end = after[path][1]
-        if end >= start:
-            total_uj += end - start
-        elif max_range is not None:
-            total_uj += (max_range - start) + end
-    return total_uj / 1_000_000.0 if matched else None
 
 
 def fmt(x, f="{:.2f}"):
@@ -365,25 +342,15 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
 
     app_log = run_dir / f"app_b{batch_size}_r{run_idx}.log"
     pub_log = run_dir / f"pub_b{batch_size}_r{run_idx}.log"
+    metrics_path = run_dir / f"metrics_b{batch_size}_r{run_idx}.jsonl"
+    pub_metrics_path = run_dir / f"pub_metrics_b{batch_size}_r{run_idx}.json"
+    env["DRAVA_METRICS_FILE"] = str(metrics_path)
     app_ready = threading.Event()
-    app_metrics = {}
-    pub_done = {}
     marks = {"publish_start": None, "metrics": None}
 
     def on_app_line(line: str):
         if "JetStream ready:" in line:
             app_ready.set()
-        m = DRAVA_METRICS_RE.search(line)
-        if m:
-            gd = m.groupdict()
-            if gd.get("reason") in ("rx_eos", "tx_eos"):
-                app_metrics.update(gd)
-                marks["metrics"] = time.monotonic()
-
-    def on_pub_line(line: str):
-        m = PUB_DONE_RE.search(line)
-        if m:
-            pub_done.update(m.groupdict())
 
     print(f"[batch={batch_size} run={run_idx}] starting app.py")
     app_proc = subprocess.Popen(
@@ -409,7 +376,7 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
     gpu_samples = []
     gpu_stop = threading.Event()
     gpu_thread = None
-    if not args.no_gpu_energy:
+    if not args.no_gpu_telemetry:
         gpu_thread = threading.Thread(
             target=gpu_power_sampler,
             args=(gpu_stop, gpu_samples, args.gpu_sample_interval_s),
@@ -417,32 +384,39 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
         )
         gpu_thread.start()
 
-    rapl_before = read_rapl_domains(args.rapl_glob)
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     marks["publish_start"] = time.monotonic()
     pub_proc = subprocess.Popen(
         [args.python, "publisher_jetstream.py"],
         cwd=root,
-        env=env,
+        env=dict(env, DRAVA_PUBLISHER_METRICS_FILE=str(pub_metrics_path)),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
-    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log, on_pub_line), daemon=True)
+    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log), daemon=True)
     pub_thread.start()
 
     expected_frames = configured_num_frames if configured_num_frames > 0 else 16
     pub_timeout_s = max(180, int(max(1, expected_frames) / 1000) + 180)
     pub_proc.wait(timeout=pub_timeout_s)
     pub_thread.join(timeout=5)
+    pub_done = read_publisher_metrics(pub_metrics_path)
 
+    app_metrics = None
     end_wait = time.time() + effective_app_timeout_s
-    while time.time() < end_wait and not app_metrics:
+    while time.time() < end_wait:
+        app_metrics = read_metrics_record(metrics_path, stage="stage1")
+        if app_metrics is not None:
+            marks["metrics"] = time.monotonic()
+            break
         if app_proc.poll() is not None:
+            app_metrics = read_metrics_record(metrics_path, stage="stage1")
+            if app_metrics is not None:
+                marks["metrics"] = time.monotonic()
             break
         time.sleep(0.2)
-    rapl_after = read_rapl_domains(args.rapl_glob)
 
     gpu_stop.set()
     if gpu_thread is not None:
@@ -451,9 +425,9 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
     app_thread.join(timeout=5)
 
     if not pub_done:
-        raise RuntimeError(f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
-    if not app_metrics:
-        raise RuntimeError(f"drava metrics line not found\n--- app tail ---\n{tail_text(app_log)}")
+        raise RuntimeError(f"publisher metrics file not found: {pub_metrics_path}\n--- pub tail ---\n{tail_text(pub_log)}")
+    if app_metrics is None:
+        raise RuntimeError(f"drava metrics not found\n--- app tail ---\n{tail_text(app_log)}")
 
     publisher_frames = int(pub_done["frames"])
     stage_frames = int(app_metrics["rx_items"])
@@ -462,11 +436,16 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
 
     start_t = marks["publish_start"]
     end_t = marks["metrics"] or time.monotonic()
-    gpu_energy_j = integrate_power_j(gpu_samples, start_t, end_t) if gpu_samples else None
-    cpu_rapl_energy_j = rapl_delta_j(rapl_before, rapl_after)
-    total_energy_j = None
-    if gpu_energy_j is not None or cpu_rapl_energy_j is not None:
-        total_energy_j = (gpu_energy_j or 0.0) + (cpu_rapl_energy_j or 0.0)
+
+    # Energy comes from the runtime's exact counters (NVML for GPU, RAPL for
+    # CPU), reported in the metrics JSONL over the runtime's own stage window --
+    # no Python-side power sampling or integration. Fields are absent when a
+    # source is unavailable (e.g. NVML not compiled in).
+    gpu_energy_j = app_metrics.get("gpu_energy_j")
+    cpu_energy_j = app_metrics.get("cpu_energy_j")
+    total_energy_j = app_metrics.get("total_energy_j")
+    total_energy_j_per_frame = app_metrics.get("total_energy_j_per_frame")
+
     stage_time_s = float(app_metrics["stage_total_s"])
     e2e_s = end_t - start_t
     drava_overhead_s = max(0.0, e2e_s - stage_time_s)
@@ -478,22 +457,24 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
         "threads": effective_threads,
         "timeout_ms": effective_timeout_ms,
         "frames": publisher_frames,
-        "publisher_time_s": float(pub_done["time"]),
-        "publisher_avg_fps": float(pub_done["fps"]),
+        "publisher_time_s": float(pub_done["duration_s"]),
+        "publisher_avg_fps": float(pub_done["avg_fps"]),
         "stage_time_s": stage_time_s,
         "stage_fps": float(app_metrics["stage_total_fps"]),
         "cb_avg_ms": float(app_metrics["cb_avg_ms"]),
         "pipeline_e2e_s": e2e_s,
         "drava_overhead_s": drava_overhead_s,
         "drava_overhead_pct": drava_overhead_pct,
+        # GPU power/util/memory averages remain sampled telemetry (nvidia-smi);
+        # energy itself is from the runtime counters above.
         "gpu_avg_power_w": average_window(gpu_samples, start_t, end_t, 1),
         "gpu_avg_util_pct": average_window(gpu_samples, start_t, end_t, 2),
         "gpu_avg_mem_mib": average_window(gpu_samples, start_t, end_t, 3),
         "gpu_energy_j": gpu_energy_j,
         "gpu_energy_j_per_frame": gpu_energy_j / publisher_frames if gpu_energy_j is not None else None,
-        "cpu_rapl_energy_j": cpu_rapl_energy_j,
+        "cpu_energy_j": cpu_energy_j,
         "total_energy_j": total_energy_j,
-        "total_energy_j_per_frame": total_energy_j / publisher_frames if total_energy_j is not None else None,
+        "total_energy_j_per_frame": total_energy_j_per_frame,
     }
 
 
@@ -501,7 +482,7 @@ def print_table(rows):
     print("")
     print(
         "| Batch | Threads | Frames | Stage Time (s) | Stage FPS | E2E (s) | "
-        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | CPU RAPL (J) | Total J/frame |"
+        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | CPU Energy (J) | Total J/frame |"
     )
     print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
@@ -510,7 +491,7 @@ def print_table(rows):
             f"{fmt(r['stage_fps'])} | {fmt(r['pipeline_e2e_s'])} | "
             f"{fmt(r['drava_overhead_s'])} | {fmt(r['drava_overhead_pct'])} | "
             f"{fmt(r['gpu_avg_power_w'])} | {fmt(r['gpu_energy_j'])} | "
-            f"{fmt(r['gpu_energy_j_per_frame'], '{:.4f}')} | {fmt(r['cpu_rapl_energy_j'])} | "
+            f"{fmt(r['gpu_energy_j_per_frame'], '{:.4f}')} | {fmt(r['cpu_energy_j'])} | "
             f"{fmt(r['total_energy_j_per_frame'], '{:.4f}')} |"
         )
 
@@ -537,7 +518,7 @@ def write_summary_csv(path: Path, rows):
         "publisher_avg_fps", "stage_time_s", "stage_fps", "cb_avg_ms", "pipeline_e2e_s",
         "drava_overhead_s", "drava_overhead_pct",
         "gpu_avg_power_w", "gpu_avg_util_pct", "gpu_avg_mem_mib", "gpu_energy_j",
-        "gpu_energy_j_per_frame", "cpu_rapl_energy_j", "total_energy_j",
+        "gpu_energy_j_per_frame", "cpu_energy_j", "total_energy_j",
         "total_energy_j_per_frame",
     ]
     with open(path, "w", encoding="utf-8") as f:

@@ -7,7 +7,11 @@ import os
 import struct
 import time
 
-from publisher_util import load_dataset_payloads, load_publish_config
+from publisher_util import (
+    load_dataset_payloads,
+    load_publish_config,
+    write_publisher_metrics,
+)
 
 FIFO_PATH = os.getenv("DRAVA_OUTPUT_FIFO_PATH", "/tmp/drava_in")
 RATE_HZ, TARGET_FRAMES = load_publish_config()
@@ -71,10 +75,12 @@ def main():
 
     t_end = time.perf_counter()
     total_dt = t_end - t0
+    avg_fps = sent_count / total_dt if total_dt > 0 else 0.0
     print(
         f"Done: published {sent_count} frames in {total_dt:.3f}s "
-        f"(avg_fps={sent_count / total_dt:.2f})"
+        f"(avg_fps={avg_fps:.2f})"
     )
+    write_publisher_metrics(sent_count, total_dt, avg_fps)
 
 
 if __name__ == "__main__":

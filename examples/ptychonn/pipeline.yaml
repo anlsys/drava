@@ -18,6 +18,9 @@ stages:
     runtime:
       threads: 4
       callback_batch: 256
+      # Parallel callbacks: the stateless callback + runtime-owned EOS/index
+      # make this safe without any app-side lock.
+      callback_serialize: false
     ingress:
       stream: FRAMES
       subject: frames.raw
@@ -27,6 +30,8 @@ stages:
     egress:
       stream: PREDICTIONS
       subject: frames.stage1
+      # forward_eos defaults to true: the runtime re-publishes the EOS marker
+      # downstream once this stage drains, so the app never handles EOS.
       # For socket transport, use:
       # output_fifo_path: /tmp/drava_stage1_out
 
@@ -42,3 +47,12 @@ stages:
       fetch_timeout_ms: 500
       # For socket transport, use:
       # socket_path: /tmp/drava_stage2_in
+    egress:
+      # Terminal stage: nothing downstream, so do not forward the EOS marker.
+      # The app's on_end_of_stream hook fires instead.
+      forward_eos: false
+    # metrics:
+    #   # Runtime appends one JSON record per snapshot here (instead of only
+    #   # logging the [drava-metrics] console line). Benchmarks read this file.
+    #   # The DRAVA_METRICS_FILE env var overrides this path.
+    #   output_path: /tmp/drava_stage2_metrics.jsonl

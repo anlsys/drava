@@ -62,14 +62,52 @@ else ()
 endif ()
 # ------------------------------------------------------------------------
 
+#############################################
+# Optional NVML (GPU energy) auto-detect    #
+#############################################
+# NVML ships with the CUDA toolkit / driver (libnvidia-ml, nvml.h). It provides
+# nvmlDeviceGetTotalEnergyConsumption (a monotonic mJ counter, Volta+), which the
+# runtime uses to report exact GPU energy. Optional: without it, the runtime
+# still reports CPU (RAPL) energy on Linux and omits GPU energy.
+set(NVML_ROOT "$ENV{NVML_ROOT}" CACHE PATH "Root of NVML/CUDA installation (optional)")
+set(NVML_ENABLED FALSE)
+
+set(_NVML_INCLUDE_HINTS "")
+set(_NVML_LIB_HINTS "")
+if (NVML_ROOT)
+    list(APPEND _NVML_INCLUDE_HINTS "${NVML_ROOT}/include")
+    list(APPEND _NVML_LIB_HINTS "${NVML_ROOT}/lib64" "${NVML_ROOT}/lib"
+            "${NVML_ROOT}/lib64/stubs" "${NVML_ROOT}/lib/stubs")
+endif ()
+if (DEFINED ENV{CUDA_HOME})
+    list(APPEND _NVML_INCLUDE_HINTS "$ENV{CUDA_HOME}/include")
+    list(APPEND _NVML_LIB_HINTS "$ENV{CUDA_HOME}/lib64" "$ENV{CUDA_HOME}/lib64/stubs")
+endif ()
+
+find_path(NVML_INCLUDE_DIR NAMES nvml.h HINTS ${_NVML_INCLUDE_HINTS})
+find_library(NVML_LIBRARY NAMES nvidia-ml HINTS ${_NVML_LIB_HINTS})
+
+if (NVML_INCLUDE_DIR AND NVML_LIBRARY)
+    set(NVML_ENABLED TRUE)
+    message(STATUS "NVML GPU-energy backend enabled (include=${NVML_INCLUDE_DIR}, lib=${NVML_LIBRARY})")
+else ()
+    message(STATUS "NVML not found: building without GPU-energy reporting (CPU/RAPL energy still available on Linux).\n
+    To enable GPU energy, ensure nvml.h and libnvidia-ml are discoverable, e.g.:\n
+    export NVML_ROOT=/path/to/cuda  (or set CUDA_HOME)
+    ")
+endif ()
+# ------------------------------------------------------------------------
+
 ######################
 # Core source files  #
 ######################
 
-# Always compile socket backend
+# Always compile socket backend and the energy module (energy.cc degrades to
+# CPU-only / no-op when NVML is not compiled in).
 set(SOURCE_FILES
         ${CMAKE_SOURCE_DIR}/src/drava.cc
         ${CMAKE_SOURCE_DIR}/src/drava_internal.cc
+        ${CMAKE_SOURCE_DIR}/src/energy.cc
         ${CMAKE_SOURCE_DIR}/src/transport_socket.cc
 )
 
@@ -121,6 +159,19 @@ if (NATS_ENABLED)
     get_filename_component(_NATS_LIBDIR "${NATS_LIBRARY}" DIRECTORY)
     if (_NATS_LIBDIR)
         target_link_options(${DRAVA_NAME} PRIVATE "-Wl,-rpath,${_NATS_LIBDIR}")
+    endif ()
+endif ()
+
+# NVML-specific properties (GPU energy)
+if (NVML_ENABLED)
+    target_include_directories(${DRAVA_NAME} PRIVATE ${NVML_INCLUDE_DIR})
+    target_link_libraries(${DRAVA_NAME} PRIVATE ${NVML_LIBRARY})
+    target_compile_definitions(${DRAVA_NAME} PRIVATE DRAVA_HAS_NVML=1)
+
+    # rpath to where libnvidia-ml.so lives (skip driver stubs dir)
+    get_filename_component(_NVML_LIBDIR "${NVML_LIBRARY}" DIRECTORY)
+    if (_NVML_LIBDIR AND NOT _NVML_LIBDIR MATCHES "stubs")
+        target_link_options(${DRAVA_NAME} PRIVATE "-Wl,-rpath,${_NVML_LIBDIR}")
     endif ()
 endif ()
 ###################

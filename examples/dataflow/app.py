@@ -15,7 +15,4 @@ def func(frames):
         values = np.frombuffer(frame, dtype=FRAME_DTYPE, count=FRAME_VALUES)
         print(f"Python app received raw frame: {values.tolist()}")
 
-drava.init()
-drava.register_routine_py(func)
-drava.listen_py()
-drava.deinit()
+drava.run(func)

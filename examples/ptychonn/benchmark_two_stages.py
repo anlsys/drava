@@ -12,25 +12,47 @@ import time
 from pathlib import Path
 import yaml
 
-DRAVA_METRICS_RE = re.compile(
-    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
-    r"rx_items=(?P<rx_items>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
-    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
-    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
-    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_item_fps=(?P<rx_item_fps>[0-9.]+)\s+"
-    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+cb_total_s=(?P<cb_total_s>[0-9.]+)\s+"
-    r"publish_total_s=(?P<publish_total_s>[0-9.]+)\s+compute_total_s=(?P<compute_total_s>[0-9.]+)\s+"
-    r"stage_total_s=(?P<stage_total_s>[0-9.]+)\s+stage_total_fps=(?P<stage_total_fps>[0-9.]+)\s+"
-    r"stage=(?P<stage>\S+)"
-)
-PUB_DONE_RE = re.compile(
-    r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
-    r"\(avg_fps=(?P<fps>[0-9.]+)\)"
-)
+# Drava runtime metrics are read from the per-stage JSONL files the runtime
+# writes (DRAVA_METRICS_FILE), and publisher metrics from the JSON file the
+# publisher writes (DRAVA_PUBLISHER_METRICS_FILE). Only stage2's finalize line
+# is still parsed from stdout.
 STAGE2_FINAL_RE = re.compile(
     r"\[stage2-final\]\s+frames=(?P<frames>\d+)\s+stitched_frames=(?P<stitched>\d+)\s+"
     r"stitch_side=(?P<side>\d+)"
 )
+
+
+def read_publisher_metrics(path: Path):
+    """Return the publisher's single JSON metrics object, or None if the file is
+    not present/complete yet."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def read_metrics_record(path: Path, stage=None, reasons=("rx_eos", "tx_eos")):
+    """Return the last JSON metrics record in the runtime's metrics file that
+    matches the given stage and reason, or None if not present yet."""
+    if not path.exists():
+        return None
+    record = None
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if reasons is not None and obj.get("reason") not in reasons:
+            continue
+        if stage is not None and obj.get("stage") != stage:
+            continue
+        record = obj
+    return record
 
 
 def parse_args():
@@ -541,19 +563,26 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     )
     write_yaml_config(run_config_path, run_config)
 
+    stage1_metrics_path = run_dir / f"metrics_stage1_b{batch_size}_r{run_idx}.jsonl"
+    stage2_metrics_path = run_dir / f"metrics_stage2_b{batch_size}_r{run_idx}.jsonl"
+
     env_stage1 = dict(env_common)
     env_stage1["DRAVA_STAGE_CONFIG"] = str(run_config_path)
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
     env_stage1["DRAVA_STAGE1_CALLBACK_BATCH"] = str(stage1_callback_batch)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
     env_stage1["STAGE1_JOB_ID"] = stage1_job_id
+    env_stage1["DRAVA_METRICS_FILE"] = str(stage1_metrics_path)
 
     env_stage2 = dict(env_common)
     env_stage2["DRAVA_STAGE_CONFIG"] = str(run_config_path)
     env_stage2["DRAVA_STAGE_NAME"] = "stage2"
+    env_stage2["DRAVA_METRICS_FILE"] = str(stage2_metrics_path)
 
+    pub_metrics_path = run_dir / f"pub_metrics_b{batch_size}_r{run_idx}.json"
     env_pub = dict(env_common)
     env_pub["DRAVA_STAGE_CONFIG"] = str(run_config_path)
+    env_pub["DRAVA_PUBLISHER_METRICS_FILE"] = str(pub_metrics_path)
 
     stage1_log = run_dir / f"app_stage1_b{batch_size}_r{run_idx}.log"
     stage2_log = run_dir / f"app_stage2_b{batch_size}_r{run_idx}.log"
@@ -561,38 +590,20 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     stage1_ready = threading.Event()
     stage2_ready = threading.Event()
-    stage1_metrics = {}
-    stage2_metrics = {}
     stage2_final = {}
-    pub_done = {}
     marks = {"pub_start": None, "stage2_final": None}
 
     def on_stage1_line(line: str):
         if "JetStream ready:" in line:
             stage1_ready.set()
-        m = DRAVA_METRICS_RE.search(line)
-        if m:
-            gd = m.groupdict()
-            if gd.get("reason") in ("rx_eos", "tx_eos"):
-                stage1_metrics.update(gd)
 
     def on_stage2_line(line: str):
         if "JetStream ready:" in line:
             stage2_ready.set()
-        m = DRAVA_METRICS_RE.search(line)
-        if m:
-            gd = m.groupdict()
-            if gd.get("reason") in ("rx_eos", "tx_eos"):
-                stage2_metrics.update(gd)
         m = STAGE2_FINAL_RE.search(line)
         if m:
             stage2_final.update(m.groupdict())
             marks["stage2_final"] = time.monotonic()
-
-    def on_pub_line(line: str):
-        m = PUB_DONE_RE.search(line)
-        if m:
-            pub_done.update(m.groupdict())
 
     print(f"[batch={batch_size} run={run_idx}] starting app_stage2.py")
     stage2_proc = subprocess.Popen(
@@ -651,22 +662,35 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         text=True,
         bufsize=1,
     )
-    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log, on_pub_line), daemon=True)
+    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log), daemon=True)
     pub_thread.start()
 
     pub_timeout_s = max(120, int(max(1, configured_num_frames) / 1000) + 120)
     pub_proc.wait(timeout=pub_timeout_s)
     pub_thread.join(timeout=5)
+    pub_done = read_publisher_metrics(pub_metrics_path)
 
+    stage1_metrics = None
+    stage2_metrics = None
     end_wait = time.time() + effective_app_timeout_s
     while time.time() < end_wait and (
-            not stage1_metrics
-            or not stage2_metrics
+            stage1_metrics is None
+            or stage2_metrics is None
             or not stage2_final
     ):
+        if stage1_metrics is None:
+            stage1_metrics = read_metrics_record(stage1_metrics_path, stage="stage1")
+        if stage2_metrics is None:
+            stage2_metrics = read_metrics_record(stage2_metrics_path, stage="stage2")
         if stage1_proc.poll() is not None and stage2_proc.poll() is not None:
             break
         time.sleep(0.2)
+
+    # Final read in case metrics were flushed just before the processes exited.
+    if stage1_metrics is None:
+        stage1_metrics = read_metrics_record(stage1_metrics_path, stage="stage1")
+    if stage2_metrics is None:
+        stage2_metrics = read_metrics_record(stage2_metrics_path, stage="stage2")
 
     terminate_proc(stage1_proc)
     terminate_proc(stage2_proc)
@@ -674,10 +698,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     stage2_thread.join(timeout=5)
 
     if not pub_done:
-        fail_with_logs(run_dir, f"publisher final line not found\n--- pub tail ---\n{tail_text(pub_log)}")
-    if not stage1_metrics:
+        fail_with_logs(run_dir, f"publisher metrics file not found: {pub_metrics_path}\n--- pub tail ---\n{tail_text(pub_log)}")
+    if stage1_metrics is None:
         fail_with_logs(run_dir, f"stage1 drava metrics not found\n--- stage1 tail ---\n{tail_text(stage1_log)}")
-    if not stage2_metrics:
+    if stage2_metrics is None:
         fail_with_logs(run_dir, f"stage2 drava metrics not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
     if not stage2_final:
         fail_with_logs(run_dir, f"stage2 finalize line not found\n--- stage2 tail ---\n{tail_text(stage2_log)}")
@@ -694,8 +718,8 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         )
 
     row["total_frames"] = pub_frames
-    row["publisher_avg_fps"] = float(pub_done["fps"])
-    row["publisher_time_s"] = float(pub_done["time"])
+    row["publisher_avg_fps"] = float(pub_done["avg_fps"])
+    row["publisher_time_s"] = float(pub_done["duration_s"])
     row["stage1_total_time_s"] = float(stage1_metrics["stage_total_s"])
     row["stage1_total_fps"] = float(stage1_metrics["stage_total_fps"])
     row["stage2_total_time_s"] = float(stage2_metrics["stage_total_s"])

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as dt
+import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -10,21 +10,46 @@ import threading
 import time
 from pathlib import Path
 
-DRAVA_METRICS_RE = re.compile(
-    r"\[drava-metrics\]\s+reason=(?P<reason>\S+)\s+rx_msgs=(?P<rx_msgs>\d+)\s+"
-    r"rx_items=(?P<rx_items>\d+)\s+rx_bytes=(?P<rx_bytes>\d+)\s+tx_msgs=(?P<tx_msgs>\d+)\s+"
-    r"tx_bytes=(?P<tx_bytes>\d+)\s+cb_batches=(?P<cb_batches>\d+)\s+cb_avg_ms=(?P<cb_avg_ms>[0-9.]+)\s+"
-    r"stage_samples=(?P<stage_samples>\d+)\s+stage_avg_ms=(?P<stage_avg_ms>[0-9.]+)\s+"
-    r"stage_max_ms=(?P<stage_max_ms>[0-9.]+)\s+rx_item_fps=(?P<rx_item_fps>[0-9.]+)\s+"
-    r"tx_msg_fps=(?P<tx_msg_fps>[0-9.]+)\s+cb_total_s=(?P<cb_total_s>[0-9.]+)\s+"
-    r"publish_total_s=(?P<publish_total_s>[0-9.]+)\s+compute_total_s=(?P<compute_total_s>[0-9.]+)\s+"
-    r"stage_total_s=(?P<stage_total_s>[0-9.]+)\s+stage_total_fps=(?P<stage_total_fps>[0-9.]+)\s+"
-    r"stage=(?P<stage>\S+)"
-)
-PUB_DONE_RE = re.compile(
-    r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
-    r"\(avg_fps=(?P<fps>[0-9.]+)\)"
-)
+# Drava runtime metrics are read from the JSONL file the runtime writes
+# (DRAVA_METRICS_FILE), and publisher metrics from the JSON file the publisher
+# writes (DRAVA_PUBLISHER_METRICS_FILE). Nothing is scraped from stdout.
+
+
+def read_publisher_metrics(path: Path):
+    """Return the publisher's single JSON metrics object, or None if the file is
+    not present/complete yet."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def read_metrics_record(path: Path, stage=None, reasons=("rx_eos", "tx_eos")):
+    """Return the last JSON metrics record in the runtime's metrics file that
+    matches the given stage and reason, or None if not present yet.
+
+    The runtime appends one JSON object per snapshot. Taking the last matching
+    record mirrors the previous "last [drava-metrics] line wins" behavior
+    (a transform stage emits rx_eos then tx_eos)."""
+    if not path.exists():
+        return None
+    record = None
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if reasons is not None and obj.get("reason") not in reasons:
+            continue
+        if stage is not None and obj.get("stage") != stage:
+            continue
+        record = obj
+    return record
 
 
 def parse_args():
@@ -276,8 +301,10 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     app_log = run_dir / f"app_b{batch_size}_r{run_idx}.log"
     pub_log = run_dir / f"pub_b{batch_size}_r{run_idx}.log"
+    metrics_path = run_dir / f"metrics_b{batch_size}_r{run_idx}.jsonl"
+    pub_metrics_path = run_dir / f"pub_metrics_b{batch_size}_r{run_idx}.json"
+    env["DRAVA_METRICS_FILE"] = str(metrics_path)
 
-    app_metrics = {}
     app_ready = threading.Event()
     timing_marks = {"infer_start_monotonic": None, "final_monotonic": None}
 
@@ -286,12 +313,6 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
             app_ready.set()
         if timing_marks["infer_start_monotonic"] is None and "drava_transport" in line:
             timing_marks["infer_start_monotonic"] = time.monotonic()
-        m = DRAVA_METRICS_RE.search(line)
-        if m:
-            gd = m.groupdict()
-            if gd.get("reason") in ("rx_eos", "tx_eos"):
-                app_metrics.update(gd)
-            timing_marks["final_monotonic"] = time.monotonic()
 
     print(f"[batch={batch_size} run={run_idx}] starting app.py")
     app_proc = subprocess.Popen(
@@ -333,35 +354,39 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     gpu_thread = threading.Thread(target=gpu_sampler, args=(gpu_stop, gpu_samples), daemon=True)
     gpu_thread.start()
 
-    pub_done = {}
-
-    def on_pub_line(line: str):
-        m = PUB_DONE_RE.search(line)
-        if m:
-            pub_done.update(m.groupdict())
-
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     pub_proc = subprocess.Popen(
         [args.python, "publisher_jetstream.py"],
         cwd=root,
-        env=dict(env, NATS_URL=nats_url, DRAVA_SUBJECT=input_subject),
+        env=dict(env, NATS_URL=nats_url, DRAVA_SUBJECT=input_subject,
+                 DRAVA_PUBLISHER_METRICS_FILE=str(pub_metrics_path)),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
-    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log, on_pub_line), daemon=True)
+    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log), daemon=True)
     pub_thread.start()
 
     pub_timeout_s = max(120, int(max(1, configured_num_frames) / 1000) + 120)
     pub_proc.wait(timeout=pub_timeout_s)
     pub_thread.join(timeout=5)
+    pub_done = read_publisher_metrics(pub_metrics_path)
     print(f"[batch={batch_size} run={run_idx}] publisher finished")
 
     end_wait = time.time() + effective_app_timeout_s
     print(f"[batch={batch_size} run={run_idx}] waiting for drava metrics (timeout={effective_app_timeout_s}s)")
-    while time.time() < end_wait and not app_metrics:
+    app_metrics = None
+    while time.time() < end_wait:
+        app_metrics = read_metrics_record(metrics_path, stage="stage1")
+        if app_metrics is not None:
+            timing_marks["final_monotonic"] = time.monotonic()
+            break
         if app_proc.poll() is not None:
+            # Process exited; read once more in case metrics were flushed on exit.
+            app_metrics = read_metrics_record(metrics_path, stage="stage1")
+            if app_metrics is not None:
+                timing_marks["final_monotonic"] = time.monotonic()
             break
         time.sleep(0.2)
 
@@ -377,11 +402,13 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     if pub_done:
         row["publisher_frames"] = int(pub_done["frames"])
-        row["publisher_time_s"] = float(pub_done["time"])
-        row["publisher_avg_fps"] = float(pub_done["fps"])
+        row["publisher_time_s"] = float(pub_done["duration_s"])
+        row["publisher_avg_fps"] = float(pub_done["avg_fps"])
         row["total_frames"] = row["publisher_frames"]
     else:
-        raise RuntimeError(f"[batch={batch_size} run={run_idx}] failed to parse publisher final line")
+        raise RuntimeError(
+            f"[batch={batch_size} run={run_idx}] publisher metrics file not found: {pub_metrics_path}"
+        )
 
     if app_metrics:
         row["stage1_frames"] = int(app_metrics["rx_items"])

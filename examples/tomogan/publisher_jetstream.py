@@ -9,6 +9,7 @@ from publisher_util import (
     load_dataset_payloads,
     load_publish_config,
     load_transport_config,
+    write_publisher_metrics,
 )
 
 NATS_URL, STREAM, SUBJECT = load_transport_config()
@@ -103,11 +104,13 @@ async def main():
 
     t_end = time.perf_counter()
     total_dt = t_end - t0
+    avg_fps = sent_count / total_dt if total_dt > 0 else 0.0
     print(
         f"Done: published {sent_count} frames in {total_dt:.3f}s "
-        f"(avg_fps={sent_count / total_dt:.2f}) "
+        f"(avg_fps={avg_fps:.2f}) "
         f"seq={last_ack_seq if last_ack_seq is not None else 'n/a'} eos_seq={eos_ack.seq}"
     )
+    write_publisher_metrics(sent_count, total_dt, avg_fps, eos_seq=eos_ack.seq)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
 #define __DRAVA_C_H__
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,10 +80,15 @@ typedef struct drava_frame_t {
 
 /**
  * Data model for batch of frames
+ *
+ * base_index is the global 0-based index of the first *data* frame in this
+ * batch across the whole stream (EOS markers excluded). It lets a callback
+ * compute per-frame stream positions without keeping its own counter.
  */
 typedef struct drava_frame_batch_t {
     uint64_t batch_id;
     uint32_t count;
+    uint64_t base_index;
     const drava_frame_t *frames;
 } drava_frame_batch_t;
 
@@ -108,8 +114,19 @@ typedef struct drava_stats_t {
 typedef void *(*drava_frame_routine_t)(const drava_frame_batch_t *batch,
                                        void *user_data);
 
+/**
+ * End-of-stream routine type.
+ *
+ * Invoked once by the runtime after the EOS marker has been observed and all
+ * in-flight data callbacks have drained. expected_frames is the frame count
+ * carried by the EOS marker (0 if the marker had no/invalid count).
+ */
+typedef void (*drava_eos_routine_t)(uint64_t expected_frames, void *user_data);
+
 int drava_register_frame_routine(drava_frame_routine_t routine,
                                  void *user_data);
+
+int drava_register_eos_routine(drava_eos_routine_t routine, void *user_data);
 
 int drava_init(void);
 
@@ -130,6 +147,21 @@ int drava_set_callback_batch(size_t batch_size);
 int drava_set_callback_flush_timeout_ms(int timeout_ms);
 
 int drava_set_callback_serialize(int enabled);
+
+/**
+ * When enabled (default), the runtime re-publishes the EOS marker to the
+ * configured egress once the stream drains. Terminal stages set this to 0.
+ */
+int drava_set_forward_eos(int enabled);
+
+/**
+ * Return non-zero if the payload is an EOS marker. When it is and out_count is
+ * non-NULL, *out_count receives the frame count encoded after the prefix
+ * (0 if absent/invalid).
+ */
+int drava_payload_parse_eos(const void *data,
+                            size_t data_len,
+                            uint64_t *out_count);
 
 #ifdef __cplusplus
 }

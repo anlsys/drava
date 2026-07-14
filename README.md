@@ -122,6 +122,120 @@ Available applications:
 - [Iris Inference](examples/iris_knn)
 - [Dataflow](examples/dataflow)
 
+### Writing an app
+
+A Drava stage is just a callback plus one call to `drava.run`. The runtime owns
+the stream lifecycle — it strips the end-of-stream (EOS) marker before your
+callback runs, tracks each frame's global position, drives finalization once the
+stream drains, and forwards EOS to the next stage — so the callback only handles
+data:
+
+```python
+import drava
+
+def func(frames, base_index):
+    # frames: list[bytes] of data payloads (no EOS marker)
+    # base_index: global index of frames[0] across the whole stream
+    for i, raw in enumerate(frames):
+        result = process(raw)
+        drava.publish_py(result)   # transform stages publish downstream
+
+drava.run(func)
+```
+
+- Callbacks may be written as `func(frames)` or `func(frames, base_index)`;
+  `drava.run` adapts either.
+- For a **terminal** stage that produces a final result, pass an
+  `on_end_of_stream` hook and set `egress.forward_eos: false` in the pipeline
+  config:
+
+  ```python
+  def finalize(expected_frames):
+      write_output()          # runs once, after all callbacks drain
+
+  drava.run(func, on_end_of_stream=finalize)
+  ```
+
+- Concurrency: with `callback_serialize: false` the runtime runs callbacks on
+  multiple threads. Because the runtime owns EOS accounting and `base_index`, a
+  stateless callback needs no lock. Keep app-side locks only for state the app
+  itself accumulates (e.g. a result list).
+- Knobs (`threads`, `callback_batch`, `callback_serialize`, `forward_eos`) live
+  in the stage's `pipeline.yaml`, not in app code.
+
+### Runtime metrics
+
+At end-of-stream the runtime logs a human-readable `[drava-metrics] ...` line to
+the console. For machine consumption (benchmarks, tuners), point the runtime at
+a structured sink instead of scraping that log line:
+
+- Per stage in `pipeline.yaml`:
+
+  ```yaml
+  stages:
+    - name: stage1
+      metrics:
+        output_path: /tmp/drava_stage1_metrics.jsonl
+  ```
+
+- Or via environment variable (overrides the YAML value):
+
+  ```shell
+  export DRAVA_METRICS_FILE=/tmp/drava_metrics.jsonl
+  ```
+
+When set, the runtime **appends one JSON object per metrics snapshot** to that
+file. Each record carries `reason` (`rx_eos`/`tx_eos`), `stage`, the raw
+counters (`rx_items`, `tx_msgs`, `cb_batches`, …), and the derived fields
+(`stage_total_s`, `stage_total_fps`, `cb_avg_ms`, `compute_total_s`,
+`publish_total_s`, …) — the same values as the console line. Readers should
+filter by `stage`/`reason` and ignore unknown keys, so the schema can grow
+without breaking consumers. The benchmark drivers under `examples/` read this
+file; they no longer parse the console output.
+
+#### Publisher metrics
+
+The publishers under `examples/` are separate data-source processes (plain
+NATS/socket clients — they do not link the runtime), so their throughput is not
+visible to the runtime. Like the runtime, each publisher reports its own metrics
+to a file rather than only to stdout. Point it at a path with:
+
+```shell
+export DRAVA_PUBLISHER_METRICS_FILE=/tmp/drava_pub_metrics.json
+```
+
+When set, the publisher writes a **single JSON object** at completion:
+`{"frames": N, "duration_s": X, "avg_fps": Y[, "eos_seq": S]}`. The benchmark
+drivers set this per run and read the file; the human-readable `Done: published
+…` line is still printed to the publisher log but is no longer parsed.
+
+#### Energy
+
+When available, the runtime reports **energy** in the same metrics record,
+measured from hardware counters over the runtime's own stage window (from the
+first frame to end-of-stream) — not sampled and integrated in Python:
+
+- `gpu_energy_j` — GPU energy from NVML's
+  `nvmlDeviceGetTotalEnergyConsumption` (a monotonic mJ counter, Volta+). Only
+  present when Drava is built with NVML (see below).
+- `cpu_energy_j` — CPU package energy from the Linux RAPL powercap sysfs
+  (`/sys/class/powercap/intel-rapl:*`). Present on Linux when the domains are
+  readable.
+- `total_energy_j`, `total_energy_j_per_frame` — sum of the available sources.
+
+Any field whose source is unavailable is simply omitted, so consumers must treat
+these as optional. GPU energy requires an NVML-enabled build:
+
+```shell
+# NVML ships with the CUDA toolkit/driver. Point Drava at it (or set CUDA_HOME):
+export NVML_ROOT=$CUDA_HOME        # or e.g. /usr/local/cuda
+# then configure/build as usual; CMake prints whether NVML was enabled.
+```
+
+Without NVML, the runtime still reports CPU (RAPL) energy on Linux and omits the
+GPU fields. GPU power/utilization/memory *averages* (as opposed to energy)
+remain sampled by the benchmark via `nvidia-smi`.
+
 ## Paper Experiments
 
 The submitted-paper experiment index is in [experiments.md](experiments.md).

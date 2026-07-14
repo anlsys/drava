@@ -5,14 +5,6 @@ def func(frames):
     for frame in frames:
         ...
 
-# Initialize Drava runtime (loads config, sets up transport/execution)
-drava.init()
-
-# Register callback as a pipeline stage
-drava.register_routine(func)
-
-# Start event loop / begin processing incoming data stream
-drava.listen()
-
-# Shutdown runtime and release resources
-drava.deinit()
+# Run the Drava stage: loads config, sets up transport/execution, registers the
+# callback, processes the incoming stream, and shuts down on end-of-stream.
+drava.run(func)

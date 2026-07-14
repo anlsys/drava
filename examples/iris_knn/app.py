@@ -23,7 +23,4 @@ def func(frames):
 
 # Set the transport using env var variable
 # export DRAVA_TRANSPORT=nats/socket
-drava.init()
-drava.register_routine_py(func)
-drava.listen_py()
-drava.deinit()
+drava.run(func)
