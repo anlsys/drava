@@ -59,6 +59,9 @@ def main() -> None:
                     help="batch:path, e.g. 16:power_trace_b16_r1.csv (repeatable)")
     ap.add_argument("--dir", default=None, help="Dir with power_trace_b*_r1.csv files.")
     ap.add_argument("--out", default=None, help="Output basename.")
+    ap.add_argument("--orientation", choices=["vertical", "horizontal"],
+                    default="vertical",
+                    help="Panel layout: vertical (stacked, shared time axis) or horizontal.")
     args = ap.parse_args()
 
     items: list[tuple[int, Path]] = []
@@ -75,53 +78,88 @@ def main() -> None:
                 else items[-1][1].parent / "tomogan_power_trace_compare")
 
     plt.rcParams.update({
-        "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
-        "ytick.labelsize": 11, "legend.fontsize": 11, "axes.titlesize": 13,
+        "font.size": 13, "axes.labelsize": 14, "xtick.labelsize": 12,
+        "ytick.labelsize": 12, "legend.fontsize": 12, "axes.titlesize": 14,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    n = len(items)
-    fig, axes = plt.subplots(1, n, figsize=(2.3 * n + 0.8, 2.9),
-                             sharex=True, sharey=True, constrained_layout=True)
-    if n == 1:
-        axes = [axes]
-
-    # Shared axis limits across panels for fair comparison.
-    max_t = max(max(t for t, _ in read_trace(p).get("gpu", [(0, 0)])) for _, p in items)
-    all_pw = []
+    # Parse and compute shared axis limits across panels for fair comparison.
     parsed = []
+    all_pw = []
+    max_t = 0.0
     for batch, path in items:
         s = read_trace(path)
         parsed.append((batch, s))
         for src in ("gpu", "cpu"):
-            all_pw += [w for _, w in s.get(src, [])]
+            pts = s.get(src, [])
+            all_pw += [w for _, w in pts]
+            if pts:
+                max_t = max(max_t, max(t for t, _ in pts))
     max_w = max(all_pw) if all_pw else 1.0
-
-    # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
-    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
-    labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
     for batch, s in parsed:
         if "cpu" not in s or not s["cpu"]:
             print(f"[warn] batch {batch}: trace has no CPU rows. The source run "
                   "likely lacked a working CPU energy source (use "
                   "--cpu-energy-source perf and confirm perf reports Joules).")
-    for ax, (batch, s) in zip(axes, parsed):
-        for src in ("gpu", "cpu"):
-            if src not in s:
-                continue
-            xs = [t for t, _ in s[src]]
-            ys = [w for _, w in s[src]]
-            ax.plot(xs, ys, color=colors[src], linewidth=1.4, label=labels[src])
-        ax.set_title(f"batch {batch}")
-        ax.set_xlabel("Time (s)")
-        ax.set_xlim(0, max_t * 1.02)
-        ax.set_ylim(0, max_w * 1.08)
-        ax.grid(True, color="#E8E8E8", linewidth=0.6)
-        ax.set_axisbelow(True)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-    axes[0].set_ylabel("Power (W)")
-    axes[-1].legend(loc="upper right", frameon=False)
+
+    # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
+    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
+    labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
+
+    n = len(items)
+    if args.orientation == "vertical":
+        # Stacked rows with a common time axis makes the runtime comparison
+        # across batch sizes immediate (batch 2 runs ~30 s, batch 16 ~14 s).
+        # Wide + short panels: the x-axis (time) must be long enough to show the
+        # runtime differences; stack them so a common time axis lines up.
+        fig, axes = plt.subplots(n, 1, figsize=(7.0, 1.25 * n + 0.7),
+                                 sharex=True, sharey=True, constrained_layout=True)
+        axes = [axes] if n == 1 else list(axes)
+        for i, (ax, (batch, s)) in enumerate(zip(axes, parsed)):
+            for src in ("gpu", "cpu"):
+                if src in s:
+                    xs = [t for t, _ in s[src]]
+                    ys = [w for _, w in s[src]]
+                    ax.plot(xs, ys, color=colors[src], linewidth=1.3,
+                            label=labels[src])
+            ax.set_xlim(0, max_t * 1.02)
+            ax.set_ylim(0, max_w * 1.08)
+            ax.grid(True, color="#E8E8E8", linewidth=0.6)
+            ax.set_axisbelow(True)
+            for spine in ("top", "right"):
+                ax.spines[spine].set_visible(False)
+            # In-panel batch label (saves vertical space vs a title per panel).
+            ax.text(0.995, 0.88, f"batch {batch}", transform=ax.transAxes,
+                    ha="right", va="top", fontsize=13,
+                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none",
+                              alpha=0.75))
+        axes[-1].set_xlabel("Time (s)")
+        fig.supylabel("Power (W)")
+        # Legend above the top panel so it never overlaps the traces.
+        axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02),
+                       frameon=False, ncol=2, handlelength=1.6,
+                       columnspacing=1.6, borderpad=0.2)
+    else:
+        fig, axes = plt.subplots(1, n, figsize=(2.3 * n + 0.8, 2.9),
+                                 sharex=True, sharey=True, constrained_layout=True)
+        axes = [axes] if n == 1 else list(axes)
+        for ax, (batch, s) in zip(axes, parsed):
+            for src in ("gpu", "cpu"):
+                if src in s:
+                    xs = [t for t, _ in s[src]]
+                    ys = [w for _, w in s[src]]
+                    ax.plot(xs, ys, color=colors[src], linewidth=1.4,
+                            label=labels[src])
+            ax.set_title(f"batch {batch}")
+            ax.set_xlabel("Time (s)")
+            ax.set_xlim(0, max_t * 1.02)
+            ax.set_ylim(0, max_w * 1.08)
+            ax.grid(True, color="#E8E8E8", linewidth=0.6)
+            ax.set_axisbelow(True)
+            for spine in ("top", "right"):
+                ax.spines[spine].set_visible(False)
+        axes[0].set_ylabel("Power (W)")
+        axes[0].legend(loc="upper left", frameon=False)
 
     for ext in ("pdf", "png"):
         fig.savefig(out_base.with_suffix(f".{ext}"), dpi=300)
