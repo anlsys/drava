@@ -49,6 +49,8 @@ def parse_args():
     p.add_argument("--nats-command", default="nats-server", help="nats-server executable when launching NATS.")
     p.add_argument("--nats-config", default="",
                    help="Optional nats-server config file. When set, launches '<nats-command> -c <file>'.")
+    p.add_argument("--nats-max-payload", default="8MB",
+                   help="max_payload for the auto-started nats-server (TomoGAN frames are 4 MB).")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Base stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs", help="Output directory under examples/tomogan.")
     p.add_argument("--app-timeout-s", type=float, default=None, help="Max wait for app metrics after publisher exits.")
@@ -159,7 +161,11 @@ def start_nats(args, run_dir: Path, nats_url: str):
     if ":" not in host_port:
         raise RuntimeError(f"Invalid --nats-url: {nats_url}")
     host, port = host_port.rsplit(":", 1)
-    cmd = [args.nats_command, "-js", "-a", host, "-p", port]
+    # TomoGAN frames are 1024x1024 float32 = 4 MB, which exceeds NATS' default
+    # 1 MB max_payload. Raise it when auto-starting nats-server so the default
+    # launch path works without requiring an external --nats-config.
+    cmd = [args.nats_command, "-js", "-a", host, "-p", port,
+           "--max_payload", args.nats_max_payload]
     log_path = run_dir / "nats.log"
     f = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
