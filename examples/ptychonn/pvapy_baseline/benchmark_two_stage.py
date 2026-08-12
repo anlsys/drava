@@ -71,6 +71,8 @@ def parse_args() -> argparse.Namespace:
         help="Delay after both consumers are ready before releasing the publisher.",
     )
     parser.add_argument("--consumer-timeout-s", type=float, default=180.0)
+    parser.add_argument("--stage2-idle-timeout-s", type=float, default=15.0,
+                        help="Stage-2 finalizes best-effort if idle this long (dropped EOS).")
     parser.add_argument("--stage2-extra-wait-s", type=float, default=60.0,
                         help="Extra time to wait for stage 2 to finalize after stage 1 finishes.")
     parser.add_argument("--python", default=sys.executable)
@@ -195,6 +197,7 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         "--input-channel", args.stage1_channel,
         "--monitor-queue", str(args.monitor_queue),
         "--timeout-s", str(args.consumer_timeout_s),
+        "--idle-timeout-s", str(args.stage2_idle_timeout_s),
     ]
     stage2_proc = subprocess.Popen(
         stage2_cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,

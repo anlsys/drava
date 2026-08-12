@@ -35,6 +35,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-channel", default=OUTPUT_CHANNEL)
     parser.add_argument("--monitor-queue", type=int, default=int(os.getenv("PVAPY_MONITOR_QUEUE", "0")))
     parser.add_argument("--timeout-s", type=float, default=0.0, help="0 means wait forever.")
+    parser.add_argument("--idle-timeout-s", type=float, default=15.0,
+                        help="Finalize best-effort if no stage-1 message arrives for this long "
+                             "after the first one (guards against the PvaServer record path "
+                             "dropping the EOS/last predictions under load).")
     return parser.parse_args()
 
 
@@ -98,6 +102,8 @@ class Stage2PvaConsumer:
         self.stitched_frames = 0
         self.t0: float | None = None
         self.t_final: float | None = None
+        # Last time any stage-1 message was received (for the idle watchdog).
+        self.last_msg_t: float | None = None
 
     # -- accumulation (ported from Drava app_stage2.Stage2Accumulator) --------
     def reset_job(self, job_id: int) -> None:
@@ -227,6 +233,26 @@ class Stage2PvaConsumer:
         )
         self.done.set()
 
+    def finalize_partial(self) -> None:
+        """Finalize when the stream stalls (EOS/last predictions were dropped by
+        the overwriting PvaServer record path). Report how many unique
+        predictions actually arrived so the loss is visible instead of hanging."""
+        with self.lock:
+            if self.finalized:
+                return
+            unique = self.total_unique_received
+            expected = self.expected_frames
+            self.finalized = True
+            self.t_final = time.perf_counter()
+        print(
+            f"[pvapy-stage2-final] frames={expected or 0} stitched_frames=0 "
+            f"stitch_side=0 status=incomplete unique_received={unique} "
+            f"reason=idle_timeout (stage-1 predictions and/or EOS were dropped "
+            f"by the single-record PvaServer path under load)",
+            flush=True,
+        )
+        self.done.set()
+
     # -- PVA monitor callback -------------------------------------------------
     def on_update(self, pv_object) -> None:
         start_s = time.perf_counter()
@@ -247,6 +273,7 @@ class Stage2PvaConsumer:
         with self.lock:
             if self.t0 is None:
                 self.t0 = time.perf_counter()
+            self.last_msg_t = time.perf_counter()
             if unique_id <= self.last_unique_id:
                 return
             if self.last_unique_id >= 0 and unique_id > self.last_unique_id + 1:
@@ -309,12 +336,23 @@ def main() -> int:
         flush=True,
     )
 
+    deadline = time.perf_counter() + args.timeout_s if args.timeout_s > 0 else None
     try:
-        if args.timeout_s > 0:
-            consumer.done.wait(args.timeout_s)
-        else:
-            while not consumer.done.wait(0.5):
-                pass
+        while not consumer.done.wait(0.5):
+            now = time.perf_counter()
+            # Idle watchdog: if we have started receiving but nothing has arrived
+            # for idle_timeout_s, the stream stalled (dropped EOS/predictions).
+            if (consumer.last_msg_t is not None
+                    and args.idle_timeout_s > 0
+                    and (now - consumer.last_msg_t) > args.idle_timeout_s):
+                print(f"[pvapy-stage2] idle for >{args.idle_timeout_s}s; finalizing "
+                      "best-effort.", flush=True)
+                consumer.finalize_partial()
+                break
+            if deadline is not None and now >= deadline:
+                if not consumer.finalized:
+                    consumer.finalize_partial()
+                break
     finally:
         channel.stopMonitor()
 
