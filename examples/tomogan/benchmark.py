@@ -846,7 +846,10 @@ def main():
                     print(
                         f"  done: stage_fps={fmt(row['stage_fps'])} "
                         f"overhead_pct={fmt(row['drava_overhead_pct'])} "
-                        f"gpu_j_per_frame={fmt(row['gpu_energy_j_per_frame'], '{:.4f}')}"
+                        f"gpu_j_per_frame={fmt(row['gpu_energy_j_per_frame'], '{:.4f}')} "
+                        f"cpu_j={fmt(row['cpu_energy_j'])} "
+                        f"cpu_j_per_frame={fmt(row.get('cpu_energy_j_per_frame'), '{:.4f}')} "
+                        f"total_j_per_frame={fmt(row['total_energy_j_per_frame'], '{:.4f}')}"
                     )
         print_table(rows)
         print_aggregate_table(rows)
