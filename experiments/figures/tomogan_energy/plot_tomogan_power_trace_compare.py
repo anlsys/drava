@@ -75,13 +75,13 @@ def main() -> None:
                 else items[-1][1].parent / "tomogan_power_trace_compare")
 
     plt.rcParams.update({
-        "font.size": 9, "axes.labelsize": 9, "xtick.labelsize": 8,
-        "ytick.labelsize": 8, "legend.fontsize": 8,
+        "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
+        "ytick.labelsize": 11, "legend.fontsize": 11, "axes.titlesize": 13,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
     n = len(items)
-    fig, axes = plt.subplots(1, n, figsize=(2.0 * n + 0.6, 2.5),
+    fig, axes = plt.subplots(1, n, figsize=(2.3 * n + 0.8, 2.9),
                              sharex=True, sharey=True, constrained_layout=True)
     if n == 1:
         axes = [axes]
@@ -97,7 +97,8 @@ def main() -> None:
             all_pw += [w for _, w in s.get(src, [])]
     max_w = max(all_pw) if all_pw else 1.0
 
-    colors = {"gpu": "#2E5E8C", "cpu": "#B5651D"}
+    # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
+    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
     labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
     for ax, (batch, s) in zip(axes, parsed):
         for src in ("gpu", "cpu"):
@@ -105,7 +106,7 @@ def main() -> None:
                 continue
             xs = [t for t, _ in s[src]]
             ys = [w for _, w in s[src]]
-            ax.plot(xs, ys, color=colors[src], linewidth=1.2, label=labels[src])
+            ax.plot(xs, ys, color=colors[src], linewidth=1.4, label=labels[src])
         ax.set_title(f"batch {batch}")
         ax.set_xlabel("Time (s)")
         ax.set_xlim(0, max_t * 1.02)

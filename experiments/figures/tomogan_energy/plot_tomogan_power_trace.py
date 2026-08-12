@@ -48,24 +48,25 @@ def main() -> None:
     out_base = Path(args.out).resolve() if args.out else trace_path.with_suffix("")
 
     plt.rcParams.update({
-        "font.size": 9,
-        "axes.labelsize": 9,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
-        "legend.fontsize": 8,
+        "font.size": 12,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
 
-    fig, ax = plt.subplots(figsize=(3.45, 2.45), constrained_layout=True)
-    colors = {"gpu": "#2E5E8C", "cpu": "#B5651D"}
+    fig, ax = plt.subplots(figsize=(3.6, 2.7), constrained_layout=True)
+    # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
+    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
     labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
     for source in ("gpu", "cpu"):
         if source not in series:
             continue
         xs = [t for t, _ in series[source]]
         ys = [w for _, w in series[source]]
-        ax.plot(xs, ys, color=colors[source], linewidth=1.3, label=labels[source])
+        ax.plot(xs, ys, color=colors[source], linewidth=1.5, label=labels[source])
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Power (W)")
