@@ -313,7 +313,10 @@ class PerfEnergySampler:
             ev = ev.strip()
             if ev:
                 events += ["-e", ev]
-        cmd = [self.perf_command, "stat", *events, "-I", str(self.interval_ms),
+        # Machine-readable CSV output (-x,) is flushed reliably per interval and
+        # is locale-independent, unlike the human-readable table. Interval lines:
+        #   <elapsed_s>,<counter>,<unit>,<event>,...  e.g. "0.200,12.50,Joules,power/energy-pkg/,..."
+        cmd = [self.perf_command, "stat", "-x", ",", *events, "-I", str(self.interval_ms),
                "--", "sleep", str(self.max_window_s)]
         try:
             self.proc = subprocess.Popen(
@@ -325,11 +328,11 @@ class PerfEnergySampler:
         self._t0 = time.monotonic()
         return True
 
-    def stop(self) -> float | None:
+    def stop(self, debug_path: "Path | None" = None) -> float | None:
         if self.proc is None:
             return None
         try:
-            # Interrupt the inner `sleep`; perf then flushes its counter report.
+            # SIGINT makes perf stop counting and flush its final report.
             self.proc.send_signal(signal.SIGINT)
             _out, err = self.proc.communicate(timeout=15)
         except Exception:
@@ -340,48 +343,90 @@ class PerfEnergySampler:
                 self.proc.kill()
                 err = ""
         self.stderr_text = err or ""
+        if debug_path is not None:
+            try:
+                debug_path.write_text(self.stderr_text, encoding="utf-8")
+            except Exception:
+                pass
         self.power_samples = self._parse_interval_power(self.stderr_text, self._t0)
-        return self._parse_joules(self.stderr_text)
+        joules = self._parse_joules(self.stderr_text)
+        if joules is None and self.stderr_text.strip():
+            tail = "\n".join(self.stderr_text.strip().splitlines()[-5:])
+            print(f"[perf] WARNING: could not parse CPU energy from perf output. "
+                  f"Last lines:\n{tail}", flush=True)
+        return joules
 
     @staticmethod
     def _parse_joules(text: str) -> float | None:
-        # Sums all interval and/or summary "Joules" lines. With -I, perf prints
-        # one Joules value per interval, so the sum is the total window energy.
-        # The Joules value is the token immediately preceding the "Joules" unit
-        # (interval lines begin with an elapsed-time token that must be skipped).
+        # Sum the Joules value from every parsed row (CSV or human-readable).
+        # With -I, each interval contributes one row, so the sum is total energy.
         total = None
-        for line in text.splitlines():
-            joules = PerfEnergySampler._value_before_joules(line)
-            if joules is not None:
-                total = (total or 0.0) + joules
+        for _elapsed, joules in PerfEnergySampler._iter_joules_rows(text):
+            total = (total or 0.0) + joules
         return total
 
-    @staticmethod
-    def _value_before_joules(line: str) -> float | None:
-        tokens = line.strip().split()
-        for i, tok in enumerate(tokens):
-            if tok == "Joules" and i > 0:
-                return PerfEnergySampler._maybe_float(tokens[i - 1].replace(",", ""))
-        return None
-
     def _parse_interval_power(self, text: str, t0: float | None):
-        # Interval line format: "<elapsed_s>   <joules> Joules power/energy-pkg/"
-        # Power (W) for the interval = joules / interval_s.
         interval_s = self.interval_ms / 1000.0
         base = t0 if t0 is not None else 0.0
         out: list[tuple[float, float]] = []
-        for line in text.splitlines():
-            parts = line.strip().split()
-            if len(parts) < 2 or "Joules" not in parts:
-                continue
-            elapsed = PerfEnergySampler._maybe_float(parts[0])
-            joules = PerfEnergySampler._value_before_joules(line)
-            if joules is None:
-                continue
+        for elapsed, joules in PerfEnergySampler._iter_joules_rows(text):
             power_w = joules / interval_s if interval_s > 0 else 0.0
             ts = base + elapsed if elapsed is not None else base
             out.append((ts, power_w))
         return out
+
+    @staticmethod
+    def _iter_joules_rows(text: str):
+        """Yield (elapsed_s|None, joules) for each energy line.
+
+        Handles both `perf stat -x,` CSV rows and the human-readable table.
+        CSV interval row: "0.200122853,,12.50,Joules,power/energy-pkg/,..."
+        CSV summary row:  "12.50,Joules,power/energy-pkg/,..."
+        Text interval:    "     0.200122853     12.50 Joules power/energy-pkg/"
+        Text summary:     "            12.50 Joules power/energy-pkg/"
+        """
+        for line in text.splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "Joules" not in raw:
+                continue
+            if "," in raw:
+                fields = [f.strip() for f in raw.split(",")]
+                # Find the "Joules" unit field; the counter value is the nearest
+                # non-empty numeric field before it (perf -x, emits empty fields,
+                # e.g. "<elapsed>,,<value>,,Joules,<event>,...").
+                try:
+                    u = fields.index("Joules")
+                except ValueError:
+                    continue
+                joules = None
+                value_idx = None
+                for j in range(u - 1, -1, -1):
+                    v = PerfEnergySampler._maybe_float(fields[j])
+                    if v is not None:
+                        joules = v
+                        value_idx = j
+                        break
+                if joules is None:
+                    continue
+                # An elapsed-time field precedes the value only in interval rows.
+                elapsed = None
+                if value_idx is not None and value_idx >= 1:
+                    elapsed = PerfEnergySampler._maybe_float(fields[0])
+                    if elapsed == joules:
+                        elapsed = None
+                yield elapsed, joules
+            else:
+                tokens = raw.split()
+                try:
+                    u = tokens.index("Joules")
+                except ValueError:
+                    continue
+                if u < 1:
+                    continue
+                joules = PerfEnergySampler._maybe_float(tokens[u - 1].replace(",", ""))
+                elapsed = PerfEnergySampler._maybe_float(tokens[0]) if u >= 2 else None
+                if joules is not None:
+                    yield elapsed, joules
 
     @staticmethod
     def _maybe_float(token: str) -> float | None:
@@ -595,7 +640,8 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
             break
         time.sleep(0.2)
     rapl_after = read_rapl_domains(args.rapl_glob) if cpu_source == "rapl" else {}
-    perf_cpu_energy_j = perf_sampler.stop() if perf_sampler is not None else None
+    perf_debug_path = run_dir / f"perf_b{batch_size}_r{run_idx}.txt"
+    perf_cpu_energy_j = perf_sampler.stop(perf_debug_path) if perf_sampler is not None else None
 
     gpu_stop.set()
     if gpu_thread is not None:
