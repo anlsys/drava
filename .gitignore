@@ -224,19 +224,47 @@ examples/ptychonn/PtychoNN_data_partial/
 # Tomogan data
 examples/tomogan/dataset/
 
-# Experiment run outputs (logs, summaries, generated configs, traces)
-bench_logs/
-bench_logs_*/
-tune_logs_*/
-tune_ytopt_*/
-experiments/results/
+# Experiment run outputs: keep data CSVs + text logs for reproducibility,
+# but exclude bulky binaries (.h5) and image dumps. We ignore the run dirs by
+# default, then re-include the text/CSV artifacts needed to regenerate figures.
+bench_logs/**
+bench_logs_*/**
+tune_logs_*/**
+tune_ytopt_*/**
+experiments/results/**
 .matplotlib-cache/
 
-# Generated per-run artifacts
+# Re-include the reproducibility artifacts (CSV summaries, power traces, and
+# text logs) inside the otherwise-ignored run directories.
+!bench_logs/
+!bench_logs/**/
+!bench_logs_*/
+!bench_logs_*/**/
+!tune_logs_*/
+!tune_logs_*/**/
+!tune_ytopt_*/
+!tune_ytopt_*/**/
+!experiments/results/
+!experiments/results/**/
+!**/*.csv
+!**/*.log
+!**/*.txt
+!**/*.yaml
+!**/*.json
+
+# Still exclude bulky/binary per-run artifacts even inside re-included dirs.
 **/jsdata/
 **/drava_output/
 *.h5
-examples/tomogan/*.png
-examples/tomogan/drava_tomogan_output.h5
+*.png
+*.jpg
+*.jpeg
+*.npy
+*.npz
+# Keep committed paper/figure images (these live outside run dirs).
+!figs/**/*.png
+!figs/**/*.pdf
+!experiments/figures/**/*.png
+!experiments/figures/**/*.pdf
 no_gil_requirements.txt
 examples/tomogan/no_gil_requirements.txt
