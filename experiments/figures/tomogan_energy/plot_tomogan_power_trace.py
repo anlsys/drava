@@ -59,7 +59,7 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(3.45, 2.45), constrained_layout=True)
     colors = {"gpu": "#2E5E8C", "cpu": "#B5651D"}
-    labels = {"gpu": "GPU package", "cpu": "CPU package"}
+    labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
     for source in ("gpu", "cpu"):
         if source not in series:
             continue
@@ -67,7 +67,7 @@ def main() -> None:
         ys = [w for _, w in series[source]]
         ax.plot(xs, ys, color=colors[source], linewidth=1.3, label=labels[source])
 
-    ax.set_xlabel("Time since publisher start (s)")
+    ax.set_xlabel("Time (s)")
     ax.set_ylabel("Power (W)")
     ax.grid(True, color="#E0E0E0", linewidth=0.7)
     ax.set_axisbelow(True)
