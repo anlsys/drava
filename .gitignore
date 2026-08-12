@@ -223,3 +223,20 @@ examples/ptychonn/PtychoNN_data_partial/
 
 # Tomogan data
 examples/tomogan/dataset/
+
+# Experiment run outputs (logs, summaries, generated configs, traces)
+bench_logs/
+bench_logs_*/
+tune_logs_*/
+tune_ytopt_*/
+experiments/results/
+.matplotlib-cache/
+
+# Generated per-run artifacts
+**/jsdata/
+**/drava_output/
+*.h5
+examples/tomogan/*.png
+examples/tomogan/drava_tomogan_output.h5
+no_gil_requirements.txt
+examples/tomogan/no_gil_requirements.txt
