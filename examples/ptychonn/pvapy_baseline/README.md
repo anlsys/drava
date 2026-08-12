@@ -149,10 +149,18 @@ python benchmark_two_stage.py \
 ```
 
 Per-run logs (`stage1_*.log`, `stage2_*.log`, `publisher_*.log`) and `summary.csv`
-are written under `bench_logs_two_stage/<timestamp>/`. As with the single-stage
-baseline, use a paced `--rate-hz` (and/or `--monitor-queue`) for a loss-free
-comparison; at high unpaced rates the simple `PvaServer` record path overwrites
-updates, which the benchmark reports as stage-1 frame loss.
+are written under `bench_logs_two_stage/<timestamp>/`.
+
+Note on the stage-1 -> stage-2 boundary: stage 1 republishes predictions through
+the same single-record `PvaServer.update()` path. Under load, the stage-1 output
+(prediction chunks and the final EOS) is overwritten before the stage-2 monitor
+can pull it, so stage 2 receives only a fraction of predictions and cannot
+finalize the stitch. Stage 2 therefore uses an idle watchdog
+(`--stage2-idle-timeout-s`, default 15 s): if the stream stalls it finalizes
+best-effort and prints `status=incomplete unique_received=<n>` instead of
+hanging. This is the two-stage analogue of the single-stage overrun: Drava
+completes the full two-stage pipeline loss-free at rates where the pvaPy
+single-record path cannot.
 
 ### Repeated Runs (statistics)
 
