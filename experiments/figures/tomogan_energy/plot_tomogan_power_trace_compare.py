@@ -100,6 +100,11 @@ def main() -> None:
     # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
     colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
     labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
+    for batch, s in parsed:
+        if "cpu" not in s or not s["cpu"]:
+            print(f"[warn] batch {batch}: trace has no CPU rows. The source run "
+                  "likely lacked a working CPU energy source (use "
+                  "--cpu-energy-source perf and confirm perf reports Joules).")
     for ax, (batch, s) in zip(axes, parsed):
         for src in ("gpu", "cpu"):
             if src not in s:
