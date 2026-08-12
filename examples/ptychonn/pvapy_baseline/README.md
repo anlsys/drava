@@ -1,6 +1,6 @@
 ## pvaPy PtychoNN Baseline
 
-This directory contains a pvaPy/PV Access baseline for the Drava PtychoNN stage-1 workflow.
+This directory contains a pvaPy/PV Access baseline for the Drava PtychoNN workflow.
 It keeps the same application payload and model shape used by `examples/ptychonn/app.py`:
 
 - input frames are raw `float32` patches with shape `(64, 64, 1)`
@@ -9,7 +9,24 @@ It keeps the same application payload and model shape used by `examples/ptychonn
 - an explicit EOS update carries the expected frame count
 
 The baseline intentionally removes Drava and NATS from the path. The publisher hosts a PVA
-record with pvaPy, and the consumer monitors that record with `pvaccess.Channel`.
+record with pvaPy, and the consumers monitor that record with `pvaccess.Channel`.
+
+Two configurations are provided:
+
+- **Single stage** (`consumer.py`): stage-1 GPU inference only. Used for the
+  paced/unpaced ingest throughput curve.
+- **Two stage** (`consumer.py` + `consumer_stage2.py`): the full PtychoNN
+  pipeline, mirroring Drava's `benchmark_two_stages.py`. Stage 1 runs GPU
+  inference and republishes predictions on `ptychonn:stage1`; stage 2 monitors
+  that channel, accumulates predictions, and performs the same overlap-add
+  stitching as Drava's `app_stage2.py` (ported into `consumer_stage2.py`). This
+  lets us compare end-to-end latency and per-stage throughput of the two
+  runtimes on identical science.
+
+```
+publisher.py --(ptychonn:frames)--> consumer.py (stage 1: infer)
+             --(ptychonn:stage1)--> consumer_stage2.py (stage 2: stitch)
+```
 
 ### Install
 
@@ -25,6 +42,42 @@ python download_partial.py
 
 The Python module provided by pvaPy is named `pvaccess`.
 
+### Run on JLSE
+
+The pvaPy baseline does not use the Drava/XKRT build, so it does not need the
+Drava build modules. It only needs a GPU node (A100 used for the paper), CUDA,
+and a Python environment with pvaPy + TensorFlow. The results in the paper were
+collected on a JLSE A100-PCIE-40GB node using a free-threaded CPython 3.13
+environment (`no-gil-3.13`).
+
+```shell
+# GPU runtime modules (A100 node)
+module use /soft/modulefiles
+module load spack/gcc-0.6.1
+module load cuda/12.3.0
+
+# Python 3.13 (free-threaded) used for the paper runs
+module load python/3.13-no-gil   # or: conda activate no-gil-3.13
+
+# One-time environment setup (from examples/ptychonn/pvapy_baseline)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt   # pvapy, numpy, tensorflow, keras
+
+# Fetch the pretrained PtychoNN weights + data
+cd ..
+python download_partial.py
+cd pvapy_baseline
+```
+
+Pinned versions used for the paper (`requirements.txt`): `pvapy==5.6.0`,
+`numpy==2.3.5`, `tensorflow==2.20.0`, `keras==3.12.0`. Confirm the GPU is
+visible before benchmarking:
+
+```shell
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
 ### Manual Run
 
 Terminal 1:
@@ -35,12 +88,20 @@ source venv/bin/activate
 python publisher.py --synthetic --num-frames 3600 --control-file /tmp/ptychonn_pvapy_start
 ```
 
-Terminal 2:
+Terminal 2 (stage 1):
 
 ```shell
 cd examples/ptychonn/pvapy_baseline
 source venv/bin/activate
 python consumer.py --infer-batch 256 --monitor-queue 1024
+```
+
+Terminal 3 (stage 2, optional, for the two-stage pipeline):
+
+```shell
+cd examples/ptychonn/pvapy_baseline
+source venv/bin/activate
+python consumer_stage2.py --monitor-queue 1024
 ```
 
 Then start the publisher:
@@ -68,6 +129,116 @@ The benchmark writes per-run logs and `summary.csv` under `bench_logs/<timestamp
 Use `--real-data` to publish `X_test.npy` instead of the cached synthetic pool. Use
 `--no-publish-output` to measure input transport plus inference without publishing stage-1
 prediction payloads.
+
+### Two-Stage Benchmark
+
+`benchmark_two_stage.py` runs the full publisher -> stage 1 -> stage 2 pipeline and
+reports per-stage throughput and end-to-end latency (measured from publisher release
+to the stage-2 finalize/stitch line), matching Drava's two-stage metrics.
+
+```shell
+cd examples/ptychonn/pvapy_baseline
+source venv/bin/activate
+python benchmark_two_stage.py \
+  --batches 128,256,512 \
+  --runs 1 \
+  --num-frames 3600 \
+  --rate-hz 1000 \
+  --monitor-queue 1024 \
+  --start-settle-s 2
+```
+
+Per-run logs (`stage1_*.log`, `stage2_*.log`, `publisher_*.log`) and `summary.csv`
+are written under `bench_logs_two_stage/<timestamp>/`. As with the single-stage
+baseline, use a paced `--rate-hz` (and/or `--monitor-queue`) for a loss-free
+comparison; at high unpaced rates the simple `PvaServer` record path overwrites
+updates, which the benchmark reports as stage-1 frame loss.
+
+### Repeated Runs (statistics)
+
+Both benchmarks accept `--runs N`, which repeats each batch configuration `N`
+times and writes one row per run to `summary.csv` (columns include `batch` and
+`run`). To report mean and spread (e.g., for error bars/shaded bands), pass
+`--runs 10` and aggregate the per-run rows by `batch`:
+
+```shell
+python benchmark_two_stage.py --batches 128,256,512 --runs 10 \
+  --num-frames 3600 --rate-hz 1000 --monitor-queue 1024 --start-settle-s 2
+```
+
+Each run is a fresh publisher/consumer launch (cold monitor state), so the
+spread across runs captures launch-to-launch variability, not just steady-state
+jitter. Aggregate `summary.csv` (group by `batch`, take mean/std of
+`stage1_total_fps`, `stage2_total_fps`, `pipeline_e2e_s`) to produce the values
+plotted in the paper.
+
+### Reproducing the Paper Comparison (PvaPy vs Drava)
+
+The paper compares PvaPy against Drava on the *same* PtychoNN inference stream:
+same synthetic frame pool + seed, same pretrained Keras model, same inference
+batch sweep `B in {128,256,512}`. Only the ingress/dispatch path differs. Run
+both sides on the same JLSE A100 node (see "Run on JLSE") with the same
+`--num-frames 3600`.
+
+**1. PvaPy side (this directory).** Paced sweep, one rate per invocation:
+
+```shell
+cd examples/ptychonn/pvapy_baseline
+source venv/bin/activate
+
+# Loss-free paced points (increase rate until missed_frames > 0)
+for R in 100 200 1000 2000 2500 3000; do
+  python benchmark.py \
+    --batches 128,256,512 \
+    --runs 10 \
+    --num-frames 3600 \
+    --rate-hz $R \
+    --monitor-queue 1024 \
+    --start-settle-s 2
+done
+```
+
+At `--rate-hz 3000` the simple `PvaServer` record path drops frames
+(e.g., 784 missed frames observed in the paper): the benchmark raises and
+reports `missed_frames`, which is the loss/overrun data point. Lossy runs above
+~2 kHz are excluded from the loss-free throughput curve.
+
+Two-stage PvaPy (full pipeline, end-to-end latency + per-stage fps):
+
+```shell
+python benchmark_two_stage.py \
+  --batches 128,256,512 \
+  --runs 10 \
+  --num-frames 3600 \
+  --rate-hz 1000 \
+  --monitor-queue 1024 \
+  --start-settle-s 2
+```
+
+**2. Drava side (parent directory).** Matching paced sweep plus the unpaced
+(`--rate-hz 0`) burst run that PvaPy cannot sustain loss-free:
+
+```shell
+cd examples/ptychonn
+# (build + module setup per top-level drava/README.md)
+for R in 100 200 1000 2000 2500 3000 0; do
+  python benchmark.py \
+    --batches 128,256,512 \
+    --runs 10 \
+    --num-frames 3600 \
+    --rate-hz $R \
+    --threads 4 \
+    --timeout-ms 200 \
+    --stage-config pipeline.yaml
+done
+```
+
+Drava's `benchmark.py` also writes a `comparison_summary.csv` in the same
+`pvapy_baseline` column format, so PvaPy and Drava summaries can be aggregated
+side by side. Group both by `batch`/`rate`, take mean/std of `stage_total_fps`
+(and `pipeline_e2e_s` for two-stage), and plot with error bars or a shaded
+band. The chart-generation script is referenced in
+`drava/experiments.md` (Baseline comparison with PvaPy).
 
 ### Notes
 

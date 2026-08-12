@@ -42,12 +42,31 @@ def main() -> None:
         grouped[int(row["batch"])].append(row)
 
     batches = sorted(grouped)
-    energy_mean = [
-        mean([float(r["gpu_energy_j_per_frame"]) for r in grouped[b]])
+
+    # Prefer full-system energy (GPU + CPU) when the summary CSV provides it
+    # (populated once the benchmark is run with a working CPU energy source,
+    # e.g. --cpu-energy-source perf). Fall back to GPU-only energy otherwise.
+    def _has_col(col: str) -> bool:
+        return all(
+            col in r and r[col] not in (None, "", "None")
+            for b in batches for r in grouped[b]
+        )
+
+    if _has_col("total_energy_j_per_frame"):
+        energy_col = "total_energy_j_per_frame"
+        energy_label = "Energy efficiency, GPU+CPU (frames/J)"
+    else:
+        energy_col = "gpu_energy_j_per_frame"
+        energy_label = "GPU energy efficiency (frames/J)"
+
+    # Report energy efficiency as frames per joule (higher is better) so the
+    # bars share the same "higher is better" direction as the throughput line.
+    efficiency_mean = [
+        mean([1.0 / float(r[energy_col]) for r in grouped[b]])
         for b in batches
     ]
-    energy_std = [
-        stdev([float(r["gpu_energy_j_per_frame"]) for r in grouped[b]])
+    efficiency_std = [
+        stdev([1.0 / float(r[energy_col]) for r in grouped[b]])
         for b in batches
     ]
     fps_mean = [
@@ -73,8 +92,8 @@ def main() -> None:
     x = np.arange(len(batches))
     bars = ax.bar(
         x,
-        energy_mean,
-        yerr=energy_std,
+        efficiency_mean,
+        yerr=efficiency_std,
         width=0.62,
         capsize=3,
         color="#6A8F7A",
@@ -88,8 +107,8 @@ def main() -> None:
     ax.set_xticks(x)
     ax.set_xticklabels([str(b) for b in batches])
     ax.set_xlabel("Callback-inference batch size")
-    ax.set_ylabel("GPU energy (J/frame)")
-    ax.set_ylim(0, max(e + s for e, s in zip(energy_mean, energy_std)) * 1.18)
+    ax.set_ylabel(energy_label)
+    ax.set_ylim(0, max(e + s for e, s in zip(efficiency_mean, efficiency_std)) * 1.18)
     ax.grid(True, axis="y", color="#D6D6D6", linewidth=0.7)
     ax.set_axisbelow(True)
 
@@ -97,17 +116,33 @@ def main() -> None:
         ax.spines[spine].set_visible(False)
 
     ax2 = ax.twinx()
-    ax2.plot(
+    fps_mean_arr = np.asarray(fps_mean)
+    fps_std_arr = np.asarray(fps_std)
+    # Shaded band shows +/- 1 std across the repeated runs.
+    ax2.fill_between(
+        x,
+        fps_mean_arr - fps_std_arr,
+        fps_mean_arr + fps_std_arr,
+        color="#2E5E8C",
+        alpha=0.15,
+        linewidth=0,
+        zorder=2,
+    )
+    ax2.errorbar(
         x,
         fps_mean,
+        yerr=fps_std,
         color="#2E5E8C",
         marker="o",
         markersize=4,
         linewidth=1.5,
+        capsize=3,
+        elinewidth=0.9,
+        capthick=0.9,
         zorder=3,
     )
     ax2.set_ylabel("Throughput (frames/s)")
-    ax2.set_ylim(0, max(fps_mean) * 1.25)
+    ax2.set_ylim(0, max(fps_mean_arr + fps_std_arr) * 1.25)
     ax2.spines["top"].set_visible(False)
     ax2.tick_params(axis="y", colors="#2E5E8C")
     ax2.yaxis.label.set_color("#2E5E8C")
@@ -116,7 +151,7 @@ def main() -> None:
     throughput_proxy = plt.Line2D([0], [0], color="#2E5E8C", marker="o", linewidth=1.5)
     ax.legend(
         [energy_proxy, throughput_proxy],
-        ["GPU energy", "throughput"],
+        ["energy efficiency", "throughput"],
         loc="upper left",
         frameon=False,
         borderpad=0.2,

@@ -45,6 +45,22 @@ python benchmark.py \
 ```
 - Figure: [figs/paper_figs/pvapy_drava_ptychonn.pdf](figs/paper_figs/pvapy_drava_ptychonn.pdf)
 
+### Two-stage baseline comparison with PvaPy
+- App code: [examples/ptychonn/pvapy_baseline/consumer_stage2.py](examples/ptychonn/pvapy_baseline/consumer_stage2.py) (stage 2: stitching), reuses [consumer.py](examples/ptychonn/pvapy_baseline/consumer.py) (stage 1: inference)
+- Benchmark: [examples/ptychonn/pvapy_baseline/benchmark_two_stage.py](examples/ptychonn/pvapy_baseline/benchmark_two_stage.py)
+- Mirrors Drava's two-stage pipeline in [examples/ptychonn/benchmark_two_stages.py](examples/ptychonn/benchmark_two_stages.py) for end-to-end latency and per-stage throughput comparison.
+- Example benchmark
+```shell
+cd examples/ptychonn/pvapy_baseline
+python benchmark_two_stage.py \
+  --batches 128,256,512 \
+  --runs 1 \
+  --num-frames 3600 \
+  --rate-hz 1000 \
+  --monitor-queue 1024 \
+  --start-settle-s 2
+```
+
 ### Manual configurations throughput-latency trade-off
 - Chart generation: [examples/ptychonn/visualize_manual_config.py](examples/ptychonn/visualize_manual_config.py)
 - Figure: [figs/paper_figs/throughput_vs_latency.pdf](figs/paper_figs/throughput_vs_latency.pdf)
@@ -87,14 +103,30 @@ python tune_two_stage_ytopt.py \
 
 ### Energy efficiency
 - Logs: [examples/tomogan/debug_logs/energy_logs.md](examples/tomogan/debug_logs/energy_logs.md)
-- Example benchmark:
+- App/benchmark code: [examples/tomogan/benchmark.py](examples/tomogan/benchmark.py)
+- Measures **GPU energy** by integrating `nvidia-smi` power samples, and **CPU
+  package energy** via `perf stat -e power/energy-pkg/` (default
+  `--cpu-energy-source auto`, which prefers `perf` and falls back to RAPL
+  powercap sysfs). On JLSE AMD EPYC nodes the RAPL sysfs is not readable, so
+  `perf` is required for CPU energy; `perf` needs
+  `kernel.perf_event_paranoid <= 1` (verify with
+  `perf stat -e power/energy-pkg/ sleep 1`).
+- Example benchmark (GPU + CPU energy, 10 runs, with power-vs-time trace):
 ```shell
-python experiments/sc4_tomogan_gpu_energy.py \
---batches 2,4,8,16 \
---thread-list 2,4,8 \
---num-frames 512 \
---runs 3 \
---rate-hz 0
+cd examples/tomogan
+python benchmark.py \
+  --batches 2,4,8,16 \
+  --thread-list 2 \
+  --num-frames 512 \
+  --runs 10 \
+  --rate-hz 0 \
+  --cpu-energy-source perf \
+  --perf-interval-ms 200 \
+  --save-power-trace
 ```
-- Chart generation: [experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py](experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py)
+- Efficiency chart: [experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py](experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py)
+  (auto-uses GPU+CPU `total_energy_j_per_frame` when present, else GPU-only;
+  bars/line show mean +/- std over the runs)
+- Power-vs-time chart: [experiments/figures/tomogan_energy/plot_tomogan_power_trace.py](experiments/figures/tomogan_energy/plot_tomogan_power_trace.py)
+  (input: `power_trace_*.csv` from `--save-power-trace`)
 - Figure: [figs/paper_figs/tomogan_energy_efficiency.pdf](figs/paper_figs/tomogan_energy_efficiency.pdf)

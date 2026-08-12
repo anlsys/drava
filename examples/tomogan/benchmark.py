@@ -55,7 +55,18 @@ def parse_args():
     p.add_argument("--gpu-sample-interval-s", type=float, default=0.2, help="nvidia-smi sampling interval.")
     p.add_argument("--no-gpu-energy", action="store_true", help="Disable nvidia-smi power sampling.")
     p.add_argument("--rapl-glob", default="/sys/class/powercap/intel-rapl:*/energy_uj",
-                   help="RAPL energy_uj glob. Use '' to disable CPU/package energy sampling.")
+                   help="RAPL energy_uj glob. Use '' to disable RAPL CPU/package energy sampling.")
+    p.add_argument("--cpu-energy-source", choices=["auto", "perf", "rapl", "none"], default="auto",
+                   help="CPU package energy source. 'perf' uses `perf stat -e power/energy-pkg/`, "
+                        "'rapl' reads the powercap sysfs, 'auto' tries perf then falls back to RAPL, "
+                        "'none' disables CPU energy.")
+    p.add_argument("--perf-command", default="perf", help="perf executable used for CPU energy.")
+    p.add_argument("--perf-energy-event", default="power/energy-pkg/",
+                   help="perf event(s) for CPU package energy (comma-separated for multi-socket).")
+    p.add_argument("--perf-interval-ms", type=int, default=200,
+                   help="perf stat interval (-I) in ms for the CPU power time-series.")
+    p.add_argument("--save-power-trace", action="store_true",
+                   help="Write per-run GPU/CPU power-vs-time traces to power_trace_*.csv.")
     return p.parse_args()
 
 
@@ -247,6 +258,133 @@ def read_rapl_domains(pattern: str):
     return domains
 
 
+def perf_energy_available(perf_command: str, event: str) -> bool:
+    """Return True if `perf stat` can read the CPU package energy event."""
+    try:
+        proc = subprocess.run(
+            [perf_command, "stat", "-e", event, "--", "sleep", "0.2"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+        )
+    except Exception:
+        return False
+    err = proc.stderr or ""
+    # perf prints "<not supported>" / "<not counted>" when the event is unusable,
+    # and reports "Joules" on success.
+    if "<not supported>" in err or "<not counted>" in err:
+        return False
+    return "Joules" in err
+
+
+class PerfEnergySampler:
+    """Measure CPU package energy over a window with `perf stat`.
+
+    Runs `perf stat -e power/energy-pkg/ -I <interval_ms> -- sleep <big>` in the
+    background for the duration of the measurement window, then interrupts it and
+    parses both (i) the total Joules and (ii) an interval time-series that is
+    converted into a CPU power (W) trace for line charts. This mirrors the
+    perf-based CPU energy approach used in the instruction-count energy sweeps and
+    works on JLSE AMD EPYC nodes where the RAPL powercap sysfs is not readable.
+    """
+
+    def __init__(self, perf_command: str, event: str, interval_ms: int = 200,
+                 max_window_s: float = 3600.0):
+        self.perf_command = perf_command
+        self.event = event
+        self.interval_ms = int(interval_ms)
+        self.max_window_s = max_window_s
+        self.proc: subprocess.Popen | None = None
+        self.stderr_text: str = ""
+        # Power time-series as (monotonic_time_s, power_w) captured at stop().
+        self.power_samples: list[tuple[float, float]] = []
+        self._t0: float | None = None
+
+    def start(self) -> bool:
+        events = []
+        for ev in self.event.split(","):
+            ev = ev.strip()
+            if ev:
+                events += ["-e", ev]
+        cmd = [self.perf_command, "stat", *events, "-I", str(self.interval_ms),
+               "--", "sleep", str(self.max_window_s)]
+        try:
+            self.proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            )
+        except Exception:
+            self.proc = None
+            return False
+        self._t0 = time.monotonic()
+        return True
+
+    def stop(self) -> float | None:
+        if self.proc is None:
+            return None
+        try:
+            # Interrupt the inner `sleep`; perf then flushes its counter report.
+            self.proc.send_signal(signal.SIGINT)
+            _out, err = self.proc.communicate(timeout=15)
+        except Exception:
+            try:
+                self.proc.terminate()
+                _out, err = self.proc.communicate(timeout=5)
+            except Exception:
+                self.proc.kill()
+                err = ""
+        self.stderr_text = err or ""
+        self.power_samples = self._parse_interval_power(self.stderr_text, self._t0)
+        return self._parse_joules(self.stderr_text)
+
+    @staticmethod
+    def _parse_joules(text: str) -> float | None:
+        # Sums all interval and/or summary "Joules" lines. With -I, perf prints
+        # one Joules value per interval, so the sum is the total window energy.
+        # The Joules value is the token immediately preceding the "Joules" unit
+        # (interval lines begin with an elapsed-time token that must be skipped).
+        total = None
+        for line in text.splitlines():
+            joules = PerfEnergySampler._value_before_joules(line)
+            if joules is not None:
+                total = (total or 0.0) + joules
+        return total
+
+    @staticmethod
+    def _value_before_joules(line: str) -> float | None:
+        tokens = line.strip().split()
+        for i, tok in enumerate(tokens):
+            if tok == "Joules" and i > 0:
+                return PerfEnergySampler._maybe_float(tokens[i - 1].replace(",", ""))
+        return None
+
+    def _parse_interval_power(self, text: str, t0: float | None):
+        # Interval line format: "<elapsed_s>   <joules> Joules power/energy-pkg/"
+        # Power (W) for the interval = joules / interval_s.
+        interval_s = self.interval_ms / 1000.0
+        base = t0 if t0 is not None else 0.0
+        out: list[tuple[float, float]] = []
+        for line in text.splitlines():
+            parts = line.strip().split()
+            if len(parts) < 2 or "Joules" not in parts:
+                continue
+            elapsed = PerfEnergySampler._maybe_float(parts[0])
+            joules = PerfEnergySampler._value_before_joules(line)
+            if joules is None:
+                continue
+            power_w = joules / interval_s if interval_s > 0 else 0.0
+            ts = base + elapsed if elapsed is not None else base
+            out.append((ts, power_w))
+        return out
+
+    @staticmethod
+    def _maybe_float(token: str) -> float | None:
+        try:
+            return float(token)
+        except (ValueError, TypeError):
+            return None
+
+
 def rapl_delta_j(before: dict, after: dict):
     total_uj = 0
     matched = False
@@ -417,7 +555,15 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
         )
         gpu_thread.start()
 
-    rapl_before = read_rapl_domains(args.rapl_glob)
+    cpu_source = getattr(args, "_cpu_source", "none")
+    perf_sampler = None
+    if cpu_source == "perf":
+        perf_sampler = PerfEnergySampler(
+            args.perf_command, args.perf_energy_event, interval_ms=args.perf_interval_ms,
+        )
+        if not perf_sampler.start():
+            perf_sampler = None
+    rapl_before = read_rapl_domains(args.rapl_glob) if cpu_source == "rapl" else {}
     print(f"[batch={batch_size} run={run_idx}] starting publisher_jetstream.py")
     marks["publish_start"] = time.monotonic()
     pub_proc = subprocess.Popen(
@@ -442,7 +588,8 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
         if app_proc.poll() is not None:
             break
         time.sleep(0.2)
-    rapl_after = read_rapl_domains(args.rapl_glob)
+    rapl_after = read_rapl_domains(args.rapl_glob) if cpu_source == "rapl" else {}
+    perf_cpu_energy_j = perf_sampler.stop() if perf_sampler is not None else None
 
     gpu_stop.set()
     if gpu_thread is not None:
@@ -463,10 +610,21 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
     start_t = marks["publish_start"]
     end_t = marks["metrics"] or time.monotonic()
     gpu_energy_j = integrate_power_j(gpu_samples, start_t, end_t) if gpu_samples else None
-    cpu_rapl_energy_j = rapl_delta_j(rapl_before, rapl_after)
+    if perf_cpu_energy_j is not None:
+        cpu_energy_j = perf_cpu_energy_j
+    else:
+        cpu_energy_j = rapl_delta_j(rapl_before, rapl_after)
+
+    if args.save_power_trace:
+        cpu_trace = perf_sampler.power_samples if perf_sampler is not None else []
+        write_power_trace(
+            run_dir / f"power_trace_b{batch_size}_r{run_idx}.csv",
+            gpu_samples, cpu_trace, start_t, end_t,
+        )
+
     total_energy_j = None
-    if gpu_energy_j is not None or cpu_rapl_energy_j is not None:
-        total_energy_j = (gpu_energy_j or 0.0) + (cpu_rapl_energy_j or 0.0)
+    if gpu_energy_j is not None or cpu_energy_j is not None:
+        total_energy_j = (gpu_energy_j or 0.0) + (cpu_energy_j or 0.0)
     stage_time_s = float(app_metrics["stage_total_s"])
     e2e_s = end_t - start_t
     drava_overhead_s = max(0.0, e2e_s - stage_time_s)
@@ -491,7 +649,11 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
         "gpu_avg_mem_mib": average_window(gpu_samples, start_t, end_t, 3),
         "gpu_energy_j": gpu_energy_j,
         "gpu_energy_j_per_frame": gpu_energy_j / publisher_frames if gpu_energy_j is not None else None,
-        "cpu_rapl_energy_j": cpu_rapl_energy_j,
+        "cpu_energy_source": cpu_source,
+        "cpu_energy_j": cpu_energy_j,
+        "cpu_energy_j_per_frame": cpu_energy_j / publisher_frames if cpu_energy_j is not None else None,
+        # Backward-compatible alias for existing scripts/logs.
+        "cpu_rapl_energy_j": cpu_energy_j,
         "total_energy_j": total_energy_j,
         "total_energy_j_per_frame": total_energy_j / publisher_frames if total_energy_j is not None else None,
     }
@@ -501,16 +663,18 @@ def print_table(rows):
     print("")
     print(
         "| Batch | Threads | Frames | Stage Time (s) | Stage FPS | E2E (s) | "
-        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | CPU RAPL (J) | Total J/frame |"
+        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | "
+        "CPU src | CPU (J) | CPU J/frame | Total J/frame |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['batch']} | {r['threads']} | {r['frames']} | {fmt(r['stage_time_s'])} | "
             f"{fmt(r['stage_fps'])} | {fmt(r['pipeline_e2e_s'])} | "
             f"{fmt(r['drava_overhead_s'])} | {fmt(r['drava_overhead_pct'])} | "
             f"{fmt(r['gpu_avg_power_w'])} | {fmt(r['gpu_energy_j'])} | "
-            f"{fmt(r['gpu_energy_j_per_frame'], '{:.4f}')} | {fmt(r['cpu_rapl_energy_j'])} | "
+            f"{fmt(r['gpu_energy_j_per_frame'], '{:.4f}')} | {r.get('cpu_energy_source', 'n/a')} | "
+            f"{fmt(r['cpu_energy_j'])} | {fmt(r.get('cpu_energy_j_per_frame'), '{:.4f}')} | "
             f"{fmt(r['total_energy_j_per_frame'], '{:.4f}')} |"
         )
 
@@ -531,13 +695,34 @@ def print_aggregate_table(rows):
         )
 
 
+def write_power_trace(path: Path, gpu_samples, cpu_samples, start_t, end_t):
+    """Write a GPU/CPU power-vs-time trace for one run.
+
+    Rows are (rel_time_s, source, power_w) so a plot can draw one line per
+    source. Times are relative to the publisher-start marker.
+    """
+    rows = []
+    for (t, power_w, _u, _m) in gpu_samples:
+        if start_t <= t <= end_t:
+            rows.append((t - start_t, "gpu", power_w))
+    for (t, power_w) in cpu_samples:
+        if start_t <= t <= end_t:
+            rows.append((t - start_t, "cpu", power_w))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("rel_time_s,source,power_w\n")
+        for rel_t, source, power_w in rows:
+            f.write(f"{rel_t:.4f},{source},{power_w:.3f}\n")
+
+
 def write_summary_csv(path: Path, rows):
     columns = [
         "batch", "run", "threads", "timeout_ms", "frames", "publisher_time_s",
         "publisher_avg_fps", "stage_time_s", "stage_fps", "cb_avg_ms", "pipeline_e2e_s",
         "drava_overhead_s", "drava_overhead_pct",
         "gpu_avg_power_w", "gpu_avg_util_pct", "gpu_avg_mem_mib", "gpu_energy_j",
-        "gpu_energy_j_per_frame", "cpu_rapl_energy_j", "total_energy_j",
+        "gpu_energy_j_per_frame", "cpu_energy_source", "cpu_energy_j",
+        "cpu_energy_j_per_frame", "cpu_rapl_energy_j", "total_energy_j",
         "total_energy_j_per_frame",
     ]
     with open(path, "w", encoding="utf-8") as f:
@@ -554,6 +739,23 @@ def main():
     thread_values = parse_int_list(args.thread_list) if args.thread_list else [args.threads]
     if not thread_values:
         thread_values = [None]
+
+    # Resolve the CPU package energy source once. On JLSE AMD EPYC nodes the RAPL
+    # powercap sysfs is typically not readable, so `perf` is preferred.
+    cpu_source = args.cpu_energy_source
+    if cpu_source == "auto":
+        if perf_energy_available(args.perf_command, args.perf_energy_event):
+            cpu_source = "perf"
+        elif args.rapl_glob and read_rapl_domains(args.rapl_glob):
+            cpu_source = "rapl"
+        else:
+            cpu_source = "none"
+    elif cpu_source == "perf":
+        if not perf_energy_available(args.perf_command, args.perf_energy_event):
+            print("[global] WARNING: perf CPU energy not available; CPU energy will be n/a. "
+                  "Check `perf stat -e power/energy-pkg/ sleep 1` and perf_event_paranoid.", flush=True)
+    args._cpu_source = cpu_source
+    print(f"[global] CPU energy source: {cpu_source}")
 
     root = Path(__file__).resolve().parent
     stage_config_path = (root / args.stage_config).resolve() if not Path(args.stage_config).is_absolute() else Path(
