@@ -49,16 +49,28 @@ python benchmark.py \
 - App code: [examples/ptychonn/pvapy_baseline/consumer_stage2.py](examples/ptychonn/pvapy_baseline/consumer_stage2.py) (stage 2: stitching), reuses [consumer.py](examples/ptychonn/pvapy_baseline/consumer.py) (stage 1: inference)
 - Benchmark: [examples/ptychonn/pvapy_baseline/benchmark_two_stage.py](examples/ptychonn/pvapy_baseline/benchmark_two_stage.py)
 - Mirrors Drava's two-stage pipeline in [examples/ptychonn/benchmark_two_stages.py](examples/ptychonn/benchmark_two_stages.py) for end-to-end latency and per-stage throughput comparison.
-- Example benchmark
+- Finding: the pvaPy single-record `PvaServer` path drops stage-1 prediction
+  messages (and often the EOS) at the stage1->stage2 boundary even at 1 kHz, so
+  stage 2 cannot finalize the stitch (14/15 runs incomplete at 1 kHz). Drava
+  completes the full two-stage pipeline loss-free. Curated data:
+  [experiments/figures/pvapy_drava_comparison/pvapy_two_stage_summary.csv](experiments/figures/pvapy_drava_comparison/pvapy_two_stage_summary.csv)
+  and `drava_two_stage_summary.csv`; plot:
+  [experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_two_stage.py](experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_two_stage.py)
+- pvaPy benchmark
 ```shell
 cd examples/ptychonn/pvapy_baseline
-python benchmark_two_stage.py \
-  --batches 128,256,512 \
-  --runs 1 \
-  --num-frames 3600 \
-  --rate-hz 1000 \
-  --monitor-queue 1024 \
-  --start-settle-s 2
+for R in 1000 2000 2500 3000 0; do
+  python benchmark_two_stage.py --batches 128,256,512 --runs 5 \
+    --num-frames 3600 --rate-hz $R --monitor-queue 1024 --start-settle-s 2
+done
+```
+- Drava benchmark
+```shell
+cd examples/ptychonn
+for R in 1000 2000 2500 3000 0; do
+  python benchmark_two_stages.py --batches 128,256,512 --runs 5 \
+    --num-frames 3600 --rate-hz $R --threads 4 --timeout-ms 200 --stage-config pipeline.yaml
+done
 ```
 
 ### Manual configurations throughput-latency trade-off
