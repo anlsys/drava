@@ -96,6 +96,15 @@ benchmark writes a timestamped `bench_logs*/` (or `experiments/results/`)
 directory with per-run logs and a `summary.csv`; plot scripts consume those CSVs
 and emit PDF/PNG into `figs/paper_figs/`.
 
+Reproducibility policy: the bulky per-run run directories (`bench_logs*/`,
+`experiments/results/`) are git-ignored. The curated figure-source CSVs that
+regenerate every plot are committed under `experiments/figures/<experiment>/`
+(e.g., `tomogan_energy/tomogan_energy_efficiency_data.csv` and
+`tomogan_energy/sample_power_trace_b*.csv`). To refresh a figure after a new
+run, copy the relevant `summary.csv`/`power_trace_*.csv` from the run directory
+into the matching `experiments/figures/<experiment>/` file and re-run the plot
+script.
+
 The two experiments highlighted for this revision are detailed in
 Sections 7.1 (TomoGAN energy) and 7.2 (two-stage PvaPy) below.
 
