@@ -36,6 +36,8 @@ STAGE2_FINAL_RE = re.compile(
 def parse_args():
     p = argparse.ArgumentParser(description="Run PtychoNN two-stage benchmark matrix.")
     p.add_argument("--batches", default="128,256,512", help="Comma-separated stage1 infer batch sizes.")
+    p.add_argument("--max-retries", type=int, default=3,
+                   help="Retries per run on intermittent native runtime crashes (e.g. XKRT free() abort).")
     p.add_argument("--timeout-ms", type=int, default=500, help="DRAVA_FETCH_TIMEOUT_MS.")
     p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
     p.add_argument("--stage1-threads", type=int, default=None, help="Override DRAVA_THREADS for stage1.")
@@ -772,7 +774,26 @@ def main():
             for b in batches:
                 for run_idx in range(1, args.runs + 1):
                     print(f"Running batch={b} run={run_idx} ...")
-                    row = run_one(args, base_env, run_dir, b, run_idx)
+                    # Retry intermittent native runtime crashes (e.g. XKRT
+                    # "free(): invalid size" at stage init) instead of aborting
+                    # the whole sweep. A fresh process usually starts cleanly.
+                    attempts = max(1, args.max_retries + 1)
+                    row = None
+                    last_err = None
+                    for attempt in range(1, attempts + 1):
+                        try:
+                            row = run_one(args, base_env, run_dir, b, run_idx)
+                            break
+                        except RuntimeError as exc:
+                            last_err = exc
+                            print(f"  [retry] batch={b} run={run_idx} attempt "
+                                  f"{attempt}/{attempts} failed: "
+                                  f"{str(exc).splitlines()[0]}", flush=True)
+                            time.sleep(2.0)
+                    if row is None:
+                        print(f"  [skip] batch={b} run={run_idx} failed after "
+                              f"{attempts} attempts; continuing sweep.", flush=True)
+                        continue
                     rows.append(row)
                     print(
                         f"  done: publisher_fps={fmt(row['publisher_avg_fps'])} "
