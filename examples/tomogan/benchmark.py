@@ -774,10 +774,13 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
 
 def print_table(rows):
     print("")
+    # Note: tables report energy as J/frame (lower is better). The paper figure
+    # plots the reciprocal, frames/J (higher is better), so it shares direction
+    # with the throughput line. Same data, inverted for the figure.
     print(
         "| Batch | Threads | Frames | Stage Time (s) | Stage FPS | E2E (s) | "
-        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame | "
-        "CPU src | CPU (J) | CPU J/frame | Total J/frame |"
+        "Overhead (s) | Overhead (%) | GPU Power (W) | GPU Energy (J) | GPU J/frame (lower=better) | "
+        "CPU src | CPU (J) | CPU J/frame (lower=better) | Total J/frame (lower=better) |"
     )
     print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
@@ -795,7 +798,7 @@ def print_table(rows):
 def print_aggregate_table(rows):
     print("")
     print(
-        "| Batch | Threads | Runs | Frames | Stage FPS mean +/- std | E2E mean (s) | Overhead mean (%) | Total J/frame mean |")
+        "| Batch | Threads | Runs | Frames | Stage FPS mean +/- std | E2E mean (s) | Overhead mean (%) | Total J/frame mean (lower=better) |")
     print("|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in aggregate_rows(rows):
         fps_text = "n/a"
