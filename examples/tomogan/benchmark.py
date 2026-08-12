@@ -4,6 +4,7 @@ import datetime as dt
 import math
 import os
 import re
+import tempfile
 import signal
 import subprocess
 import sys
@@ -306,6 +307,8 @@ class PerfEnergySampler:
         # Power time-series as (monotonic_time_s, power_w) captured at stop().
         self.power_samples: list[tuple[float, float]] = []
         self._t0: float | None = None
+        self._out_file = None
+        self._out_path: Path | None = None
 
     def start(self) -> bool:
         events = []
@@ -313,14 +316,27 @@ class PerfEnergySampler:
             ev = ev.strip()
             if ev:
                 events += ["-e", ev]
-        # Machine-readable CSV output (-x,) is flushed reliably per interval and
-        # is locale-independent, unlike the human-readable table. Interval lines:
+        # Machine-readable CSV output (-x,) is locale-independent. Interval lines:
         #   <elapsed_s>,<counter>,<unit>,<event>,...  e.g. "0.200,12.50,Joules,power/energy-pkg/,..."
+        # Write perf's report to a FILE (not a pipe): when stderr is a pipe, perf
+        # buffers the interval output and a SIGINT can kill it before the buffer
+        # flushes, yielding empty output. A file is appended as perf runs and is
+        # readable even if perf is interrupted.
+        try:
+            self._out_path = Path(tempfile.mkstemp(prefix="perf_energy_", suffix=".csv")[1])
+            self._out_file = open(self._out_path, "w+", encoding="utf-8")
+        except Exception:
+            self._out_file = None
+            self._out_path = None
+            return False
         cmd = [self.perf_command, "stat", "-x", ",", *events, "-I", str(self.interval_ms),
+               "-o", str(self._out_path),
                "--", "sleep", str(self.max_window_s)]
         try:
+            # New process group so we can terminate only the inner `sleep`/perf.
             self.proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except Exception:
             self.proc = None
@@ -331,18 +347,44 @@ class PerfEnergySampler:
     def stop(self, debug_path: "Path | None" = None) -> float | None:
         if self.proc is None:
             return None
+        # SIGINT to the perf process group: perf stops counting, flushes the
+        # remaining interval to the -o file, and exits.
         try:
-            # SIGINT makes perf stop counting and flush its final report.
-            self.proc.send_signal(signal.SIGINT)
-            _out, err = self.proc.communicate(timeout=15)
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+        except Exception:
+            try:
+                self.proc.send_signal(signal.SIGINT)
+            except Exception:
+                pass
+        try:
+            self.proc.wait(timeout=15)
         except Exception:
             try:
                 self.proc.terminate()
-                _out, err = self.proc.communicate(timeout=5)
+                self.proc.wait(timeout=5)
             except Exception:
                 self.proc.kill()
-                err = ""
-        self.stderr_text = err or ""
+
+        text = ""
+        if self._out_path is not None:
+            try:
+                if self._out_file is not None:
+                    self._out_file.flush()
+                text = Path(self._out_path).read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                text = ""
+        self.stderr_text = text
+        if self._out_file is not None:
+            try:
+                self._out_file.close()
+            except Exception:
+                pass
+        if self._out_path is not None:
+            try:
+                os.unlink(self._out_path)
+            except Exception:
+                pass
+
         if debug_path is not None:
             try:
                 debug_path.write_text(self.stderr_text, encoding="utf-8")
