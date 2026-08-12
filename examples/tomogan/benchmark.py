@@ -68,6 +68,9 @@ def parse_args():
                    help="perf event(s) for CPU package energy (comma-separated for multi-socket).")
     p.add_argument("--perf-interval-ms", type=int, default=200,
                    help="perf stat interval (-I) in ms for the CPU power time-series.")
+    p.add_argument("--perf-no-system-wide", dest="perf_system_wide", action="store_false",
+                   help="Measure only the launching socket's package (default: -a, all sockets).")
+    p.set_defaults(perf_system_wide=True)
     p.add_argument("--save-power-trace", action="store_true",
                    help="Write per-run GPU/CPU power-vs-time traces to power_trace_*.csv.")
     return p.parse_args()
@@ -297,11 +300,15 @@ class PerfEnergySampler:
     """
 
     def __init__(self, perf_command: str, event: str, interval_ms: int = 200,
-                 max_window_s: float = 3600.0):
+                 max_window_s: float = 3600.0, system_wide: bool = True):
         self.perf_command = perf_command
         self.event = event
         self.interval_ms = int(interval_ms)
         self.max_window_s = max_window_s
+        # System-wide (-a) so perf aggregates ALL CPU packages (both sockets on
+        # dual-socket EPYC) into one Joules value per interval. Without -a on a
+        # multi-socket node, only the launching socket's package is counted.
+        self.system_wide = system_wide
         self.proc: subprocess.Popen | None = None
         self.stderr_text: str = ""
         # Power time-series as (monotonic_time_s, power_w) captured at stop().
@@ -329,9 +336,10 @@ class PerfEnergySampler:
             self._out_file = None
             self._out_path = None
             return False
-        cmd = [self.perf_command, "stat", "-x", ",", *events, "-I", str(self.interval_ms),
-               "-o", str(self._out_path),
-               "--", "sleep", str(self.max_window_s)]
+        cmd = [self.perf_command, "stat", "-x", ",", *events, "-I", str(self.interval_ms)]
+        if self.system_wide:
+            cmd.append("-a")
+        cmd += ["-o", str(self._out_path), "--", "sleep", str(self.max_window_s)]
         try:
             # New process group so we can terminate only the inner `sleep`/perf.
             self.proc = subprocess.Popen(
@@ -410,10 +418,20 @@ class PerfEnergySampler:
     def _parse_interval_power(self, text: str, t0: float | None):
         interval_s = self.interval_ms / 1000.0
         base = t0 if t0 is not None else 0.0
-        out: list[tuple[float, float]] = []
+        # Aggregate rows that share the same interval timestamp (e.g. per-socket
+        # rows under -A, or multiple energy events) into one total-power sample.
+        by_elapsed: "dict[float, float]" = {}
+        order: list[float] = []
         for elapsed, joules in PerfEnergySampler._iter_joules_rows(text):
-            power_w = joules / interval_s if interval_s > 0 else 0.0
-            ts = base + elapsed if elapsed is not None else base
+            key = elapsed if elapsed is not None else -1.0
+            if key not in by_elapsed:
+                by_elapsed[key] = 0.0
+                order.append(key)
+            by_elapsed[key] += joules
+        out: list[tuple[float, float]] = []
+        for key in order:
+            power_w = by_elapsed[key] / interval_s if interval_s > 0 else 0.0
+            ts = base + key if key >= 0 else base
             out.append((ts, power_w))
         return out
 
@@ -653,6 +671,7 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
     if cpu_source == "perf":
         perf_sampler = PerfEnergySampler(
             args.perf_command, args.perf_energy_event, interval_ms=args.perf_interval_ms,
+            system_wide=args.perf_system_wide,
         )
         if not perf_sampler.start():
             perf_sampler = None
