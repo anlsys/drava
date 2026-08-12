@@ -60,8 +60,8 @@ def main() -> None:
     ap.add_argument("--dir", default=None, help="Dir with power_trace_b*_r1.csv files.")
     ap.add_argument("--out", default=None, help="Output basename.")
     ap.add_argument("--orientation", choices=["vertical", "horizontal"],
-                    default="vertical",
-                    help="Panel layout: vertical (stacked, shared time axis) or horizontal.")
+                    default="horizontal",
+                    help="Panel layout: horizontal (side-by-side, shows spikes) or vertical (stacked).")
     args = ap.parse_args()
 
     items: list[tuple[int, Path]] = []
@@ -140,7 +140,7 @@ def main() -> None:
                        frameon=False, ncol=2, handlelength=1.6,
                        columnspacing=1.6, borderpad=0.2)
     else:
-        fig, axes = plt.subplots(1, n, figsize=(2.3 * n + 0.8, 2.9),
+        fig, axes = plt.subplots(1, n, figsize=(2.5 * n + 0.8, 2.9),
                                  sharex=True, sharey=True, constrained_layout=True)
         axes = [axes] if n == 1 else list(axes)
         for ax, (batch, s) in zip(axes, parsed):
@@ -159,6 +159,10 @@ def main() -> None:
             for spine in ("top", "right"):
                 ax.spines[spine].set_visible(False)
         axes[0].set_ylabel("Power (W)")
+        # Legend above the panels so it never covers the GPU spikes.
+        handles, lbls = axes[0].get_legend_handles_labels()
+        fig.legend(handles, lbls, loc="lower center", bbox_to_anchor=(0.5, 1.0),
+                   ncol=2, frameon=False, handlelength=1.6, columnspacing=1.8)
         axes[0].legend(loc="upper left", frameon=False)
 
     for ext in ("pdf", "png"):
