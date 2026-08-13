@@ -567,7 +567,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     stage2_metrics = {}
     stage2_final = {}
     pub_done = {}
-    marks = {"pub_start": None, "stage2_final": None}
+    marks = {"pub_start": None, "pub_first_frame": None, "stage2_final": None}
 
     def on_stage1_line(line: str):
         if "JetStream ready:" in line:
@@ -592,6 +592,11 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
             marks["stage2_final"] = time.monotonic()
 
     def on_pub_line(line: str):
+        # Mark the actual first-frame send (harness clock) so end-to-end latency
+        # excludes publisher process/connection startup and matches the pvaPy
+        # baseline, which starts timing at its release signal (first frame).
+        if marks.get("pub_first_frame") is None and "First frame sent at:" in line:
+            marks["pub_first_frame"] = time.monotonic()
         m = PUB_DONE_RE.search(line)
         if m:
             pub_done.update(m.groupdict())
@@ -708,8 +713,11 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     )
     row["stage2_side"] = int(stage2_final["side"])
 
-    if marks["pub_start"] is not None and marks["stage2_final"] is not None:
-        row["pipeline_e2e_s"] = marks["stage2_final"] - marks["pub_start"]
+    # Measure end-to-end from the first frame actually sent (fair vs pvaPy),
+    # falling back to publisher-launch time if the marker was missed.
+    e2e_start = marks.get("pub_first_frame") or marks["pub_start"]
+    if e2e_start is not None and marks["stage2_final"] is not None:
+        row["pipeline_e2e_s"] = marks["stage2_final"] - e2e_start
 
     return row
 
