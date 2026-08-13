@@ -1,134 +1,155 @@
 #!/usr/bin/env python3
-"""Two-stage PtychoNN comparison: Drava vs pvaPy.
+"""Two-stage PtychoNN comparison: end-to-end throughput vs publisher rate.
 
-The reconstruction needs every stage-1 prediction to stitch the scan, so a single
-dropped inter-stage message fails the whole run. This plot shows pipeline
-completion rate (fraction of runs that produced a full stitched reconstruction)
-as a function of inference batch size, for pvaPy at 1 and 2 kHz and Drava. The
-pvaPy single-record path degrades with batch size and rate, while Drava's durable
-transport completes every run.
+Mirrors the single-stage figure (throughput vs publisher rate) but for the full
+two-stage pipeline (GPU inference -> CPU stitching). We fix the inference batch
+size and sweep the publisher rate. End-to-end pipeline throughput is
+frames / end_to_end_latency over runs that completed a full stitch. Where a
+runtime fails to complete the pipeline (drops a stage-boundary message), it has
+no loss-free point at that rate, so the curve stops -- exactly like the
+single-stage loss curve.
 
-Inputs (curated CSVs in this directory):
-  - pvapy_two_stage_summary.csv : per-run pvaPy rows (stage2_side>0 => completed)
-  - drava_two_stage_summary.csv : per-run Drava rows
-
-A run "completed" iff stage2_side > 0 (a full stitch was produced).
+Inputs (curated CSVs in this directory), per-run rows with columns:
+  rate_hz,batch,run,stage1_total_fps,stage2_total_fps,stage2_side,pipeline_e2e_s
+  - pvapy_two_stage_summary.csv
+  - drava_two_stage_summary.csv
+A run "completed" iff stage2_side > 0.
 """
 from __future__ import annotations
 
 import argparse
 import csv
-import os
 from collections import defaultdict
 from pathlib import Path
 
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    str(Path(__file__).resolve().parents[3] / ".matplotlib-cache"),
-)
-
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
+from matplotlib.ticker import FuncFormatter
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = HERE.parents[2]
 PVAPY_CSV = HERE / "pvapy_two_stage_summary.csv"
 DRAVA_CSV = HERE / "drava_two_stage_summary.csv"
-OUT_BASE = ROOT / "figs" / "paper_figs" / "pvapy_drava_two_stage"
+FIGS_DIR = REPO_ROOT / "figs" / "paper_figs"
+NUM_FRAMES = 3600
 
-GREEN = "#6A8F7A"    # Drava
-ORANGE = "#B5651D"   # pvaPy 1 kHz
-ORANGE2 = "#E0A458"  # pvaPy 2 kHz (lighter)
+COLORS = {"Drava": "#27667B", "PvaPy": "#C1662D"}
+MARKERS = {"Drava": "o", "PvaPy": "s"}
 
 
-def read_csv(path: Path) -> list[dict]:
+def read_csv(path: Path):
     if not path.exists():
         return []
     with open(path, "r", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
 
 
-def completion_by_batch(rows, rate_hz):
-    """Return {batch: completion_percent} for the given rate."""
-    by_batch = defaultdict(list)
+def mean(v):
+    return sum(v) / len(v) if v else 0.0
+
+
+def e2e_throughput_by_rate(rows, batch):
+    """Return {rate_hz: mean end-to-end throughput (fps)} over completed runs
+    at the given batch. rate_hz=0 is treated as 'max' (unpaced)."""
+    by_rate = defaultdict(list)
     for r in rows:
-        if int(float(r.get("rate_hz", rate_hz))) != rate_hz:
+        if int(r["batch"]) != batch:
             continue
-        by_batch[int(r["batch"])].append(r)
-    out = {}
-    for b, rs in by_batch.items():
-        done = sum(1 for r in rs if float(r.get("stage2_side", 0) or 0) > 0)
-        out[b] = 100.0 * done / len(rs) if rs else 0.0
-    return out
+        if float(r.get("stage2_side", 0) or 0) <= 0:
+            continue  # incomplete run: no loss-free point
+        e2e = float(r["pipeline_e2e_s"])
+        if e2e > 0:
+            by_rate[int(float(r["rate_hz"]))].append(NUM_FRAMES / e2e)
+    return {rate: mean(v) for rate, v in by_rate.items()}
+
+
+def completion_by_rate(rows, batch):
+    by_rate = defaultdict(list)
+    for r in rows:
+        if int(r["batch"]) != batch:
+            continue
+        by_rate[int(float(r["rate_hz"]))].append(
+            1 if float(r.get("stage2_side", 0) or 0) > 0 else 0)
+    return {rate: (sum(v), len(v)) for rate, v in by_rate.items()}
+
+
+def fmt_k(x, _pos):
+    return f"{x/1000:g}k" if x >= 1000 else f"{x:g}"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rates", default="1000,2000", help="Comma-separated pvaPy rates to show.")
+    ap.add_argument("--batch", type=int, default=128,
+                    help="Fixed inference batch size for the rate sweep.")
+    ap.add_argument("--rates", default="1000,2000,2500,3000,0",
+                    help="Rate order for the x-axis (0 = unpaced/max).")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    rates = [int(x) for x in args.rates.split(",") if x.strip()]
-    pv_rows = read_csv(PVAPY_CSV)
-    dr_rows = read_csv(DRAVA_CSV)
+    order = [int(x) for x in args.rates.split(",") if x.strip()]
+    labels = {r: (f"{r//1000}k" if r >= 1000 else ("max" if r == 0 else str(r)))
+              for r in order}
+    labels_special = {2500: "2.5k"}
+    for k, v in labels_special.items():
+        if k in labels:
+            labels[k] = v
 
-    pv_comp = {r: completion_by_batch(pv_rows, r) for r in rates}
-    # Drava completes every run at all rates; aggregate over all Drava rows.
-    dr_comp_all = defaultdict(list)
-    for r in dr_rows:
-        dr_comp_all[int(r["batch"])].append(r)
-    dr_comp = {
-        b: 100.0 * sum(1 for x in rs if float(x.get("stage2_side", 0) or 0) > 0) / len(rs)
-        for b, rs in dr_comp_all.items()
-    }
+    pv = read_csv(PVAPY_CSV)
+    dr = read_csv(DRAVA_CSV)
 
-    batches = sorted(set(dr_comp) | {b for r in rates for b in pv_comp[r]})
-    if not batches:
-        raise SystemExit("No data found in the two-stage summary CSVs.")
+    dr_tput = e2e_throughput_by_rate(dr, args.batch)
+    pv_tput = e2e_throughput_by_rate(pv, args.batch)
+    pv_comp = completion_by_rate(pv, args.batch)
 
     plt.rcParams.update({
-        "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
-        "ytick.labelsize": 11, "legend.fontsize": 10.5, "axes.titlesize": 13,
+        "font.size": 11, "axes.labelsize": 11, "axes.titlesize": 11,
+        "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 9,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    fig, ax = plt.subplots(figsize=(4.4, 3.0), constrained_layout=True)
-    x = np.arange(len(batches), dtype=float)
+    fig, ax = plt.subplots(figsize=(5.0, 3.0), constrained_layout=True)
+    xpos = {r: i for i, r in enumerate(order)}
 
-    series = [("Drava", dr_comp, GREEN, "#2E4A3A")]
-    for i, r in enumerate(rates):
-        label = f"PvaPy {r//1000}\u2009kHz"
-        color = ORANGE if r == rates[0] else ORANGE2
-        edge = "#6E3D10"
-        series.append((label, pv_comp[r], color, edge))
+    def series(tput):
+        xs, ys = [], []
+        for r in order:
+            if r in tput and tput[r] > 0:
+                xs.append(xpos[r]); ys.append(tput[r])
+        return xs, ys
 
-    n = len(series)
-    w = 0.8 / n
-    for i, (label, comp, fc, ec) in enumerate(series):
-        offset = (i - (n - 1) / 2.0) * w
-        vals = [comp.get(b, 0.0) for b in batches]
-        bars = ax.bar(x + offset, vals, w * 0.95, color=fc, edgecolor=ec,
-                      linewidth=0.8, label=label, zorder=2)
-        # Annotate zero-completion bars with a small "0".
-        for xi, v in zip(x + offset, vals):
-            if v == 0:
-                ax.text(xi, 2, "0", ha="center", va="bottom", fontsize=9,
-                        color=ec)
+    dxs, dys = series(dr_tput)
+    pxs, pys = series(pv_tput)
+    ax.plot(dxs, dys, color=COLORS["Drava"], marker=MARKERS["Drava"],
+            linewidth=2.4, markersize=6.5, label="Drava")
+    ax.plot(pxs, pys, color=COLORS["PvaPy"], marker=MARKERS["PvaPy"],
+            linewidth=2.4, markersize=6.5, label="PvaPy")
 
-    ax.set_ylabel("Pipeline completion (%)")
-    ax.set_xlabel("Inference batch size")
-    ax.set_xticks(x); ax.set_xticklabels([str(b) for b in batches])
-    ax.set_ylim(0, 112)
-    ax.set_yticks([0, 25, 50, 75, 100])
-    ax.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax.set_axisbelow(True)
-    for sp in ("top", "right"):
-        ax.spines[sp].set_visible(False)
-    ax.legend(frameon=False, loc="lower left", ncol=1)
+    # Mark rates where PvaPy could not complete the pipeline (no loss-free point).
+    ymax = max(dys + pys) if (dys + pys) else 1.0
+    for r in order:
+        done, total = pv_comp.get(r, (0, 0))
+        if total and done == 0:
+            ax.annotate("PvaPy\nfails", xy=(xpos[r], 0.06 * ymax),
+                        ha="center", va="bottom", fontsize=8,
+                        color=COLORS["PvaPy"])
 
-    out_base = Path(args.out).resolve() if args.out else OUT_BASE
+    ax.set_title(f"Two-stage PtychoNN end-to-end throughput (batch {args.batch})")
+    ax.set_ylabel("End-to-end throughput (frames/s)")
+    ax.set_xlabel("Publisher rate")
+    ax.set_xticks(list(xpos.values()))
+    ax.set_xticklabels([labels[r] for r in order])
+    ax.set_ylim(0, ymax * 1.25)
+    ax.yaxis.set_major_formatter(FuncFormatter(fmt_k))
+    ax.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(loc="upper left", frameon=False)
+
+    out_base = Path(args.out).resolve() if args.out else FIGS_DIR / "pvapy_drava_two_stage"
     out_base.parent.mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):
-        fig.savefig(out_base.with_suffix(f".{ext}"), dpi=300)
+        fig.savefig(out_base.with_suffix(f".{ext}"), dpi=300, bbox_inches="tight")
         print(out_base.with_suffix(f".{ext}"))
 
 
