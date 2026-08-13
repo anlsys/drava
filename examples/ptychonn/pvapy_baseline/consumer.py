@@ -113,7 +113,9 @@ class PtychoNNPvaConsumer:
         single-stage publisher paces its record updates)."""
         if self.pub_period_s > 0.0:
             now = time.perf_counter()
-            if self._next_pub_t is None:
+            if self._next_pub_t is None or self._next_pub_t < now:
+                # Don't try to "catch up" after inter-batch inference gaps;
+                # just enforce a minimum spacing between consecutive updates.
                 self._next_pub_t = now
             sleep_s = self._next_pub_t - now
             if sleep_s > 0:

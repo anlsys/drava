@@ -68,6 +68,10 @@ def parse_args() -> argparse.Namespace:
                         help="Pace stage-1 prediction output (msgs/s) so the stage-2 "
                              "overwrite-record monitor can keep up. Default -1 ties it to "
                              "--rate-hz (the input publisher rate); 0 = unpaced.")
+    parser.add_argument("--publish-chunk", type=int, default=0,
+                        help="Stage-1 prediction chunk size (frames per output message). "
+                             "0 = one message per inference batch (fewest messages, least "
+                             "overwrite risk on the single-record path).")
     parser.add_argument(
         "--start-settle-s",
         type=float,
@@ -236,6 +240,10 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         "--monitor-queue", str(args.monitor_queue),
         "--timeout-s", str(args.consumer_timeout_s),
         "--publish-rate-hz", str(stage1_publish_rate_hz),
+        # 0 -> largest chunk that keeps a message near ~2 MB (64 frames), which
+        # cuts the message count vs the 16-frame default while staying well under
+        # pvaPy's payload limits. Fewer messages => fewer overwrite races.
+        "--publish-chunk", str(args.publish_chunk if args.publish_chunk > 0 else min(batch, 64)),
     ]
     stage1_proc = subprocess.Popen(
         stage1_cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
