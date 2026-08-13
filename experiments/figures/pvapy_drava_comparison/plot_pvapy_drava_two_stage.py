@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """Two-stage PtychoNN comparison: Drava vs pvaPy.
 
-Shows that Drava completes the full two-stage pipeline loss-free while the pvaPy
-single-record PvaServer path drops stage-1 predictions at the stage boundary and
-usually cannot finalize the stitch.
+The reconstruction needs every stage-1 prediction to stitch the scan, so a single
+dropped inter-stage message fails the whole run. This plot shows pipeline
+completion rate (fraction of runs that produced a full stitched reconstruction)
+as a function of inference batch size, for pvaPy at 1 and 2 kHz and Drava. The
+pvaPy single-record path degrades with batch size and rate, while Drava's durable
+transport completes every run.
 
 Inputs (curated CSVs in this directory):
-  - pvapy_two_stage_summary.csv : per-run pvaPy rows with a `completed` flag
-  - drava_two_stage_summary.csv : per-run Drava rows (from benchmark_two_stages.py)
+  - pvapy_two_stage_summary.csv : per-run pvaPy rows (stage2_side>0 => completed)
+  - drava_two_stage_summary.csv : per-run Drava rows
 
-Panel (a): pipeline completion rate (% of runs that finalized the stitch) per batch.
-Panel (b): end-to-end latency for COMPLETED runs (mean +/- std); pvaPy shown only
-           where it completed.
-
-Usage:
-  python plot_pvapy_drava_two_stage.py            # rate_hz=1000 by default
-  python plot_pvapy_drava_two_stage.py --rate-hz 1000
+A run "completed" iff stage2_side > 0 (a full stitch was produced).
 """
 from __future__ import annotations
 
@@ -39,8 +36,9 @@ PVAPY_CSV = HERE / "pvapy_two_stage_summary.csv"
 DRAVA_CSV = HERE / "drava_two_stage_summary.csv"
 OUT_BASE = ROOT / "figs" / "paper_figs" / "pvapy_drava_two_stage"
 
-GREEN = "#6A8F7A"   # Drava
-ORANGE = "#B5651D"  # pvaPy
+GREEN = "#6A8F7A"    # Drava
+ORANGE = "#B5651D"   # pvaPy 1 kHz
+ORANGE2 = "#E0A458"  # pvaPy 2 kHz (lighter)
 
 
 def read_csv(path: Path) -> list[dict]:
@@ -50,57 +48,43 @@ def read_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def mean(v):
-    return float(np.mean(v)) if v else 0.0
-
-
-def std(v):
-    return float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
-
-
-def _agg(rows, batches_filter=None):
-    """Return per-batch completion rate (%) and, for completed runs only
-    (stitched side > 0), mean/std of end-to-end latency and stage-2 fps."""
+def completion_by_batch(rows, rate_hz):
+    """Return {batch: completion_percent} for the given rate."""
     by_batch = defaultdict(list)
     for r in rows:
+        if int(float(r.get("rate_hz", rate_hz))) != rate_hz:
+            continue
         by_batch[int(r["batch"])].append(r)
-    comp, e2e_m, e2e_s, fps_m, fps_s = {}, {}, {}, {}, {}
+    out = {}
     for b, rs in by_batch.items():
-        done = [r for r in rs if float(r.get("stage2_side", 0) or 0) > 0]
-        comp[b] = 100.0 * len(done) / len(rs) if rs else 0.0
-        e2e = [float(r["pipeline_e2e_s"]) for r in done
-               if r.get("pipeline_e2e_s") not in (None, "", "None")]
-        fps = [float(r["stage2_total_fps"]) for r in done
-               if r.get("stage2_total_fps") not in (None, "", "None")]
-        e2e_m[b], e2e_s[b] = mean(e2e), std(e2e)
-        fps_m[b], fps_s[b] = mean(fps), std(fps)
-    return comp, e2e_m, e2e_s, fps_m, fps_s
-
-
-def load_pvapy(rate_hz: int):
-    rows = [r for r in read_csv(PVAPY_CSV) if int(float(r["rate_hz"])) == rate_hz]
-    return _agg(rows)
-
-
-def load_drava(rate_hz: int):
-    all_rows = read_csv(DRAVA_CSV)
-    rows = [r for r in all_rows if int(float(r.get("rate_hz", rate_hz))) == rate_hz] or all_rows
-    return _agg(rows)
+        done = sum(1 for r in rs if float(r.get("stage2_side", 0) or 0) > 0)
+        out[b] = 100.0 * done / len(rs) if rs else 0.0
+    return out
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rate-hz", type=int, default=1000)
+    ap.add_argument("--rates", default="1000,2000", help="Comma-separated pvaPy rates to show.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    pv_comp, pv_e2e_m, pv_e2e_s, pv_fps_m, pv_fps_s = load_pvapy(args.rate_hz)
-    dr_comp, dr_e2e_m, dr_e2e_s, dr_fps_m, dr_fps_s = load_drava(args.rate_hz)
+    rates = [int(x) for x in args.rates.split(",") if x.strip()]
+    pv_rows = read_csv(PVAPY_CSV)
+    dr_rows = read_csv(DRAVA_CSV)
 
-    batches = sorted(set(pv_comp) | set(dr_comp))
+    pv_comp = {r: completion_by_batch(pv_rows, r) for r in rates}
+    # Drava completes every run at all rates; aggregate over all Drava rows.
+    dr_comp_all = defaultdict(list)
+    for r in dr_rows:
+        dr_comp_all[int(r["batch"])].append(r)
+    dr_comp = {
+        b: 100.0 * sum(1 for x in rs if float(x.get("stage2_side", 0) or 0) > 0) / len(rs)
+        for b, rs in dr_comp_all.items()
+    }
+
+    batches = sorted(set(dr_comp) | {b for r in rates for b in pv_comp[r]})
     if not batches:
-        raise SystemExit("No data. Ensure pvapy_two_stage_summary.csv and "
-                         "drava_two_stage_summary.csv exist for the chosen rate.")
+        raise SystemExit("No data found in the two-stage summary CSVs.")
 
     plt.rcParams.update({
         "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
@@ -108,66 +92,38 @@ def main() -> None:
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    # Single dual-axis chart: bars = stage-2 throughput (left), line = end-to-end
-    # latency (right). Completed runs only; a missing PvaPy bar/marker means it
-    # failed to complete the pipeline at that batch size (dropped a stage-boundary
-    # message). We annotate those with "x".
-    fig, axL = plt.subplots(figsize=(4.2, 3.0), constrained_layout=True)
-    axR = axL.twinx()
+    fig, ax = plt.subplots(figsize=(4.4, 3.0), constrained_layout=True)
     x = np.arange(len(batches), dtype=float)
-    w = 0.38
-    err_kw = {"elinewidth": 0.9, "capthick": 0.9}
 
-    def bar_vals(m, s):
-        return ([m.get(b, 0) for b in batches],
-                [s.get(b, 0) for b in batches])
+    series = [("Drava", dr_comp, GREEN, "#2E4A3A")]
+    for i, r in enumerate(rates):
+        label = f"PvaPy {r//1000}\u2009kHz"
+        color = ORANGE if r == rates[0] else ORANGE2
+        edge = "#6E3D10"
+        series.append((label, pv_comp[r], color, edge))
 
-    dr_fps, dr_fps_e = bar_vals(dr_fps_m, dr_fps_s)
-    pv_fps, pv_fps_e = bar_vals(pv_fps_m, pv_fps_s)
+    n = len(series)
+    w = 0.8 / n
+    for i, (label, comp, fc, ec) in enumerate(series):
+        offset = (i - (n - 1) / 2.0) * w
+        vals = [comp.get(b, 0.0) for b in batches]
+        bars = ax.bar(x + offset, vals, w * 0.95, color=fc, edgecolor=ec,
+                      linewidth=0.8, label=label, zorder=2)
+        # Annotate zero-completion bars with a small "0".
+        for xi, v in zip(x + offset, vals):
+            if v == 0:
+                ax.text(xi, 2, "0", ha="center", va="bottom", fontsize=9,
+                        color=ec)
 
-    axL.bar(x - w / 2, dr_fps, w, yerr=dr_fps_e, capsize=3, color=GREEN,
-            edgecolor="#2E4A3A", label="Drava throughput", error_kw=err_kw, zorder=2)
-    axL.bar(x + w / 2, pv_fps, w, yerr=pv_fps_e, capsize=3, color=ORANGE,
-            edgecolor="#6E3D10", label="PvaPy throughput", error_kw=err_kw, zorder=2)
-    axL.set_ylabel("Stage-2 throughput (frames/s)")
-    axL.set_xlabel("Inference batch size")
-    axL.set_xticks(x); axL.set_xticklabels([str(b) for b in batches])
-    axL.set_ylim(0, max(dr_fps + [1]) * 1.28)
-    axL.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); axL.set_axisbelow(True)
-    for sp in ("top",):
-        axL.spines[sp].set_visible(False)
-
-    # Latency lines (right axis). Only plot points where the runtime completed.
-    def line_pts(m):
-        xs, ys = [], []
-        for i, b in enumerate(batches):
-            v = m.get(b, 0)
-            if v and v > 0:
-                xs.append(x[i]); ys.append(v)
-        return xs, ys
-
-    dxs, dys = line_pts(dr_e2e_m)
-    pxs, pys = line_pts(pv_e2e_m)
-    axR.plot(dxs, dys, color="#123", marker="o", markersize=5, linewidth=1.6,
-             label="Drava latency", zorder=4)
-    axR.plot(pxs, pys, color="#123", marker="s", markersize=5, linewidth=1.6,
-             linestyle="--", label="PvaPy latency", zorder=4)
-    axR.set_ylabel("End-to-end latency (s)")
-    axR.set_ylim(0, max((dys + pys) or [1]) * 1.35)
-    for sp in ("top",):
-        axR.spines[sp].set_visible(False)
-
-    # Mark batches where PvaPy failed to complete any run.
-    for i, b in enumerate(batches):
-        if not pv_e2e_m.get(b, 0):
-            axL.text(x[i] + w / 2, axL.get_ylim()[1] * 0.04, "\u2717",
-                     ha="center", va="bottom", color="#6E3D10", fontsize=13,
-                     fontweight="bold")
-
-    hL, lL = axL.get_legend_handles_labels()
-    hR, lR = axR.get_legend_handles_labels()
-    axL.legend(hL + hR, lL + lR, frameon=False, loc="upper center",
-               ncol=2, fontsize=8.5, columnspacing=1.0, handlelength=1.5)
+    ax.set_ylabel("Pipeline completion (%)")
+    ax.set_xlabel("Inference batch size")
+    ax.set_xticks(x); ax.set_xticklabels([str(b) for b in batches])
+    ax.set_ylim(0, 112)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax.set_axisbelow(True)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.legend(frameon=False, loc="lower left", ncol=1)
 
     out_base = Path(args.out).resolve() if args.out else OUT_BASE
     out_base.parent.mkdir(parents=True, exist_ok=True)
