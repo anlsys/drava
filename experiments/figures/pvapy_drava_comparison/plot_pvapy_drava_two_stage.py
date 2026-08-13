@@ -59,21 +59,22 @@ def std(v):
 
 
 def _agg(rows, batches_filter=None):
-    """Return per-batch mean/std for end-to-end latency and stage-2 fps over
-    completed runs only (stitched side > 0)."""
+    """Return per-batch completion rate (%) and, for completed runs only
+    (stitched side > 0), mean/std of end-to-end latency and stage-2 fps."""
     by_batch = defaultdict(list)
     for r in rows:
         by_batch[int(r["batch"])].append(r)
-    e2e_m, e2e_s, fps_m, fps_s = {}, {}, {}, {}
+    comp, e2e_m, e2e_s, fps_m, fps_s = {}, {}, {}, {}, {}
     for b, rs in by_batch.items():
         done = [r for r in rs if float(r.get("stage2_side", 0) or 0) > 0]
+        comp[b] = 100.0 * len(done) / len(rs) if rs else 0.0
         e2e = [float(r["pipeline_e2e_s"]) for r in done
                if r.get("pipeline_e2e_s") not in (None, "", "None")]
         fps = [float(r["stage2_total_fps"]) for r in done
                if r.get("stage2_total_fps") not in (None, "", "None")]
         e2e_m[b], e2e_s[b] = mean(e2e), std(e2e)
         fps_m[b], fps_s[b] = mean(fps), std(fps)
-    return e2e_m, e2e_s, fps_m, fps_s
+    return comp, e2e_m, e2e_s, fps_m, fps_s
 
 
 def load_pvapy(rate_hz: int):
@@ -93,54 +94,53 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    pv_e2e_m, pv_e2e_s, pv_fps_m, pv_fps_s = load_pvapy(args.rate_hz)
-    dr_e2e_m, dr_e2e_s, dr_fps_m, dr_fps_s = load_drava(args.rate_hz)
+    pv_comp, pv_e2e_m, pv_e2e_s, pv_fps_m, pv_fps_s = load_pvapy(args.rate_hz)
+    dr_comp, dr_e2e_m, dr_e2e_s, dr_fps_m, dr_fps_s = load_drava(args.rate_hz)
 
-    batches = sorted(set(pv_e2e_m) | set(dr_e2e_m))
+    batches = sorted(set(pv_comp) | set(dr_comp))
     if not batches:
         raise SystemExit("No data. Ensure pvapy_two_stage_summary.csv and "
                          "drava_two_stage_summary.csv exist for the chosen rate.")
 
     plt.rcParams.update({
-        "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
-        "ytick.labelsize": 11, "legend.fontsize": 11, "axes.titlesize": 13,
+        "font.size": 12, "axes.labelsize": 12.5, "xtick.labelsize": 11,
+        "ytick.labelsize": 11, "legend.fontsize": 11, "axes.titlesize": 12.5,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.0, 2.7), constrained_layout=True)
+    fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(7.2, 2.5), constrained_layout=True)
     x = np.arange(len(batches))
     w = 0.38
     err_kw = {"elinewidth": 0.9, "capthick": 0.9}
 
-    # (a) end-to-end latency (lower is better)
-    ax1.bar(x - w / 2, [dr_e2e_m.get(b, 0) for b in batches], w,
-            yerr=[dr_e2e_s.get(b, 0) for b in batches], capsize=3, color=GREEN,
-            edgecolor="#2E4A3A", label="Drava", error_kw=err_kw)
-    ax1.bar(x + w / 2, [pv_e2e_m.get(b, 0) for b in batches], w,
-            yerr=[pv_e2e_s.get(b, 0) for b in batches], capsize=3, color=ORANGE,
-            edgecolor="#6E3D10", label="PvaPy", error_kw=err_kw)
-    ax1.set_ylabel("End-to-end latency (s)")
-    ax1.set_xlabel("Inference batch size")
-    ax1.set_xticks(x); ax1.set_xticklabels([str(b) for b in batches])
-    ax1.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax1.set_axisbelow(True)
-    for sp in ("top", "right"): ax1.spines[sp].set_visible(False)
-    ax1.set_title("(a) end-to-end latency")
-    ax1.legend(frameon=False, loc="upper right", ncol=2)
+    def paired_bars(ax, dmap, dstd, pmap, pstd):
+        ax.bar(x - w / 2, [dmap.get(b, 0) for b in batches], w,
+               yerr=None if dstd is None else [dstd.get(b, 0) for b in batches],
+               capsize=3, color=GREEN, edgecolor="#2E4A3A", label="Drava", error_kw=err_kw)
+        ax.bar(x + w / 2, [pmap.get(b, 0) for b in batches], w,
+               yerr=None if pstd is None else [pstd.get(b, 0) for b in batches],
+               capsize=3, color=ORANGE, edgecolor="#6E3D10", label="PvaPy", error_kw=err_kw)
+        ax.set_xlabel("Batch size")
+        ax.set_xticks(x); ax.set_xticklabels([str(b) for b in batches])
+        ax.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax.set_axisbelow(True)
+        for sp in ("top", "right"): ax.spines[sp].set_visible(False)
 
-    # (b) stage-2 throughput (higher is better)
-    ax2.bar(x - w / 2, [dr_fps_m.get(b, 0) for b in batches], w,
-            yerr=[dr_fps_s.get(b, 0) for b in batches], capsize=3, color=GREEN,
-            edgecolor="#2E4A3A", label="Drava", error_kw=err_kw)
-    ax2.bar(x + w / 2, [pv_fps_m.get(b, 0) for b in batches], w,
-            yerr=[pv_fps_s.get(b, 0) for b in batches], capsize=3, color=ORANGE,
-            edgecolor="#6E3D10", label="PvaPy", error_kw=err_kw)
-    ax2.set_ylabel("Stage-2 throughput (frames/s)")
-    ax2.set_xlabel("Inference batch size")
-    ax2.set_xticks(x); ax2.set_xticklabels([str(b) for b in batches])
-    ax2.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax2.set_axisbelow(True)
-    for sp in ("top", "right"): ax2.spines[sp].set_visible(False)
-    ax2.set_title("(b) stage-2 throughput")
-    ax2.legend(frameon=False, loc="upper left", ncol=2)
+    # (a) completion rate
+    paired_bars(ax0, dr_comp, None, pv_comp, None)
+    ax0.set_ylabel("Completion (%)")
+    ax0.set_ylim(0, 108)
+    ax0.set_title("(a) completion")
+    ax0.legend(frameon=False, loc="lower center", ncol=1)
+
+    # (b) end-to-end latency (completed runs; lower is better)
+    paired_bars(ax1, dr_e2e_m, dr_e2e_s, pv_e2e_m, pv_e2e_s)
+    ax1.set_ylabel("E2E latency (s)")
+    ax1.set_title("(b) latency")
+
+    # (c) stage-2 throughput (completed runs; higher is better)
+    paired_bars(ax2, dr_fps_m, dr_fps_s, pv_fps_m, pv_fps_s)
+    ax2.set_ylabel("Stage-2 fps")
+    ax2.set_title("(c) throughput")
 
     out_base = Path(args.out).resolve() if args.out else OUT_BASE
     out_base.parent.mkdir(parents=True, exist_ok=True)
