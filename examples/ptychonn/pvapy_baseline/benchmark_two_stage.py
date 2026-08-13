@@ -64,9 +64,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frame-channel", default="ptychonn:frames")
     parser.add_argument("--stage1-channel", default="ptychonn:stage1")
     parser.add_argument("--monitor-queue", type=int, default=0)
-    parser.add_argument("--stage1-publish-rate-hz", type=float, default=2000.0,
+    parser.add_argument("--stage1-publish-rate-hz", type=float, default=-1.0,
                         help="Pace stage-1 prediction output (msgs/s) so the stage-2 "
-                             "overwrite-record monitor can keep up (0 = unpaced).")
+                             "overwrite-record monitor can keep up. Default -1 ties it to "
+                             "--rate-hz (the input publisher rate); 0 = unpaced.")
     parser.add_argument(
         "--start-settle-s",
         type=float,
@@ -219,6 +220,13 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         if m:
             stage1_metrics.update(m.groupdict())
 
+    # Default (-1): tie stage-1 output pacing to the input publisher rate so the
+    # stage-2 overwrite-record monitor sees updates at the same cadence the
+    # single-stage baseline uses (where PvaPy is loss-free up to ~2 kHz).
+    stage1_publish_rate_hz = (
+        args.rate_hz if args.stage1_publish_rate_hz < 0 else args.stage1_publish_rate_hz
+    )
+
     stage1_cmd = [
         args.python, "consumer.py",
         "--input-channel", args.frame_channel,
@@ -227,7 +235,7 @@ def run_one(args: argparse.Namespace, root: Path, run_dir: Path, batch: int, run
         "--infer-batch", str(batch),
         "--monitor-queue", str(args.monitor_queue),
         "--timeout-s", str(args.consumer_timeout_s),
-        "--publish-rate-hz", str(args.stage1_publish_rate_hz),
+        "--publish-rate-hz", str(stage1_publish_rate_hz),
     ]
     stage1_proc = subprocess.Popen(
         stage1_cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
