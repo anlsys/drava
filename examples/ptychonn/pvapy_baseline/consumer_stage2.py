@@ -286,9 +286,10 @@ class Stage2PvaConsumer:
         if is_eos:
             self.on_eos(n_total)
             if not self.finalized:
-                # EOS arrived but not all frames present; finalize best-effort.
-                self.t_final = time.perf_counter()
-                self.done.set()
+                # EOS arrived but not all frames present (a prediction message
+                # was dropped by the overwrite record); finalize best-effort so a
+                # [pvapy-stage2-final] line is always emitted.
+                self.finalize_partial()
             return
 
         payload = payload_bytes_from_pv(pv_object)
