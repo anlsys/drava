@@ -103,44 +103,71 @@ def main() -> None:
                          "drava_two_stage_summary.csv exist for the chosen rate.")
 
     plt.rcParams.update({
-        "font.size": 12, "axes.labelsize": 12.5, "xtick.labelsize": 11,
-        "ytick.labelsize": 11, "legend.fontsize": 11, "axes.titlesize": 12.5,
+        "font.size": 12, "axes.labelsize": 13, "xtick.labelsize": 11,
+        "ytick.labelsize": 11, "legend.fontsize": 10.5, "axes.titlesize": 13,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(7.2, 2.5), constrained_layout=True)
-    x = np.arange(len(batches))
+    # Single dual-axis chart: bars = stage-2 throughput (left), line = end-to-end
+    # latency (right). Completed runs only; a missing PvaPy bar/marker means it
+    # failed to complete the pipeline at that batch size (dropped a stage-boundary
+    # message). We annotate those with "x".
+    fig, axL = plt.subplots(figsize=(4.2, 3.0), constrained_layout=True)
+    axR = axL.twinx()
+    x = np.arange(len(batches), dtype=float)
     w = 0.38
     err_kw = {"elinewidth": 0.9, "capthick": 0.9}
 
-    def paired_bars(ax, dmap, dstd, pmap, pstd):
-        ax.bar(x - w / 2, [dmap.get(b, 0) for b in batches], w,
-               yerr=None if dstd is None else [dstd.get(b, 0) for b in batches],
-               capsize=3, color=GREEN, edgecolor="#2E4A3A", label="Drava", error_kw=err_kw)
-        ax.bar(x + w / 2, [pmap.get(b, 0) for b in batches], w,
-               yerr=None if pstd is None else [pstd.get(b, 0) for b in batches],
-               capsize=3, color=ORANGE, edgecolor="#6E3D10", label="PvaPy", error_kw=err_kw)
-        ax.set_xlabel("Batch size")
-        ax.set_xticks(x); ax.set_xticklabels([str(b) for b in batches])
-        ax.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); ax.set_axisbelow(True)
-        for sp in ("top", "right"): ax.spines[sp].set_visible(False)
+    def bar_vals(m, s):
+        return ([m.get(b, 0) for b in batches],
+                [s.get(b, 0) for b in batches])
 
-    # (a) completion rate
-    paired_bars(ax0, dr_comp, None, pv_comp, None)
-    ax0.set_ylabel("Completion (%)")
-    ax0.set_ylim(0, 108)
-    ax0.set_title("(a) completion")
-    ax0.legend(frameon=False, loc="lower center", ncol=1)
+    dr_fps, dr_fps_e = bar_vals(dr_fps_m, dr_fps_s)
+    pv_fps, pv_fps_e = bar_vals(pv_fps_m, pv_fps_s)
 
-    # (b) end-to-end latency (completed runs; lower is better)
-    paired_bars(ax1, dr_e2e_m, dr_e2e_s, pv_e2e_m, pv_e2e_s)
-    ax1.set_ylabel("E2E latency (s)")
-    ax1.set_title("(b) latency")
+    axL.bar(x - w / 2, dr_fps, w, yerr=dr_fps_e, capsize=3, color=GREEN,
+            edgecolor="#2E4A3A", label="Drava throughput", error_kw=err_kw, zorder=2)
+    axL.bar(x + w / 2, pv_fps, w, yerr=pv_fps_e, capsize=3, color=ORANGE,
+            edgecolor="#6E3D10", label="PvaPy throughput", error_kw=err_kw, zorder=2)
+    axL.set_ylabel("Stage-2 throughput (frames/s)")
+    axL.set_xlabel("Inference batch size")
+    axL.set_xticks(x); axL.set_xticklabels([str(b) for b in batches])
+    axL.set_ylim(0, max(dr_fps + [1]) * 1.28)
+    axL.grid(True, axis="y", color="#E0E0E0", linewidth=0.7); axL.set_axisbelow(True)
+    for sp in ("top",):
+        axL.spines[sp].set_visible(False)
 
-    # (c) stage-2 throughput (completed runs; higher is better)
-    paired_bars(ax2, dr_fps_m, dr_fps_s, pv_fps_m, pv_fps_s)
-    ax2.set_ylabel("Stage-2 fps")
-    ax2.set_title("(c) throughput")
+    # Latency lines (right axis). Only plot points where the runtime completed.
+    def line_pts(m):
+        xs, ys = [], []
+        for i, b in enumerate(batches):
+            v = m.get(b, 0)
+            if v and v > 0:
+                xs.append(x[i]); ys.append(v)
+        return xs, ys
+
+    dxs, dys = line_pts(dr_e2e_m)
+    pxs, pys = line_pts(pv_e2e_m)
+    axR.plot(dxs, dys, color="#123", marker="o", markersize=5, linewidth=1.6,
+             label="Drava latency", zorder=4)
+    axR.plot(pxs, pys, color="#123", marker="s", markersize=5, linewidth=1.6,
+             linestyle="--", label="PvaPy latency", zorder=4)
+    axR.set_ylabel("End-to-end latency (s)")
+    axR.set_ylim(0, max((dys + pys) or [1]) * 1.35)
+    for sp in ("top",):
+        axR.spines[sp].set_visible(False)
+
+    # Mark batches where PvaPy failed to complete any run.
+    for i, b in enumerate(batches):
+        if not pv_e2e_m.get(b, 0):
+            axL.text(x[i] + w / 2, axL.get_ylim()[1] * 0.04, "\u2717",
+                     ha="center", va="bottom", color="#6E3D10", fontsize=13,
+                     fontweight="bold")
+
+    hL, lL = axL.get_legend_handles_labels()
+    hR, lR = axR.get_legend_handles_labels()
+    axL.legend(hL + hR, lL + lR, frameon=False, loc="upper center",
+               ncol=2, fontsize=8.5, columnspacing=1.0, handlelength=1.5)
 
     out_base = Path(args.out).resolve() if args.out else OUT_BASE
     out_base.parent.mkdir(parents=True, exist_ok=True)
