@@ -28,49 +28,55 @@ python experiments/sc5_bare_runtime_ceiling.py \
 - Figure: [figs/paper_figs/bare_runtime_ceiling.pdf](figs/paper_figs/bare_runtime_ceiling.pdf)
 
 
-### Baseline comparison with PvaPy
-- Logs: [examples/ptychonn/debug_logs/pvapy_logs.md](examples/ptychonn/debug_logs/pvapy_logs.md)
-- App code: [examples/ptychonn/pvapy_baseline/benchmark.py](examples/ptychonn/pvapy_baseline/benchmark.py)
-- Example benchmark from [examples/ptychonn/pvapy_baseline/](examples/ptychonn/pvapy_baseline/) folder:
-- Chart generation: [experiments/figures/pvapy_drava_comparison](experiments/figures/pvapy_drava_comparison)
-- Example benchmark
-```shell
-python benchmark.py \
-  --batches 128,256,512 \
-  --runs 1 \
-  --num-frames 3600 \
-  --rate-hz 1000 \
-  --monitor-queue 1024 \
-  --start-settle-s 2
-```
-- Figure: [figs/paper_figs/pvapy_drava_ptychonn.pdf](figs/paper_figs/pvapy_drava_ptychonn.pdf)
+### Baseline comparison with PvaPy (single- and two-stage)
 
-### Two-stage baseline comparison with PvaPy
-- App code: [examples/ptychonn/pvapy_baseline/consumer_stage2.py](examples/ptychonn/pvapy_baseline/consumer_stage2.py) (stage 2: stitching), reuses [consumer.py](examples/ptychonn/pvapy_baseline/consumer.py) (stage 1: inference)
-- Benchmark: [examples/ptychonn/pvapy_baseline/benchmark_two_stage.py](examples/ptychonn/pvapy_baseline/benchmark_two_stage.py)
-- Mirrors Drava's two-stage pipeline in [examples/ptychonn/benchmark_two_stages.py](examples/ptychonn/benchmark_two_stages.py) for end-to-end latency and per-stage throughput comparison.
-- Finding: the pvaPy single-record `PvaServer` path drops stage-1 prediction
-  messages (and often the EOS) at the stage1->stage2 boundary even at 1 kHz, so
-  stage 2 cannot finalize the stitch (14/15 runs incomplete at 1 kHz). Drava
-  completes the full two-stage pipeline loss-free. Curated data:
-  [experiments/figures/pvapy_drava_comparison/pvapy_two_stage_summary.csv](experiments/figures/pvapy_drava_comparison/pvapy_two_stage_summary.csv)
-  and `drava_two_stage_summary.csv`; plot:
-  [experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_two_stage.py](experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_two_stage.py)
-- pvaPy benchmark
+Throughput vs. publisher rate, PvaPy vs. Drava, for both the single-stage
+PtychoNN inference stream and the full two-stage pipeline (inference + stitch).
+Combined into one figure with two panels.
+
+- pvaPy code: [examples/ptychonn/pvapy_baseline/](examples/ptychonn/pvapy_baseline/)
+  (`benchmark.py` single-stage; `benchmark_two_stage.py` + `consumer_stage2.py` two-stage)
+- Drava two-stage: [examples/ptychonn/benchmark_two_stages.py](examples/ptychonn/benchmark_two_stages.py)
+- Curated data: `experiments/figures/pvapy_drava_comparison/`
+  (`pvapy_drava_ptychonn.csv` single-stage; `pvapy_two_stage_summary.csv` and
+  `drava_two_stage_summary.csv` two-stage)
+- Combined plot: [experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_combined.py](experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_combined.py)
+- Figure: [figs/paper_figs/pvapy_drava_combined.pdf](figs/paper_figs/pvapy_drava_combined.pdf)
+- Findings: PvaPy's single overwrite-record path is loss-free only up to 2 kHz in
+  both configs; above that it drops frames (single stage) or drops stage-boundary
+  messages so the stitch never completes (two stage). Drava is loss-free and
+  scales through the unpaced ("max") rate in both.
+
+Single-stage sweep (pvaPy + Drava written to one CSV via the harness):
 ```shell
 cd examples/ptychonn/pvapy_baseline
 for R in 1000 2000 2500 3000 0; do
-  python benchmark_two_stage.py --batches 128,256,512 --runs 5 \
+  python benchmark.py --batches 128,256,512 --runs 5 \
     --num-frames 3600 --rate-hz $R --monitor-queue 1024 --start-settle-s 2
 done
 ```
-- Drava benchmark
+Note: the single-stage metric (`stage_total_fps`) is measured inside the consumer
+(first-receive to last-callback) and is independent of harness/publisher startup,
+so it did not need re-running after the two-stage end-to-end timing fix.
+
+Two-stage sweep, fixed batch 128 (the figure panel (b) sweep):
 ```shell
+# pvaPy
+cd examples/ptychonn/pvapy_baseline
+for R in 1000 2000 2500 3000 0; do
+  python benchmark_two_stage.py --batches 128 --runs 5 \
+    --num-frames 3600 --rate-hz $R --monitor-queue 1024 --start-settle-s 2
+done
+# Drava
 cd examples/ptychonn
 for R in 1000 2000 2500 3000 0; do
-  python benchmark_two_stages.py --batches 128,256,512 --runs 5 \
+  python benchmark_two_stages.py --batches 128 --runs 5 \
     --num-frames 3600 --rate-hz $R --threads 4 --timeout-ms 200 --stage-config pipeline.yaml
 done
+```
+Regenerate the combined figure:
+```shell
+python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_combined.py --batch 128
 ```
 
 ### Manual configurations throughput-latency trade-off

@@ -110,8 +110,11 @@ Sections 7.1 (TomoGAN energy) and 7.2 (two-stage PvaPy) below.
 
 ## 6. Evaluation and expected results
 
-- PvaPy vs Drava: Drava is loss-free at publisher rates where PvaPy drops
-  frames, and reaches up to ~2.36x higher unpaced throughput.
+- PvaPy vs Drava (single stage): Drava is loss-free at publisher rates where
+  PvaPy drops frames, and reaches up to ~2.36x higher unpaced throughput.
+- PvaPy vs Drava (two stage): both loss-free only up to 2 kHz for PvaPy; Drava
+  sustains and scales the full pipeline through the unpaced rate while PvaPy
+  fails to complete the stitch at >= 2.5 kHz.
 - Runtime message-rate ceiling: ~31k frames/s once callback batches are large.
 - Observability sweep: end-to-end optimum differs from the GPU-inference optimum
   (up to ~2.44x throughput improvement from batching-aware tuning).
@@ -172,40 +175,58 @@ python experiments/figures/tomogan_energy/plot_tomogan_power_trace.py \
   examples/tomogan/bench_logs/<timestamp>/power_trace_b16_r1.csv
 ```
 
-### 7.2 Two-stage PvaPy vs Drava (PtychoNN), 10 runs
+### 7.2 PvaPy vs Drava throughput vs publisher rate (single + two stage)
 
-Runs the full PtychoNN pipeline (stage 1 GPU inference + stage 2 stitching) on
-both runtimes with identical science, for end-to-end latency and per-stage
-throughput.
+Throughput vs. publisher rate for both the single-stage inference stream and the
+full two-stage PtychoNN pipeline (stage 1 GPU inference + stage 2 stitching),
+identical science across runtimes; combined into one two-panel figure
+(`pvapy_drava_combined.pdf`). Rates: 1k, 2k, 2.5k, 3k, and unpaced ("max",
+`--rate-hz 0`). Five runs per point.
 
-PvaPy side (`examples/ptychonn/pvapy_baseline`, venv active):
+Single-stage sweep (`examples/ptychonn/pvapy_baseline`, venv active). The
+single-stage throughput metric is measured inside the consumer (first-receive to
+last-callback), so it is independent of publisher/harness startup:
 
 ```shell
 cd examples/ptychonn/pvapy_baseline
-# Single-stage ingest curve (paced), loss point appears near 3 kHz:
-for R in 100 200 1000 2000 2500 3000; do
-  python benchmark.py --batches 128,256,512 --runs 10 --num-frames 3600 \
+for R in 1000 2000 2500 3000 0; do
+  python benchmark.py --batches 128,256,512 --runs 5 --num-frames 3600 \
     --rate-hz $R --monitor-queue 1024 --start-settle-s 2
 done
-# Two-stage pipeline:
-python benchmark_two_stage.py --batches 128,256,512 --runs 10 \
-  --num-frames 3600 --rate-hz 1000 --monitor-queue 1024 --start-settle-s 2
 ```
 
-Drava side (`examples/ptychonn`, NATS running), matching sweep + unpaced:
+Two-stage sweep, fixed inference batch 128 (figure panel (b)). Drava two-stage
+end-to-end latency is measured from the first frame actually sent (harness
+"First frame sent" marker), matching PvaPy's release-at-first-frame timing:
 
 ```shell
-cd examples/ptychonn
-for R in 100 200 1000 2000 2500 3000 0; do
-  python benchmark.py --batches 128,256,512 --runs 10 --num-frames 3600 \
+# PvaPy (pvapy_baseline)
+for R in 1000 2000 2500 3000 0; do
+  python benchmark_two_stage.py --batches 128 --runs 5 --num-frames 3600 \
+    --rate-hz $R --monitor-queue 1024 --start-settle-s 2
+done
+# Drava (examples/ptychonn, NATS auto-started by the harness)
+cd ../ && \
+for R in 1000 2000 2500 3000 0; do
+  python benchmark_two_stages.py --batches 128 --runs 5 --num-frames 3600 \
     --rate-hz $R --threads 4 --timeout-ms 200 --stage-config pipeline.yaml
 done
 ```
 
-Aggregate both `summary.csv` files by `batch`/`rate`, take mean/std of
-`stage1_total_fps`, `stage2_total_fps`, and `pipeline_e2e_s`, and plot with
-error bars. Chart script referenced in `experiments.md` (Baseline comparison
-with PvaPy).
+Copy each run's `summary.csv` into the curated CSVs under
+`experiments/figures/pvapy_drava_comparison/` (`pvapy_drava_ptychonn.csv`,
+`pvapy_two_stage_summary.csv`, `drava_two_stage_summary.csv`), then regenerate:
+
+```shell
+python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_combined.py --batch 128
+```
+
+Notes:
+- A curve stops at the highest rate a runtime sustains loss-free; PvaPy is
+  loss-free only up to 2 kHz in both configs, Drava scales to "max".
+- The Drava two-stage benchmark intermittently hits a native XKRT
+  `free(): invalid size` abort at stage init; `--max-retries` (default 3)
+  relaunches the affected run, so sweeps complete.
 
 ## 8. Notes / caveats
 
@@ -220,8 +241,7 @@ with PvaPy).
 | Paper item | Driver | Plot | Output figure |
 |---|---|---|---|
 | Runtime ceiling | `experiments/sc5_bare_runtime_ceiling.py` | `experiments/figures/sc5_bare_runtime_ceiling` | `bare_runtime_ceiling.pdf` |
-| PvaPy vs Drava (1-stage) | `pvapy_baseline/benchmark.py` + `ptychonn/benchmark.py` | `experiments/figures/pvapy_drava_comparison` | `pvapy_drava_ptychonn.pdf` |
-| PvaPy vs Drava (2-stage) | `pvapy_baseline/benchmark_two_stage.py` | (aggregate summary.csv) | (revision) |
+| PvaPy vs Drava (single + two stage) | `pvapy_baseline/benchmark.py`, `pvapy_baseline/benchmark_two_stage.py`, `ptychonn/benchmark_two_stages.py` | `pvapy_drava_comparison/plot_pvapy_drava_combined.py` | `pvapy_drava_combined.pdf` |
 | Manual config sweep | `ptychonn/visualize_manual_config.py` | same | `throughput_vs_latency.pdf` |
 | Observability sweep | `experiments/exp1_runtime_overhead.py` | `experiments/visualize_exp1_runtime_observability.py` | `exp1_runtime_observability.pdf` |
 | Agentic search | `ptychonn/tune_two_stage_ytopt.py` | `ptychonn/visualize_agentic_search.py` | `convergence.pdf` |
