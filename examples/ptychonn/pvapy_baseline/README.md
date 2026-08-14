@@ -162,6 +162,48 @@ hanging. This is the two-stage analogue of the single-stage overrun: Drava
 completes the full two-stage pipeline loss-free at rates where the pvaPy
 single-record path cannot.
 
+### Two-Stage via pvaPy HPC Distributor (multiple consumers)
+
+The single-record monitor above is the low-level path; pvaPy's *supported* way to
+scale a high-rate stream is the HPC consumer framework with the pvAccess data
+distributor. `pvapy-hpc-consumer` spawns N consumer processes that the
+`pydistributor` plugin load-balances (each update to exactly one consumer), each
+with a large receiver queue to buffer bursts. This is the "spawn more consumers
+until it keeps up" approach.
+
+- Stage-2 processor: [pvapy_hpc_stage2_processor.py](pvapy_hpc_stage2_processor.py)
+  (a `pvapy.hpc.userDataProcessor.UserDataProcessor` subclass that accumulates its
+  partition of predictions and writes a per-consumer coverage JSON).
+- Sweep driver: [benchmark_hpc_two_stage.py](benchmark_hpc_two_stage.py) — starts N
+  distributor consumers, runs stage 1 + publisher, then unions per-consumer
+  coverage to check whether all frames were received loss-free.
+
+```shell
+cd examples/ptychonn/pvapy_baseline
+source venv/bin/activate
+python benchmark_hpc_two_stage.py \
+  --n-consumers 1,2,4,8 \
+  --rate-hz 1000 \
+  --num-frames 3600 \
+  --infer-batch 256 --publish-chunk 64 \
+  --receiver-queue-size 20000 \
+  --runs 3
+```
+
+`summary.csv` (under `bench_logs_hpc_two_stage/<timestamp>/`) reports, per
+`(n_consumers, rate)`: `union_frames` vs `expected_frames`, `complete` (1 if the N
+consumers together received every frame), per-consumer frame counts (load
+balance), and the stage-2 wall time. The point of the sweep is to find the
+smallest N at which pvaPy completes loss-free---evidence that pvaPy *can* handle
+the stream, but only by manually provisioning and tuning the number of
+distributor consumers, whereas Drava needs a single process and no such tuning.
+
+Preflight (confirm the HPC framework is installed):
+```shell
+which pvapy-hpc-consumer
+python -c "import pvapy.hpc.userDataProcessor; print('hpc ok')"
+```
+
 ### Repeated Runs (statistics)
 
 Both benchmarks accept `--runs N`, which repeats each batch configuration `N`
