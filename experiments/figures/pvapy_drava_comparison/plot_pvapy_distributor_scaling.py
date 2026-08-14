@@ -70,11 +70,11 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(3.6, 3.0), constrained_layout=True)
     x = list(range(len(ns)))
     ax.bar(x, wall_mean, yerr=wall_std, width=0.6, color=COLOR_BAR,
-           capsize=4, label="Stage-2 wall time")
+           capsize=4, label="Per-run wall time")
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in ns])
     ax.set_xlabel("Number of stage-2 consumers $N$")
-    ax.set_ylabel("Stage-2 wall time (s)")
+    ax.set_ylabel("Per-run wall time (s)")
     ax.set_ylim(0, max(wall_mean) * 1.25)
     ax.spines["top"].set_visible(False)
     ax.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
