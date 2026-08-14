@@ -123,7 +123,7 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
         "-pc", "PtychoNNStitchProcessor",
         "-pa", processor_args,
         "-rt", str(args.consumer_runtime_s),
-        "-rp", "5",
+        "-dc",  # disable curses screen (we capture stdout via a pipe, no TTY)
     ]
     consumer_proc = subprocess.Popen(consumer_cmd, cwd=root, env=env,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
