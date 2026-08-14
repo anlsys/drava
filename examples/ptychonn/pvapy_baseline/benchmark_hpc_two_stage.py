@@ -49,6 +49,13 @@ PUB_DONE_RE = re.compile(
 STAGE1_METRICS_RE = re.compile(
     r"rx_items=(?P<rx_items>\d+).*?expected_frames=(?P<expected>\d+)"
     r".*?missed_frames=(?P<missed>\d+)")
+# Harness-side marks for a fair end-to-end time that matches Drava's
+# benchmark_two_stages.py definition: first frame actually sent -> last stage-2
+# consumer finalize line. This excludes consumer setup and drain-poll idle.
+PUB_FIRST_FRAME_STR = "First frame sent at:"
+# Printed by the processor on every processed object; the harness records the
+# max time across all consumers = when stage 2 finished receiving data.
+CONSUMER_OBJECT_RE = re.compile(r"\[hpc-stage2\] object processed")
 
 
 def parse_args():
@@ -140,7 +147,17 @@ def run_one(args, root, run_dir, n_consumers, run_idx, rate_hz):
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1)
     import threading
-    ct = threading.Thread(target=stream_to_log, args=(consumer_proc, consumer_log), daemon=True)
+    # Record the harness-clock time of the LAST consumer finalize line so the
+    # end-to-end span ends when stage 2 actually finishes stitching.
+    marks = {"pub_first_frame": None, "stage2_final": None}
+    def on_consumer(line):
+        # Every processed-object marker advances the end time; the last one across
+        # all consumers is when stage 2 finished receiving all data.
+        if CONSUMER_OBJECT_RE.search(line):
+            marks["stage2_final"] = time.monotonic()
+    ct = threading.Thread(target=stream_to_log,
+                          args=(consumer_proc, consumer_log, None, None, on_consumer),
+                          daemon=True)
     ct.start()
     time.sleep(args.start_settle_s)  # let consumers subscribe to the distributor
 
@@ -175,6 +192,8 @@ def run_one(args, root, run_dir, n_consumers, run_idx, rate_hz):
     # --- publisher --------------------------------------------------------
     pub_done = {}
     def on_pub(line):
+        if marks["pub_first_frame"] is None and PUB_FIRST_FRAME_STR in line:
+            marks["pub_first_frame"] = time.monotonic()
         m = PUB_DONE_RE.search(line)
         if m:
             pub_done.update(m.groupdict())
@@ -236,6 +255,14 @@ def run_one(args, root, run_dir, n_consumers, run_idx, rate_hz):
     s1_rx = int(stage1_metrics.get("rx_items", 0)) if stage1_metrics else None
     s1_published = s1_rx  # stage 1 publishes exactly what it infers
 
+    # Fair end-to-end time: first frame sent -> last consumer finalize. Matches
+    # Drava's benchmark_two_stages.py (pipeline_e2e_s). Only meaningful when the
+    # run completed and both marks were captured.
+    e2e = None
+    if marks["pub_first_frame"] is not None and marks["stage2_final"] is not None:
+        e2e = round(marks["stage2_final"] - marks["pub_first_frame"], 3)
+    pipeline_fps = round(expected / e2e, 1) if (e2e and complete) else None
+
     row = {
         "n_consumers": n_consumers,
         "run": run_idx,
@@ -248,6 +275,8 @@ def run_one(args, root, run_dir, n_consumers, run_idx, rate_hz):
         "expected_frames": expected,
         "complete": int(complete),
         "stage2_matches_stage1": int(s1_published is not None and len(union) >= s1_published),
+        "pipeline_e2e_s": e2e,
+        "pipeline_fps": pipeline_fps,
         "stage2_wall_s": round(t_stage2, 3),
         "per_consumer_frames": ";".join(str(per_consumer.get(c, 0)) for c in sorted(per_consumer)),
     }
@@ -277,6 +306,7 @@ def main():
                 print(f"  done: stage1_rx={row['stage1_rx_frames']} "
                       f"union={row['union_frames']}/{row['expected_frames']} "
                       f"complete={row['complete']} s2==s1={row['stage2_matches_stage1']} "
+                      f"e2e={row['pipeline_e2e_s']}s fps={row['pipeline_fps']} "
                       f"per_consumer=[{row['per_consumer_frames']}]", flush=True)
 
     if rows:

@@ -131,6 +131,10 @@ class PtychoNNStitchProcessor(UserDataProcessor):
                 if self.save_arrays:
                     self.amp[idx] = item["pred_amp"][k]
                     self.phi[idx] = item["pred_phi"][k]
+        # Harness-visible marker: lets the benchmark record the wall-clock time of
+        # the LAST object any consumer processed (a fair end-to-end endpoint that
+        # does not depend on teardown/finalize timing). Printed per message.
+        print(f"[hpc-stage2] object processed rx_frames={self.rx_frames}", flush=True)
         return pvObject
 
     def _finalize(self):
