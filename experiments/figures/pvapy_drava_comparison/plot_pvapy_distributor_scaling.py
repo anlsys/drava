@@ -87,15 +87,17 @@ def main() -> None:
     fig, ax = plt.subplots(figsize=(3.6, 3.0), constrained_layout=True)
     x = list(range(len(ns)))
     ax.bar(x, fps_mean, yerr=fps_std, width=0.6, color=COLOR_BAR,
-           capsize=4, label="PvaPy distributor")
+           error_kw={"elinewidth": 1.0, "capsize": 2, "capthick": 1.0,
+                     "ecolor": "#3a3a3a"},
+           label="PvaPy consumers")
 
     if drava_ref is not None:
         ax.axhline(drava_ref, color=COLOR_DRAVA, linestyle="--", linewidth=2.2,
-                   label=f"Drava (1 process)")
+                   label="Drava (1 process)")
 
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in ns])
-    ax.set_xlabel("Number of stage-2 consumers $N$")
+    ax.set_xlabel("Number of PvaPy stage-2 consumers $N$")
     ax.set_ylabel("End-to-end throughput (frames/s)")
     ymax = max(fps_mean + ([drava_ref] if drava_ref else []))
     ax.set_ylim(0, ymax * 1.28)
