@@ -41,10 +41,13 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
-PTYCHONN_DIR = HERE.parent
-if str(PTYCHONN_DIR) not in sys.path:
-    sys.path.insert(0, str(PTYCHONN_DIR))
+HERE = Path(__file__).resolve().parent   # pvapy_baseline/ (holds pva_records.py)
+PTYCHONN_DIR = HERE.parent               # ptychonn/ (holds pipeline_schema.py)
+# pvapy-hpc-consumer loads this file via importlib from its own CWD, so neither
+# directory is guaranteed to be on sys.path; add both.
+for _p in (str(HERE), str(PTYCHONN_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from pipeline_schema import decode_stage1_prediction  # noqa: E402
 from pva_records import payload_bytes_from_pv, pv_field  # noqa: E402
