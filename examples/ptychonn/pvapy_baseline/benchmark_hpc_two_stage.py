@@ -54,7 +54,8 @@ STAGE1_METRICS_RE = re.compile(
 def parse_args():
     p = argparse.ArgumentParser(description="pvaPy HPC distributor two-stage sweep.")
     p.add_argument("--n-consumers", default="1,2,4,8", help="Comma-separated consumer counts to sweep.")
-    p.add_argument("--rate-hz", type=float, default=1000.0)
+    p.add_argument("--rate-hz", default="1000",
+                   help="Comma-separated publisher rate(s) in Hz to sweep, e.g. 1000,2000,2500,3000.")
     p.add_argument("--num-frames", type=int, default=3600)
     p.add_argument("--runs", type=int, default=1)
     p.add_argument("--frame-channel", default="ptychonn:frames")
@@ -104,8 +105,8 @@ def terminate(proc, grace=3.0):
             proc.kill()
 
 
-def run_one(args, root, run_dir, n_consumers, run_idx):
-    tag = f"n{n_consumers}_r{run_idx}"
+def run_one(args, root, run_dir, n_consumers, run_idx, rate_hz):
+    tag = f"n{n_consumers}_rate{int(rate_hz)}_r{run_idx}"
     hpc_out = run_dir / f"hpc_out_{tag}"
     hpc_out.mkdir(parents=True, exist_ok=True)
     stage1_log = run_dir / f"stage1_{tag}.log"
@@ -182,7 +183,7 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
         "--channel", args.frame_channel,
         "--data-dir", args.data_dir,
         "--num-frames", str(args.num_frames),
-        "--rate-hz", str(args.rate_hz),
+        "--rate-hz", str(rate_hz),
         "--control-file", str(control_file),
     ]
     pub_proc = subprocess.Popen(pub_cmd, cwd=root, env=env,
@@ -238,7 +239,7 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
     row = {
         "n_consumers": n_consumers,
         "run": run_idx,
-        "rate_hz": int(args.rate_hz),
+        "rate_hz": int(rate_hz),
         "num_frames": args.num_frames,
         "publisher_time_s": float(pub_done.get("time", 0.0)) if pub_done else None,
         "stage1_rx_frames": s1_rx,
@@ -256,24 +257,27 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
 def main():
     args = parse_args()
     counts = [int(x) for x in args.n_consumers.split(",") if x.strip()]
+    rates = [float(x) for x in str(args.rate_hz).split(",") if x.strip()]
     root = Path(__file__).resolve().parent
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = root / args.out_dir / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    for nc in counts:
-        for r in range(1, args.runs + 1):
-            print(f"Running n_consumers={nc} run={r} rate={args.rate_hz} ...", flush=True)
-            try:
-                row = run_one(args, root, run_dir, nc, r)
-            except Exception as exc:
-                print(f"  [error] {exc}", flush=True)
-                continue
-            rows.append(row)
-            print(f"  done: union={row['union_frames']}/{row['expected_frames']} "
-                  f"complete={row['complete']} stage2_wall={row['stage2_wall_s']}s "
-                  f"per_consumer=[{row['per_consumer_frames']}]", flush=True)
+    for rate in rates:
+        for nc in counts:
+            for r in range(1, args.runs + 1):
+                print(f"Running rate={int(rate)} n_consumers={nc} run={r} ...", flush=True)
+                try:
+                    row = run_one(args, root, run_dir, nc, r, rate)
+                except Exception as exc:
+                    print(f"  [error] {exc}", flush=True)
+                    continue
+                rows.append(row)
+                print(f"  done: stage1_rx={row['stage1_rx_frames']} "
+                      f"union={row['union_frames']}/{row['expected_frames']} "
+                      f"complete={row['complete']} s2==s1={row['stage2_matches_stage1']} "
+                      f"per_consumer=[{row['per_consumer_frames']}]", flush=True)
 
     if rows:
         out_csv = run_dir / "summary.csv"

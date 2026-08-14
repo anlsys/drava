@@ -183,12 +183,21 @@ cd examples/ptychonn/pvapy_baseline
 source venv/bin/activate
 python benchmark_hpc_two_stage.py \
   --n-consumers 1,2,4,8 \
-  --rate-hz 1000 \
+  --rate-hz 1000,2000,2500,3000 \
   --num-frames 3600 \
   --infer-batch 256 --publish-chunk 64 \
   --receiver-queue-size 20000 \
   --runs 3
 ```
+
+`--rate-hz` and `--n-consumers` both accept comma-separated lists and are swept
+as a grid. Stage 1 runs with a large client monitor queue
+(`--stage1-monitor-queue`, default 200000) so it buffers the full frame burst and
+does not lose input to the publisher's overwrite record; this isolates the
+`stage1 -> stage2` boundary that the distributor load-balances. The
+`stage2_matches_stage1` column is 1 when the N consumers collectively received
+every prediction stage 1 published (the distributor was loss-free); `complete` is
+1 when the union also covers all `--num-frames`.
 
 `summary.csv` (under `bench_logs_hpc_two_stage/<timestamp>/`) reports, per
 `(n_consumers, rate)`: `union_frames` vs `expected_frames`, `complete` (1 if the N
