@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-r"""PvaPy HPC distributor: stage-2 wall time and completeness vs consumer count.
+r"""PvaPy HPC distributor scaling: end-to-end throughput vs consumer count.
 
 The point of this figure: on PvaPy's supported multi-consumer path (the HPC data
-distributor), adding stage-2 consumers does NOT improve completeness---the run is
-already loss-free at N=1 because the GPU stage-1 throttles the stream---while it
-monotonically increases end-to-end (stage-2) wall time. So over-provisioning
-consumers only costs latency, and the operator must guess the right N. \drava{}
-needs a single process with no such tuning.
+distributor), adding stage-2 consumers does NOT help. The stream is already
+delivered loss-free at N=1 because GPU stage-1 throttles it, so splitting the
+cheap CPU stitch across more processes only adds distributor and IPC overhead.
+End-to-end throughput therefore drops monotonically with N (about 455 fps at N=1
+down to 82 fps at N=8), and even the best PvaPy point stays well below Drava's
+single-process two-stage pipeline (dashed reference).
 
-Left axis:  mean stage-2 wall time vs N (bars, error bars over rate x run).
-Right axis: fraction of runs that completed loss-free vs N (flat line ~1).
+End-to-end time is measured identically to Drava's benchmark_two_stages.py:
+first frame sent -> last stage-2 object received. Bars are mean over rate x run.
 
-Input: pvapy_hpc_distributor_sweep.csv in this directory.
+Inputs (curated CSVs in this directory):
+  - pvapy_hpc_distributor_sweep.csv   (this sweep, has pipeline_fps)
+  - drava_two_stage_summary.csv       (Drava two-stage e2e, for the reference)
 """
 from __future__ import annotations
 
@@ -28,15 +31,35 @@ import matplotlib.pyplot as plt
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 SWEEP_CSV = HERE / "pvapy_hpc_distributor_sweep.csv"
+DRAVA_TS_CSV = HERE / "drava_two_stage_summary.csv"
 FIGS_DIR = REPO_ROOT / "figs" / "paper_figs"
+NUM_FRAMES = 3600
 
 COLOR_BAR = "#C1662D"   # PvaPy orange (matches combined figure)
-COLOR_LINE = "#27667B"  # Drava teal, reused for the completeness overlay
+COLOR_DRAVA = "#27667B"  # Drava teal
 
 
-def read_rows():
-    with open(SWEEP_CSV, "r", encoding="utf-8", newline="") as f:
+def read_rows(path):
+    with open(path, "r", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def drava_reference_fps():
+    """Mean Drava two-stage e2e throughput over paced rates (batch 128)."""
+    vals = []
+    for r in read_rows(DRAVA_TS_CSV):
+        try:
+            if int(r["batch"]) != 128:
+                continue
+            rate = int(float(r["rate_hz"]))
+            if rate == 0:  # exclude unpaced "max" so the ref matches paced sweep
+                continue
+            e2e = float(r["pipeline_e2e_s"])
+            if e2e > 0:
+                vals.append(NUM_FRAMES / e2e)
+        except (KeyError, ValueError):
+            continue
+    return mean(vals) if vals else None
 
 
 def main() -> None:
@@ -44,22 +67,16 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    rows = read_rows()
-    # A run is "crashed" if it produced no consumer output (union==0); exclude
-    # those from wall-time stats but count them against completeness.
-    walls = defaultdict(list)       # N -> [stage2_wall_s] for runs that produced output
-    complete_flags = defaultdict(list)  # N -> [0/1] over ALL runs
+    rows = read_rows(SWEEP_CSV)
+    fps = defaultdict(list)  # N -> [pipeline_fps] over complete runs
     for r in rows:
-        n = int(r["n_consumers"])
-        crashed = (r["union_frames"] == "0")
-        complete_flags[n].append(int(r["complete"]))
-        if not crashed:
-            walls[n].append(float(r["stage2_wall_s"]))
+        if r["pipeline_fps"]:
+            fps[int(r["n_consumers"])].append(float(r["pipeline_fps"]))
 
-    ns = sorted(walls)
-    wall_mean = [mean(walls[n]) for n in ns]
-    wall_std = [pstdev(walls[n]) if len(walls[n]) > 1 else 0.0 for n in ns]
-    complete_frac = [mean(complete_flags[n]) for n in ns]
+    ns = sorted(fps)
+    fps_mean = [mean(fps[n]) for n in ns]
+    fps_std = [pstdev(fps[n]) if len(fps[n]) > 1 else 0.0 for n in ns]
+    drava_ref = drava_reference_fps()
 
     plt.rcParams.update({
         "font.size": 11, "axes.labelsize": 11, "axes.titlesize": 11,
@@ -69,28 +86,23 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(3.6, 3.0), constrained_layout=True)
     x = list(range(len(ns)))
-    ax.bar(x, wall_mean, yerr=wall_std, width=0.6, color=COLOR_BAR,
-           capsize=4, label="Per-run wall time")
+    ax.bar(x, fps_mean, yerr=fps_std, width=0.6, color=COLOR_BAR,
+           capsize=4, label="PvaPy distributor")
+
+    if drava_ref is not None:
+        ax.axhline(drava_ref, color=COLOR_DRAVA, linestyle="--", linewidth=2.2,
+                   label=f"Drava (1 process)")
+
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in ns])
     ax.set_xlabel("Number of stage-2 consumers $N$")
-    ax.set_ylabel("Per-run wall time (s)")
-    ax.set_ylim(0, max(wall_mean) * 1.25)
+    ax.set_ylabel("End-to-end throughput (frames/s)")
+    ymax = max(fps_mean + ([drava_ref] if drava_ref else []))
+    ax.set_ylim(0, ymax * 1.28)
     ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     ax.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
-
-    ax2 = ax.twinx()
-    ax2.plot(x, [c * 100 for c in complete_frac], color=COLOR_LINE,
-             marker="o", linewidth=2.2, markersize=6, label="Loss-free runs")
-    ax2.set_ylabel("Loss-free runs (%)", color=COLOR_LINE)
-    ax2.set_ylim(0, 105)
-    ax2.tick_params(axis="y", labelcolor=COLOR_LINE)
-    ax2.spines["top"].set_visible(False)
-
-    # combined legend
-    h1, l1 = ax.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1 + h2, l1 + l2, loc="upper left", frameon=False)
+    ax.legend(loc="center right", frameon=False)
 
     out_base = Path(args.out).resolve() if args.out else FIGS_DIR / "pvapy_distributor_scaling"
     out_base.parent.mkdir(parents=True, exist_ok=True)
