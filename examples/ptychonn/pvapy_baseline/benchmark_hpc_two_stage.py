@@ -46,6 +46,9 @@ PROCESSOR_FILE = HERE / "pvapy_hpc_stage2_processor.py"
 
 PUB_DONE_RE = re.compile(
     r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s")
+STAGE1_METRICS_RE = re.compile(
+    r"rx_items=(?P<rx_items>\d+).*?expected_frames=(?P<expected>\d+)"
+    r".*?missed_frames=(?P<missed>\d+)")
 
 
 def parse_args():
@@ -59,6 +62,11 @@ def parse_args():
     p.add_argument("--data-dir", default="../PtychoNN_data_partial")
     p.add_argument("--infer-batch", type=int, default=256)
     p.add_argument("--publish-chunk", type=int, default=64)
+    p.add_argument("--stage1-monitor-queue", type=int, default=200000,
+                   help="Client monitor queue for stage 1 (--monitor-queue). Large enough "
+                        "to buffer all input frames + EOS in order so stage 1 does NOT lose "
+                        "input to publisher overwrite; this isolates the stage1->stage2 "
+                        "boundary the distributor is meant to fix.")
     p.add_argument("--receiver-queue-size", type=int, default=20000,
                    help="Per-consumer receiver queue (-rqs); large enough to buffer bursts.")
     p.add_argument("--distributor-group", default="ptychonn")
@@ -66,6 +74,8 @@ def parse_args():
                    help="Sequential updates per consumer before moving to next (-du).")
     p.add_argument("--oid-field", default="uniqueId")
     p.add_argument("--consumer-runtime-s", type=float, default=120.0)
+    p.add_argument("--drain-timeout-s", type=float, default=30.0,
+                   help="Max seconds to wait after stage 1 EOS for consumers to write results.")
     p.add_argument("--start-settle-s", type=float, default=3.0)
     p.add_argument("--python", default=sys.executable)
     p.add_argument("--out-dir", default="bench_logs_hpc_two_stage")
@@ -141,14 +151,20 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
         "--data-dir", args.data_dir,
         "--infer-batch", str(args.infer_batch),
         "--publish-chunk", str(args.publish_chunk),
+        "--monitor-queue", str(args.stage1_monitor_queue),
         "--timeout-s", str(args.consumer_runtime_s),
     ]
     s1_ready = threading.Event()
+    stage1_metrics = {}
+    def on_stage1(line):
+        m = STAGE1_METRICS_RE.search(line)
+        if m:
+            stage1_metrics.update(m.groupdict())
     stage1_proc = subprocess.Popen(stage1_cmd, cwd=root, env=env,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, bufsize=1)
     s1t = threading.Thread(target=stream_to_log,
-                           args=(stage1_proc, stage1_log, s1_ready, "consumer ready:"),
+                           args=(stage1_proc, stage1_log, s1_ready, "consumer ready:", on_stage1),
                            daemon=True)
     s1t.start()
     if not s1_ready.wait(120):
@@ -180,13 +196,22 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
     pub_proc.wait(timeout=max(args.consumer_runtime_s, 60))
     pt.join(timeout=5)
 
-    # Give consumers time to drain their receiver queues after publishing ends.
-    drain_deadline = time.time() + 30
+    # Stage 1 buffers all input in its monitor queue; it exits on its own AFTER
+    # it has inferred every frame and forwarded EOS downstream. Wait for that
+    # instead of a blind timeout so we do not kill stage 1 mid-inference.
+    try:
+        stage1_proc.wait(timeout=args.consumer_runtime_s)
+    except subprocess.TimeoutExpired:
+        terminate(stage1_proc)
+
+    # Now that stage 1 has forwarded EOS, give consumers time to drain their
+    # receiver queues and write their per-consumer result files.
+    drain_deadline = time.time() + args.drain_timeout_s
     while time.time() < drain_deadline:
         results = list(glob.glob(str(hpc_out / "hpc_stage2_result_c*.json")))
         if len(results) >= n_consumers:
             break
-        time.sleep(1.0)
+        time.sleep(0.5)
     t_stage2 = time.monotonic() - t_start
 
     terminate(consumer_proc); terminate(stage1_proc)
@@ -205,6 +230,10 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
         union |= idx
     expected = args.num_frames
     complete = (len(union) >= expected)
+    # Stage-1 coverage (publisher->stage1 boundary): how many frames stage 1
+    # actually inferred+published. If < expected, stage 1 itself dropped input.
+    s1_rx = int(stage1_metrics.get("rx_items", 0)) if stage1_metrics else None
+    s1_published = s1_rx  # stage 1 publishes exactly what it infers
 
     row = {
         "n_consumers": n_consumers,
@@ -212,9 +241,12 @@ def run_one(args, root, run_dir, n_consumers, run_idx):
         "rate_hz": int(args.rate_hz),
         "num_frames": args.num_frames,
         "publisher_time_s": float(pub_done.get("time", 0.0)) if pub_done else None,
+        "stage1_rx_frames": s1_rx,
+        "stage1_published_frames": s1_published,
         "union_frames": len(union),
         "expected_frames": expected,
         "complete": int(complete),
+        "stage2_matches_stage1": int(s1_published is not None and len(union) >= s1_published),
         "stage2_wall_s": round(t_stage2, 3),
         "per_consumer_frames": ";".join(str(per_consumer.get(c, 0)) for c in sorted(per_consumer)),
     }
