@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 r"""PvaPy HPC distributor scaling: throughput, latency, and completion vs N.
 
-On PvaPy's supported multi-consumer path (the HPC data distributor), adding
-stage-2 consumers does NOT improve performance:
+On PvaPy's supported multi-consumer path (the HPC data distributor), the
+distributor delivers every frame loss-free at every N (no distributor-caused
+loss in the sweep), so adding consumers does NOT improve delivery. It only hurts
+performance:
   (a) end-to-end throughput drops (about 455 fps at N=1 to 82 fps at N=8),
   (b) end-to-end latency rises (about 8s to 44s),
-  (c) but a single consumer (N=1) is unreliable: it completes only ~50% of runs
-      because the lone consumer often crashes at teardown, so N>=2 is needed for
-      reliable completion.
-So the operator faces a real tension: N=1 is fastest but flaky, N>=2 is reliable
-but slower, and every configuration is worse than Drava's single process
-(dashed reference, ~1200 fps / ~3s, always loss-free).
+because GPU stage-1 sets the pace and extra consumers add coordination overhead.
+Every configuration is worse than Drava's single process (dashed reference,
+~1200 fps / ~3s, always loss-free). Separately, a single consumer is crash-prone
+at teardown, so N>=2 is safer, but that is stated in prose, not this figure.
 
 Throughput/latency measured identically to Drava's benchmark_two_stages.py:
 first frame sent -> last stage-2 object received. Bars are mean over rate x run.
@@ -113,7 +113,6 @@ def main() -> None:
     fps_std = [pstdev(fps[n]) if len(fps[n]) > 1 else 0.0 for n in ns]
     lat_mean = [mean(lat[n]) if lat[n] else 0.0 for n in ns]
     lat_std = [pstdev(lat[n]) if len(lat[n]) > 1 else 0.0 for n in ns]
-    comp_pct = [100.0 * complete[n] / runs[n] for n in ns]
     fps_ref, lat_ref = drava_reference()
 
     plt.rcParams.update({
@@ -122,26 +121,12 @@ def main() -> None:
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    fig, (axa, axb, axc) = plt.subplots(1, 3, figsize=(7.2, 2.5),
-                                        constrained_layout=True)
+    fig, (axa, axb) = plt.subplots(1, 2, figsize=(7.2, 3.0),
+                                   constrained_layout=True)
     bar_panel(axa, ns, fps_mean, fps_std, fps_ref,
-              "Throughput (frames/s)", "(a) throughput", "center right")
+              "End-to-end throughput (frames/s)", "(a) throughput", "center right")
     bar_panel(axb, ns, lat_mean, lat_std, lat_ref,
-              "Latency (s)", "(b) latency", "upper left")
-
-    # (c) completion rate: Drava is always 100% loss-free.
-    x = list(range(len(ns)))
-    axc.bar(x, comp_pct, width=0.62, color=COLOR_PVAPY, label="PvaPy")
-    axc.axhline(100, color=COLOR_DRAVA, linestyle="--", linewidth=2.2, label="Drava")
-    axc.set_xticks(x)
-    axc.set_xticklabels([str(n) for n in ns])
-    axc.set_xlabel("Consumers $N$")
-    axc.set_ylabel("Runs completed (%)")
-    axc.set_title("(c) completion")
-    axc.set_ylim(0, 115)
-    axc.spines["top"].set_visible(False)
-    axc.spines["right"].set_visible(False)
-    axc.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
+              "End-to-end latency (s)", "(b) latency", "upper left")
 
     out_base = Path(args.out).resolve() if args.out else FIGS_DIR / "pvapy_distributor_scaling"
     out_base.parent.mkdir(parents=True, exist_ok=True)
