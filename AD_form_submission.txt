@@ -99,24 +99,71 @@ DATASETS / MODELS
 - TomoGAN: pretrained generator + 16 preprocessed 1024x1024 slice pairs.
 - Throughput runs: deterministic PRNG-generated frames of the real input shapes.
 
-BUILD AND RUN (summary)
------------------------
+BUILD
+-----
 1. Install dependencies (see README).
 2. Build Drava:
      CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Release ..
      make -j
      export PYTHONPATH="$(pwd):$PYTHONPATH"
-3. Run a benchmark driver (starts nats-server, writes summary.csv), then the
-   matching plot script; per-experiment commands are indexed in experiments.md.
 
-EXPECTED RESULTS (validation)
------------------------------
-Each script regenerates the corresponding figure or table in the Evaluation
-section. Small run-to-run variation is expected; results are reported as the mean
-over repeated runs.
+(i) EXPERIMENT WORKFLOW
+-----------------------
+Every experiment follows the same two-step workflow, with exact commands indexed
+in experiments.md:
+1. A benchmark driver runs the pipeline (starting its own nats-server when
+   needed), sweeps the relevant knob, and writes per-run logs and a summary.csv
+   to a timestamped directory.
+2. A plot script consumes that summary.csv (or the committed curated CSV) and
+   emits the PDF/PNG figure.
+
+Experiment -> driver script -> article result:
+- Message-rate ceiling  -> sc5_bare_runtime_ceiling.py         -> Figure (bare runtime ceiling)
+- PvaPy vs Drava        -> pvapy_baseline/, benchmark_two_stages.py -> Figure (pvapy-drava combined)
+- PvaPy HPC distributor -> benchmark_hpc_two_stage.py          -> Figure (distributor scaling)
+- Manual config sweep   -> visualize_manual_config.py          -> Figure (throughput vs latency)
+- Observability sweep   -> exp1_runtime_overhead.py            -> Figure (runtime observability)
+- TomoGAN energy        -> tomogan/benchmark.py                -> Figure (energy efficiency)
+- Agentic search        -> tune_ytopt.py                       -> Figure (ytopt convergence) + Table (top configs)
+
+(ii) EXECUTION TIME ESTIMATE
+----------------------------
+- Preparation (build + deps + model/data download): ~1-2 h, ~5 GB disk.
+- A single benchmark point: seconds to a few minutes.
+- A full single-experiment sweep (all knob values, repeated runs): minutes to ~1 h.
+- Reproducing the entire figure set at high repetition: ~4-8 h on the
+  reference node.
+
+(iii) EXPECTED RESULTS AND EVALUATION
+-------------------------------------
+Each driver/plot pair regenerates the same figure, in the same format, as in the
+article, so verification is a direct visual and numerical comparison:
+- Message-rate ceiling: ~31k frames/s plateau once callback batches are large.
+- PvaPy vs Drava: Drava loss-free while PvaPy drops frames beyond 2 kHz
+  (up to 2.36x single-stage, ~1.5x two-stage throughput).
+- PvaPy HPC distributor: throughput falls and latency rises with consumer count;
+  Drava is ~2.6x faster.
+- Manual + observability sweeps: best end-to-end config differs from the
+  GPU-optimal config (up to 2.44x from batching-aware tuning).
+- TomoGAN energy: energy efficiency (frames/J) scales non-monotonically with
+  batch size.
+- Agentic search: ytopt finds a config 2.24x faster than the best manual one
+  while sampling 0.52% of the space.
+Small run-to-run variation is expected; quantitative results are reported as the
+mean over repeated runs, while qualitative trends and relative comparisons are
+stable across runs.
+
+(iv) RELATION TO RESULTS IN THE ARTICLE
+---------------------------------------
+The expected results are produced in the SAME FORMAT as in the article: each
+experiment's plot script emits the exact figure (and, for the agentic search, the
+exact table) that appears in the Evaluation section, so a reviewer verifies
+reproducibility by comparing the regenerated figure/table against the published
+one. The mapping above lists, for each experiment, the driver that produces it and
+the corresponding article figure/table.
 
 RESOURCES
 ---------
-Disk: ~5 GB (models, datasets, build). Prepare: ~1-2 h (build + deps + data).
-Full sweeps: ~4-8 h. Publicly available: yes (anonymized artifact link).
-Workflow framework: none required (plain Python/bash drivers).
+Disk: ~5 GB (models, datasets, build). Prepare: ~1-2 h. Full figure set: ~4-8 h.
+Publicly available: yes (anonymized artifact link). Workflow framework: none
+required (plain Python/bash drivers).
