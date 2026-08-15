@@ -7,161 +7,103 @@ repository/institution URLs until the paper is de-anonymized.
 ARTIFACT IDENTIFICATION
 ============================================================
 
-(i) ABSTRACT: CONTRIBUTIONS AND ROLE OF THE ARTIFACT
-----------------------------------------------------
+CONTRIBUTIONS AND ROLE OF THE ARTIFACT
+--------------------------------------
 This paper contributes Drava, an event-driven runtime for edge scientific
-streaming pipelines, together with: (i) its callback-based programming model;
-(ii) a runtime that owns microbatching, task dispatch, transport, resource
-placement, and per-stage observability; (iii) an agentic configuration search
-built on the ytopt Bayesian optimizer; and (iv) an evaluation on two
-representative pipelines -- PtychoNN ptychography and TomoGAN tomographic
-denoising -- against a PvaPy baseline.
+streaming pipelines, together with (i) its callback-based programming model,
+(ii) a runtime that owns microbatching, dispatch, transport, placement, and
+per-stage observability, (iii) an agentic (ytopt) configuration search, and
+(iv) an evaluation on PtychoNN ptychography and TomoGAN tomography against a
+PvaPy baseline. The computational artifact realizes every one of these claims:
+it contains the Drava runtime (C/C++ on the XKRT tasking runtime with Python
+bindings), the two application pipelines, a PvaPy single-record and
+HPC-distributor baseline for PtychoNN, the agentic search driver, and the
+benchmark and plotting scripts that regenerate each figure and table in the
+paper. Running the artifact reproduces the throughput, end-to-end latency,
+GPU+CPU energy, and configuration-search results reported in the Evaluation
+section.
 
-The computational artifact realizes every one of these claims. It contains:
-- the Drava runtime, implemented in C/C++ on top of the XKRT tasking runtime,
-  with Python and C bindings;
-- the two application pipelines (PtychoNN two-stage inference-and-stitching, and
-  TomoGAN single-stage denoising);
-- a PvaPy baseline for PtychoNN in two forms: the default single-record
-  (overwrite) path and the HPC data-distributor (pvapy-hpc-consumer +
-  pydistributor) path;
-- the agentic (ytopt) configuration-search driver; and
-- the benchmark drivers and plotting scripts that regenerate every figure and
-  table in the paper.
+SOFTWARE ARCHITECTURE
+---------------------
+Drava is a layered runtime. Applications register per-stage callbacks through a
+C or Python API; a YAML configuration binds each stage to its transport,
+batching policy, and thread team without changing application code; and an
+execution engine performs I/O, microbatching, work-stealing task dispatch, and
+metrics collection. Stages exchange events -- each a unique identifier,
+timestamp, and payload -- over two interchangeable transports: Unix sockets for
+intra-node communication and NATS JetStream (publish/subscribe) for streaming
+across nodes. Each stage runs as a process with an internal thread team, and
+stages are chained into multi-stage pipelines (e.g., PtychoNN stage 1 GPU
+inference -> stage 2 CPU stitching).
 
-Running the artifact reproduces the paper's throughput, end-to-end latency,
-GPU+CPU energy, and configuration-search results.
-
-(ii) SOFTWARE ARCHITECTURE / DATA MODEL
----------------------------------------
-Drava is a layered event-driven runtime:
-- Interface layer: applications register per-stage callbacks through a C or
-  Python API and define only the scientific transformation at each stage.
-- Configuration layer: a YAML file binds each stage to its transport, batching
-  policy, and thread team, read at initialization, so execution policy can change
-  without modifying application code.
-- Execution layer: an I/O thread pulls events from the transport; a microbatching
-  layer accumulates and flushes batches on one of three conditions (threshold,
-  end-of-stream, timeout); and the XKRT runtime dispatches callback tasks across a
-  work-stealing worker pool.
-- Transport layer: two interchangeable backends -- Unix sockets for intra-node
-  communication and NATS JetStream (publish/subscribe with durable consumers) for
-  streaming across nodes.
-
-Data model: stages exchange "events," each carrying a unique frame identifier, a
-receive timestamp, and a raw payload. A stage subscribes to its ingress
-subject/route, processes batches of events, and publishes derived events to its
-egress subject/route. Stages chain into multi-stage pipelines (e.g., PtychoNN
-stage 1 GPU inference -> stage 2 CPU overlap-add stitching). Per-stage metrics
-(throughput, latency components, energy) are collected throughout execution and
-emitted on end-of-stream.
-
-(iii) CONTRIBUTION TO REPRODUCIBILITY
--------------------------------------
-The artifact is designed to reproduce the paper's experiments end to end:
-- Deterministic inputs: inference uses only public pretrained models (no
-  training); throughput runs replay deterministic PRNG-generated frames of the
-  true input shapes, so no live detector is required.
-- Self-contained runs: each benchmark starts its own nats-server, writes per-run
-  logs and a summary.csv to a timestamped directory, and the plot scripts consume
-  those CSVs to emit the exact PDF/PNG figures used in the paper.
-- Archived data: bulky per-run directories are git-ignored, but the curated
-  figure-source CSVs that regenerate every plot are committed, so each figure can
-  be reproduced either from a fresh run or from the archived data.
-- Indexed commands: exact per-experiment commands are listed in experiments.md.
+CONTRIBUTION TO REPRODUCIBILITY
+-------------------------------
+The artifact makes the paper's experiments reproducible end to end. All inputs
+are deterministic: inference uses only public pretrained models, and throughput
+runs replay PRNG-generated frames of the true input shapes, so no live detector
+is needed. Each benchmark starts its own nats-server, writes per-run logs and a
+summary.csv, and the plot scripts consume those CSVs to emit the exact paper
+figures. Bulky run directories are excluded from version control while the
+curated figure-source CSVs that regenerate every plot are included, so a reader
+can reproduce a figure either from a fresh run or from the archived data. Exact
+per-experiment commands are indexed in the artifact's experiments.md.
 
 ============================================================
 REPRODUCIBILITY OF EXPERIMENTS
 ============================================================
 
-ENVIRONMENT / DEPENDENCIES
---------------------------
-- Compiler/build: LLVM/Clang >= 20 (C++20), CMake.
-- GPU stack: CUDA 12.3, cuDNN 9.19.
-- Runtime deps: XKRT runtime, yaml-cpp, NATS C client, nats-server 2.11+,
-  SWIG 4.4.1.
-- Python: free-threaded CPython 3.13 with TensorFlow 2.20, Keras 3.12,
-  NumPy 2.3, nats-py, PyYAML.
-- PvaPy baseline: pvapy==5.6.0 (module name: pvaccess).
-- Configuration search: ytopt.
-- CPU energy: a usable perf exposing power/energy-pkg/
-  (kernel.perf_event_paranoid <= 1).
-
-HARDWARE
---------
-One GPU node. Paper platform: dual-socket AMD EPYC 7532 (32 cores / 64 threads),
-256 GB DDR4, 1x NVIDIA A100-PCIE-40GB. Single-node by design, to isolate runtime
-behavior from network variability.
-
-DATASETS / MODELS
------------------
-- PtychoNN: public pretrained Keras/HDF5 weights + partial dataset.
-- TomoGAN: pretrained generator + 16 preprocessed 1024x1024 slice pairs.
-- Throughput runs: deterministic PRNG-generated frames of the real input shapes.
+ENVIRONMENT
+-----------
+LLVM/Clang >= 20 (C++20), CMake, CUDA 12.3, cuDNN 9.19; the XKRT runtime,
+yaml-cpp, the NATS C client with nats-server 2.11+, and SWIG 4.4.1;
+free-threaded CPython 3.13 with TensorFlow 2.20, Keras 3.12, NumPy 2.3,
+nats-py, and PyYAML. The PtychoNN baseline additionally needs pvapy==5.6.0;
+the configuration search needs ytopt. CPU energy requires a usable perf
+exposing power/energy-pkg/ (kernel.perf_event_paranoid <= 1). Experiments run
+on one GPU node (paper: dual-socket AMD EPYC 7532, 256 GB, 1x A100-PCIE-40GB).
 
 BUILD
 -----
-1. Install dependencies (see README).
-2. Build Drava:
-     CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Release ..
-     make -j
-     export PYTHONPATH="$(pwd):$PYTHONPATH"
+Build Drava with CMake:
+    CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Release ..
+    make -j
+and add the build directory to PYTHONPATH. The artifact is released under an
+anonymized link for double-blind review.
 
-(i) EXPERIMENT WORKFLOW
------------------------
-Every experiment follows the same two-step workflow, with exact commands indexed
-in experiments.md:
-1. A benchmark driver runs the pipeline (starting its own nats-server when
-   needed), sweeps the relevant knob, and writes per-run logs and a summary.csv
-   to a timestamped directory.
-2. A plot script consumes that summary.csv (or the committed curated CSV) and
-   emits the PDF/PNG figure.
+EXPERIMENT WORKFLOW
+-------------------
+Every experiment follows the same two-step workflow, with exact commands
+indexed in the artifact's experiments.md. (1) A benchmark driver runs the
+pipeline (starting its own nats-server when needed), sweeping the relevant knob,
+and writes per-run logs and a summary.csv to a timestamped directory. (2) A plot
+script consumes that CSV (or the archived curated CSV) and emits the PDF/PNG
+figure. Each experiment maps to one article result:
+- Message-rate ceiling                 -> runtime message-rate ceiling figure
+- PvaPy vs Drava (single/two-stage)    -> combined PvaPy-vs-Drava figure
+- PvaPy HPC distributor                -> distributor scaling figure
+- Manual config sweep                  -> throughput-vs-latency figure
+- Observability sweep                  -> runtime observability figure
+- TomoGAN energy                       -> energy-efficiency figure
+- Agentic search                       -> ytopt convergence figure + top-config table
 
-Experiment -> driver script -> article result:
-- Message-rate ceiling  -> sc5_bare_runtime_ceiling.py         -> Figure (bare runtime ceiling)
-- PvaPy vs Drava        -> pvapy_baseline/, benchmark_two_stages.py -> Figure (pvapy-drava combined)
-- PvaPy HPC distributor -> benchmark_hpc_two_stage.py          -> Figure (distributor scaling)
-- Manual config sweep   -> visualize_manual_config.py          -> Figure (throughput vs latency)
-- Observability sweep   -> exp1_runtime_overhead.py            -> Figure (runtime observability)
-- TomoGAN energy        -> tomogan/benchmark.py                -> Figure (energy efficiency)
-- Agentic search        -> tune_ytopt.py                       -> Figure (ytopt convergence) + Table (top configs)
+EXECUTION TIME
+--------------
+A single benchmark point runs in seconds to a few minutes; a full experiment
+sweep (all knob values, repeated runs) takes minutes to ~1 h, and reproducing
+the entire figure set at high repetition takes a few hours on the reference node.
 
-(ii) EXECUTION TIME ESTIMATE
-----------------------------
-- A single benchmark point: seconds to a few minutes.
-- A full single-experiment sweep (all knob values, repeated runs): minutes to ~1 h.
-- Reproducing the entire figure set at high repetition: a few hours on the
-  reference node.
-
-(iii) EXPECTED RESULTS AND EVALUATION
--------------------------------------
+EXPECTED RESULTS AND MAPPING TO THE ARTICLE
+-------------------------------------------
 Each driver/plot pair regenerates the same figure, in the same format, as in the
-article, so verification is a direct visual and numerical comparison:
-- Message-rate ceiling: ~31k frames/s plateau once callback batches are large.
-- PvaPy vs Drava: Drava loss-free while PvaPy drops frames beyond 2 kHz
-  (up to 2.36x single-stage, ~1.5x two-stage throughput).
-- PvaPy HPC distributor: throughput falls and latency rises with consumer count;
-  Drava is ~2.6x faster.
-- Manual + observability sweeps: best end-to-end config differs from the
-  GPU-optimal config (up to 2.44x from batching-aware tuning).
-- TomoGAN energy: energy efficiency (frames/J) scales non-monotonically with
-  batch size.
-- Agentic search: ytopt finds a config 2.24x faster than the best manual one
-  while sampling 0.52% of the space.
-Small run-to-run variation is expected; quantitative results are reported as the
-mean over repeated runs, while qualitative trends and relative comparisons are
-stable across runs.
-
-(iv) RELATION TO RESULTS IN THE ARTICLE
----------------------------------------
-The expected results are produced in the SAME FORMAT as in the article: each
-experiment's plot script emits the exact figure (and, for the agentic search, the
-exact table) that appears in the Evaluation section, so a reviewer verifies
-reproducibility by comparing the regenerated figure/table against the published
-one. The mapping above lists, for each experiment, the driver that produces it and
-the corresponding article figure/table.
-
-RESOURCES
----------
-Publicly available: yes (anonymized artifact link). Workflow framework: none
-required (plain Python/bash drivers).
+article, so verification is a direct visual and numerical comparison. Concretely:
+the message-rate ceiling reproduces the ~31k frames/s plateau; the PvaPy
+comparison shows Drava staying loss-free while PvaPy drops frames beyond 2 kHz
+(up to 2.36x single-stage, ~1.5x two-stage); the distributor sweep shows
+throughput falling and latency rising with consumer count while Drava is ~2.6x
+faster; the manual and observability sweeps show the best end-to-end
+configuration differing from the GPU-optimal one (up to 2.44x); the TomoGAN run
+shows the non-monotonic energy-efficiency trend; and the agentic search reaches
+2.24x over the best manual configuration while sampling 0.52% of the space. Small
+run-to-run variation is expected, so quantitative results are reported as the mean
+over repeated runs; the qualitative trends and relative comparisons are stable
+across runs.
