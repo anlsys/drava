@@ -41,7 +41,9 @@ def main():
     for key in grouped:
         grouped[key].sort(key=lambda r: r["batch"])
 
-    colors = {"noop": "#28666e", "cupy": "#c1662d"}
+    # Drava-only figure: use a distinct palette (green/blue), NOT the Drava/PvaPy
+    # comparison colors (teal/orange), to avoid cross-figure confusion.
+    colors = {"noop": "#6A8F7A", "cupy": "#3B6FB0"}
     labels = {"noop": "No-op callback", "cupy": "CuPy blank kernel"}
     markers = {"noop": "o", "cupy": "s"}
     thread_values = sorted({row["threads"] for row in rows})

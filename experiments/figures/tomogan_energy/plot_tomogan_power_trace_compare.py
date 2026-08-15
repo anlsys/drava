@@ -103,7 +103,7 @@ def main() -> None:
                   "--cpu-energy-source perf and confirm perf reports Joules).")
 
     # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
-    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
+    colors = {"gpu": "#6A8F7A", "cpu": "#7D5BA6"}
     labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
 
     n = len(items)

@@ -84,7 +84,7 @@ def main() -> None:
     # Grouped bars: GPU, CPU, Total energy efficiency (frames/J), higher is better.
     series = [("GPU", gpu_m, gpu_s, "#6A8F7A", "#2E4A3A")]
     if has_cpu:
-        series.append(("CPU", cpu_m, cpu_s, "#B5651D", "#6E3D10"))
+        series.append(("CPU", cpu_m, cpu_s, "#7D5BA6", "#4A356B"))
     if has_total:
         series.append(("Total", tot_m, tot_s, "#3B6FB0", "#22436B"))
 

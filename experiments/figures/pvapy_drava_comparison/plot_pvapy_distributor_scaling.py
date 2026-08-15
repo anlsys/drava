@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-r"""PvaPy HPC distributor scaling: throughput and latency vs consumer count.
+r"""PvaPy HPC distributor scaling: throughput, latency, and completion vs N.
 
-The point of this figure: on PvaPy's supported multi-consumer path (the HPC data
-distributor), adding stage-2 consumers does NOT improve performance. The stream
-is already delivered loss-free at N=1 because GPU stage-1 throttles it, so
-splitting the cheap CPU stitch across more processes only adds distributor and
-IPC overhead. End-to-end throughput drops (about 455 fps at N=1 to 82 fps at N=8)
-and latency rises (about 8s to 44s), and every PvaPy point is worse than Drava's
-single-process two-stage pipeline (dashed reference, ~1200 fps / ~3s).
+On PvaPy's supported multi-consumer path (the HPC data distributor), adding
+stage-2 consumers does NOT improve performance:
+  (a) end-to-end throughput drops (about 455 fps at N=1 to 82 fps at N=8),
+  (b) end-to-end latency rises (about 8s to 44s),
+  (c) but a single consumer (N=1) is unreliable: it completes only ~50% of runs
+      because the lone consumer often crashes at teardown, so N>=2 is needed for
+      reliable completion.
+So the operator faces a real tension: N=1 is fastest but flaky, N>=2 is reliable
+but slower, and every configuration is worse than Drava's single process
+(dashed reference, ~1200 fps / ~3s, always loss-free).
 
-Both metrics are measured identically to Drava's benchmark_two_stages.py: first
-frame sent -> last stage-2 object received. Bars are mean over rate x run.
+Throughput/latency measured identically to Drava's benchmark_two_stages.py:
+first frame sent -> last stage-2 object received. Bars are mean over rate x run.
 
 Inputs (curated CSVs in this directory):
-  - pvapy_hpc_distributor_sweep.csv   (this sweep, has pipeline_e2e_s/pipeline_fps)
-  - drava_two_stage_summary.csv       (Drava two-stage e2e, for the reference)
+  - pvapy_hpc_distributor_sweep.csv
+  - drava_two_stage_summary.csv
 """
 from __future__ import annotations
 
@@ -35,8 +38,9 @@ DRAVA_TS_CSV = HERE / "drava_two_stage_summary.csv"
 FIGS_DIR = REPO_ROOT / "figs" / "paper_figs"
 NUM_FRAMES = 3600
 
-COLOR_BAR = "#C1662D"   # PvaPy orange (matches combined figure)
-COLOR_DRAVA = "#27667B"  # Drava teal
+# Shared comparison palette (Drava vs PvaPy) used across all comparison figures.
+COLOR_PVAPY = "#C1662D"   # PvaPy orange
+COLOR_DRAVA = "#27667B"   # Drava teal
 
 
 def read_rows(path):
@@ -49,9 +53,7 @@ def drava_reference():
     lat = []
     for r in read_rows(DRAVA_TS_CSV):
         try:
-            if int(r["batch"]) != 128:
-                continue
-            if int(float(r["rate_hz"])) == 0:  # exclude unpaced "max"
+            if int(r["batch"]) != 128 or int(float(r["rate_hz"])) == 0:
                 continue
             e2e = float(r["pipeline_e2e_s"])
             if e2e > 0:
@@ -60,30 +62,30 @@ def drava_reference():
             continue
     if not lat:
         return None, None
-    lat_ref = mean(lat)
-    fps_ref = mean(NUM_FRAMES / v for v in lat)
-    return fps_ref, lat_ref
+    return mean(NUM_FRAMES / v for v in lat), mean(lat)
 
 
-def plot_panel(ax, ns, mean_vals, std_vals, drava_val, ylabel, ref_label_loc):
+def bar_panel(ax, ns, mean_vals, std_vals, drava_val, ylabel, title, legend_loc):
     x = list(range(len(ns)))
-    ax.bar(x, mean_vals, yerr=std_vals, width=0.6, color=COLOR_BAR,
+    ax.bar(x, mean_vals, yerr=std_vals, width=0.62, color=COLOR_PVAPY,
            error_kw={"elinewidth": 1.0, "capsize": 2, "capthick": 1.0,
                      "ecolor": "#3a3a3a"},
-           label="PvaPy consumers")
+           label="PvaPy")
     if drava_val is not None:
         ax.axhline(drava_val, color=COLOR_DRAVA, linestyle="--", linewidth=2.2,
-                   label="Drava (1 process)")
+                   label="Drava")
     ax.set_xticks(x)
     ax.set_xticklabels([str(n) for n in ns])
-    ax.set_xlabel("PvaPy stage-2 consumers $N$")
+    ax.set_xlabel("Consumers $N$")
     ax.set_ylabel(ylabel)
+    ax.set_title(title)
     ymax = max(mean_vals + ([drava_val] if drava_val else []))
     ax.set_ylim(0, ymax * 1.18)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
-    ax.legend(loc=ref_label_loc, frameon=False)
+    if legend_loc:
+        ax.legend(loc=legend_loc, frameon=False)
 
 
 def main() -> None:
@@ -94,32 +96,52 @@ def main() -> None:
     rows = read_rows(SWEEP_CSV)
     lat = defaultdict(list)
     fps = defaultdict(list)
+    runs = defaultdict(int)
+    complete = defaultdict(int)
     for r in rows:
+        n = int(r["n_consumers"])
+        runs[n] += 1
+        if r["complete"] == "1":
+            complete[n] += 1
         if r["pipeline_e2e_s"]:
-            lat[int(r["n_consumers"])].append(float(r["pipeline_e2e_s"]))
+            lat[n].append(float(r["pipeline_e2e_s"]))
         if r["pipeline_fps"]:
-            fps[int(r["n_consumers"])].append(float(r["pipeline_fps"]))
+            fps[n].append(float(r["pipeline_fps"]))
 
-    ns = sorted(lat)
-    lat_mean = [mean(lat[n]) for n in ns]
-    lat_std = [pstdev(lat[n]) if len(lat[n]) > 1 else 0.0 for n in ns]
-    fps_mean = [mean(fps[n]) for n in ns]
+    ns = sorted(runs)
+    fps_mean = [mean(fps[n]) if fps[n] else 0.0 for n in ns]
     fps_std = [pstdev(fps[n]) if len(fps[n]) > 1 else 0.0 for n in ns]
+    lat_mean = [mean(lat[n]) if lat[n] else 0.0 for n in ns]
+    lat_std = [pstdev(lat[n]) if len(lat[n]) > 1 else 0.0 for n in ns]
+    comp_pct = [100.0 * complete[n] / runs[n] for n in ns]
     fps_ref, lat_ref = drava_reference()
 
     plt.rcParams.update({
-        "font.size": 11, "axes.labelsize": 11, "axes.titlesize": 11,
-        "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 9.0,
+        "font.size": 10, "axes.labelsize": 10, "axes.titlesize": 10,
+        "xtick.labelsize": 9, "ytick.labelsize": 9, "legend.fontsize": 8.5,
         "pdf.fonttype": 42, "ps.fonttype": 42,
     })
 
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(7.2, 3.0), constrained_layout=True)
-    plot_panel(axa, ns, fps_mean, fps_std, fps_ref,
-               "End-to-end throughput (frames/s)", "center right")
-    plot_panel(axb, ns, lat_mean, lat_std, lat_ref,
-               "End-to-end latency (s)", "upper left")
-    axa.set_title("(a) throughput")
-    axb.set_title("(b) latency")
+    fig, (axa, axb, axc) = plt.subplots(1, 3, figsize=(7.2, 2.5),
+                                        constrained_layout=True)
+    bar_panel(axa, ns, fps_mean, fps_std, fps_ref,
+              "Throughput (frames/s)", "(a) throughput", "center right")
+    bar_panel(axb, ns, lat_mean, lat_std, lat_ref,
+              "Latency (s)", "(b) latency", "upper left")
+
+    # (c) completion rate: Drava is always 100% loss-free.
+    x = list(range(len(ns)))
+    axc.bar(x, comp_pct, width=0.62, color=COLOR_PVAPY, label="PvaPy")
+    axc.axhline(100, color=COLOR_DRAVA, linestyle="--", linewidth=2.2, label="Drava")
+    axc.set_xticks(x)
+    axc.set_xticklabels([str(n) for n in ns])
+    axc.set_xlabel("Consumers $N$")
+    axc.set_ylabel("Runs completed (%)")
+    axc.set_title("(c) completion")
+    axc.set_ylim(0, 115)
+    axc.spines["top"].set_visible(False)
+    axc.spines["right"].set_visible(False)
+    axc.grid(True, axis="y", color="#D3D3D3", linewidth=0.7)
 
     out_base = Path(args.out).resolve() if args.out else FIGS_DIR / "pvapy_distributor_scaling"
     out_base.parent.mkdir(parents=True, exist_ok=True)

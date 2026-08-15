@@ -59,7 +59,7 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(3.6, 2.7), constrained_layout=True)
     # Shared palette with the energy-efficiency figure: GPU green, CPU orange.
-    colors = {"gpu": "#6A8F7A", "cpu": "#B5651D"}
+    colors = {"gpu": "#6A8F7A", "cpu": "#7D5BA6"}
     labels = {"gpu": "GPU power draw", "cpu": "CPU power draw"}
     for source in ("gpu", "cpu"):
         if source not in series:
