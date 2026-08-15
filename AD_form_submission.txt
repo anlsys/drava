@@ -128,10 +128,9 @@ Experiment -> driver script -> article result:
 
 (ii) EXECUTION TIME ESTIMATE
 ----------------------------
-- Preparation (build + deps + model/data download): ~1-2 h, ~5 GB disk.
 - A single benchmark point: seconds to a few minutes.
 - A full single-experiment sweep (all knob values, repeated runs): minutes to ~1 h.
-- Reproducing the entire figure set at high repetition: ~4-8 h on the
+- Reproducing the entire figure set at high repetition: a few hours on the
   reference node.
 
 (iii) EXPECTED RESULTS AND EVALUATION
@@ -164,6 +163,5 @@ the corresponding article figure/table.
 
 RESOURCES
 ---------
-Disk: ~5 GB (models, datasets, build). Prepare: ~1-2 h. Full figure set: ~4-8 h.
 Publicly available: yes (anonymized artifact link). Workflow framework: none
 required (plain Python/bash drivers).
