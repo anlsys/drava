@@ -1,0 +1,122 @@
+ARTIFACT DESCRIPTION (AD) -- FORM SUBMISSION (plain text)
+Paper: Drava: An Event-Driven Runtime for Scientific Pipelines
+Note: anonymized for double-blind review. Do not add de-anonymizing
+repository/institution URLs until the paper is de-anonymized.
+
+============================================================
+ARTIFACT IDENTIFICATION
+============================================================
+
+(i) ABSTRACT: CONTRIBUTIONS AND ROLE OF THE ARTIFACT
+----------------------------------------------------
+This paper contributes Drava, an event-driven runtime for edge scientific
+streaming pipelines, together with: (i) its callback-based programming model;
+(ii) a runtime that owns microbatching, task dispatch, transport, resource
+placement, and per-stage observability; (iii) an agentic configuration search
+built on the ytopt Bayesian optimizer; and (iv) an evaluation on two
+representative pipelines -- PtychoNN ptychography and TomoGAN tomographic
+denoising -- against a PvaPy baseline.
+
+The computational artifact realizes every one of these claims. It contains:
+- the Drava runtime, implemented in C/C++ on top of the XKRT tasking runtime,
+  with Python and C bindings;
+- the two application pipelines (PtychoNN two-stage inference-and-stitching, and
+  TomoGAN single-stage denoising);
+- a PvaPy baseline for PtychoNN in two forms: the default single-record
+  (overwrite) path and the HPC data-distributor (pvapy-hpc-consumer +
+  pydistributor) path;
+- the agentic (ytopt) configuration-search driver; and
+- the benchmark drivers and plotting scripts that regenerate every figure and
+  table in the paper.
+
+Running the artifact reproduces the paper's throughput, end-to-end latency,
+GPU+CPU energy, and configuration-search results.
+
+(ii) SOFTWARE ARCHITECTURE / DATA MODEL
+---------------------------------------
+Drava is a layered event-driven runtime:
+- Interface layer: applications register per-stage callbacks through a C or
+  Python API and define only the scientific transformation at each stage.
+- Configuration layer: a YAML file binds each stage to its transport, batching
+  policy, and thread team, read at initialization, so execution policy can change
+  without modifying application code.
+- Execution layer: an I/O thread pulls events from the transport; a microbatching
+  layer accumulates and flushes batches on one of three conditions (threshold,
+  end-of-stream, timeout); and the XKRT runtime dispatches callback tasks across a
+  work-stealing worker pool.
+- Transport layer: two interchangeable backends -- Unix sockets for intra-node
+  communication and NATS JetStream (publish/subscribe with durable consumers) for
+  streaming across nodes.
+
+Data model: stages exchange "events," each carrying a unique frame identifier, a
+receive timestamp, and a raw payload. A stage subscribes to its ingress
+subject/route, processes batches of events, and publishes derived events to its
+egress subject/route. Stages chain into multi-stage pipelines (e.g., PtychoNN
+stage 1 GPU inference -> stage 2 CPU overlap-add stitching). Per-stage metrics
+(throughput, latency components, energy) are collected throughout execution and
+emitted on end-of-stream.
+
+(iii) CONTRIBUTION TO REPRODUCIBILITY
+-------------------------------------
+The artifact is designed to reproduce the paper's experiments end to end:
+- Deterministic inputs: inference uses only public pretrained models (no
+  training); throughput runs replay deterministic PRNG-generated frames of the
+  true input shapes, so no live detector is required.
+- Self-contained runs: each benchmark starts its own nats-server, writes per-run
+  logs and a summary.csv to a timestamped directory, and the plot scripts consume
+  those CSVs to emit the exact PDF/PNG figures used in the paper.
+- Archived data: bulky per-run directories are git-ignored, but the curated
+  figure-source CSVs that regenerate every plot are committed, so each figure can
+  be reproduced either from a fresh run or from the archived data.
+- Indexed commands: exact per-experiment commands are listed in experiments.md.
+
+============================================================
+REPRODUCIBILITY OF EXPERIMENTS
+============================================================
+
+ENVIRONMENT / DEPENDENCIES
+--------------------------
+- Compiler/build: LLVM/Clang >= 20 (C++20), CMake.
+- GPU stack: CUDA 12.3, cuDNN 9.19.
+- Runtime deps: XKRT runtime, yaml-cpp, NATS C client, nats-server 2.11+,
+  SWIG 4.4.1.
+- Python: free-threaded CPython 3.13 with TensorFlow 2.20, Keras 3.12,
+  NumPy 2.3, nats-py, PyYAML.
+- PvaPy baseline: pvapy==5.6.0 (module name: pvaccess).
+- Configuration search: ytopt.
+- CPU energy: a usable perf exposing power/energy-pkg/
+  (kernel.perf_event_paranoid <= 1).
+
+HARDWARE
+--------
+One GPU node. Paper platform: dual-socket AMD EPYC 7532 (32 cores / 64 threads),
+256 GB DDR4, 1x NVIDIA A100-PCIE-40GB. Single-node by design, to isolate runtime
+behavior from network variability.
+
+DATASETS / MODELS
+-----------------
+- PtychoNN: public pretrained Keras/HDF5 weights + partial dataset.
+- TomoGAN: pretrained generator + 16 preprocessed 1024x1024 slice pairs.
+- Throughput runs: deterministic PRNG-generated frames of the real input shapes.
+
+BUILD AND RUN (summary)
+-----------------------
+1. Install dependencies (see README).
+2. Build Drava:
+     CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Release ..
+     make -j
+     export PYTHONPATH="$(pwd):$PYTHONPATH"
+3. Run a benchmark driver (starts nats-server, writes summary.csv), then the
+   matching plot script; per-experiment commands are indexed in experiments.md.
+
+EXPECTED RESULTS (validation)
+-----------------------------
+Each script regenerates the corresponding figure or table in the Evaluation
+section. Small run-to-run variation is expected; results are reported as the mean
+over repeated runs.
+
+RESOURCES
+---------
+Disk: ~5 GB (models, datasets, build). Prepare: ~1-2 h (build + deps + data).
+Full sweeps: ~4-8 h. Publicly available: yes (anonymized artifact link).
+Workflow framework: none required (plain Python/bash drivers).
