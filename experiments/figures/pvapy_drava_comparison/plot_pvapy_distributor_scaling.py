@@ -8,9 +8,10 @@ performance:
   (a) end-to-end throughput drops (about 455 fps at N=1 to 82 fps at N=8),
   (b) end-to-end latency rises (about 8s to 44s),
 because GPU stage-1 sets the pace and extra consumers add coordination overhead.
-Every configuration is worse than Drava's single process (dashed reference,
-~1200 fps / ~3s, always loss-free). Separately, a single consumer is crash-prone
-at teardown, so N>=2 is safer, but that is stated in prose, not this figure.
+Every configuration is worse than Drava (dashed reference, ~1200 fps / ~3s,
+always loss-free), which needs no per-stage consumer or queue tuning. Separately,
+a single consumer is crash-prone at teardown, so N>=2 is safer, but that is
+stated in prose, not this figure.
 
 Throughput/latency measured identically to Drava's benchmark_two_stages.py:
 first frame sent -> last stage-2 object received. Bars are mean over rate x run.
