@@ -17,6 +17,18 @@ publisher/benchmark boilerplate.
   and `write_publisher_metrics`.
 - `drava_common/cli.py` — the `drava-pipeline` command.
 
+## Install
+
+```shell
+pip install -e examples/common      # provides the `drava-pipeline` script
+```
+
+This puts both the `drava-pipeline` command and the `drava_common` package on
+the path. (The example `publisher_*.py` files also add `examples/common` to
+`sys.path` themselves, so the *publishers* import `drava_common` without an
+install; the CLI, however, needs either the install above or
+`PYTHONPATH=examples/common`.)
+
 ## The `drava-pipeline` CLI
 
 ```shell
@@ -32,25 +44,16 @@ drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher
 drava-pipeline new-app myapp --stages 2
 ```
 
-If not installed on PATH, run it as a module:
+Without installing, run it as a module (note the `PYTHONPATH`):
 
 ```shell
-python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
+PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
 ```
 
 `run` sets `DRAVA_STAGE_CONFIG` and `DRAVA_STAGE_NAME` per stage — the only two
 env vars the runtime reads for stage identity — so you never hand-export them.
 It refuses to launch if the config fails validation (e.g. stage1's egress
 stream/subject doesn't match stage2's ingress).
-
-## Install (optional)
-
-```shell
-pip install -e examples/common      # provides the `drava-pipeline` script
-```
-
-The example `publisher_util.py` files add `examples/common` to `sys.path`
-automatically, so importing `drava_common` works without installation.
 
 ## Tests
 

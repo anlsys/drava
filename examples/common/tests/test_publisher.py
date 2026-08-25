@@ -76,50 +76,46 @@ def test_publish_stream_writes_metrics():
     assert "avg_fps" in obj and "duration_s" in obj and obj["eos_seq"] == 4
 
 
-def test_publish_stream_retry_on_apierror(monkeypatch=None):
-    # Simulate a JS that fails the first publish with a retryable APIError.
-    class _Flaky(_FakeJS):
-        def __init__(self):
-            super().__init__()
-            self.fail_once = True
-
-        async def publish(self, subject, payload):
-            if self.fail_once and not payload.startswith(EOS_PREFIX):
-                self.fail_once = False
-
-                class _Err(Exception):
-                    err_code = 10167
-
-                # Make it look like nats APIError so the except clause matches.
-                import drava_common.publisher as P
-
-                try:
-                    from nats.js.errors import APIError  # noqa: F401
-                except Exception:
-                    # No nats installed: patch the retry to treat _Err as APIError
-                    raise _Err()
-                raise _Err()
-            return await super().publish(subject, payload)
-
-    js = _Flaky()
-    # Without nats installed the except tuple is empty, so the error would
-    # propagate. Guard: only assert retry when nats is available.
+def test_publish_stream_retry_on_apierror():
+    # The retry branch only catches the real nats APIError; skip when nats is
+    # not installed (the branch is unreachable then).
     try:
-        import nats.js.errors  # noqa: F401
-
-        have_nats = True
+        from nats.js.errors import APIError
     except Exception:
-        have_nats = False
-
-    if not have_nats:
         print("  (skipping retry test: nats not installed)")
         return
 
+    def _make_max_msgs_error():
+        # Construct a real APIError carrying err_code 10167 ("maximum messages
+        # exceeded"), tolerating constructor differences across nats-py versions.
+        try:
+            return APIError(err_code=10167)
+        except TypeError:
+            exc = APIError("maximum messages exceeded")
+            try:
+                exc.err_code = 10167
+            except Exception:
+                pass
+            return exc
+
+    class _Flaky(_FakeJS):
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+
+        async def publish(self, subject, payload):
+            if not self.failed and not payload.startswith(EOS_PREFIX):
+                self.failed = True
+                raise _make_max_msgs_error()
+            return await super().publish(subject, payload)
+
+    js = _Flaky()
     sent, *_ = asyncio.run(
         publish_stream(js, "s", lambda i: b"x", num_frames=2, log_every=0,
                        retry_delay_s=0.0)
     )
-    assert sent == 2
+    assert sent == 2, sent
+    assert js.failed, "expected the flaky publish to have raised once"
 
 
 def test_socket_publish_stream(tmp_path=None):

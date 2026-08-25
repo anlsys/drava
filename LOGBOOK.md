@@ -14,6 +14,32 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-25 — JLSE verification of publisher redesign + launcher; two fixes
+Plan: (continuation of Theme C)
+Decision/Result: First JLSE build+run of this branch. Build succeeded (NATS
+enabled, NVML absent so CPU/RAPL-only which is expected; one benign
+missing-field-initializer warning in transport_js.cc). Verified on an A100 node:
+- `test_config.py` 7/7.
+- `two_stage benchmark` matched the pre-change baseline (publisher≈999.7,
+  stage1≈913.6, stage2≈649.8 fps vs prior 999.8/918.0/651.9) — the rewritten
+  publishers + shared publish loop are behavior-preserving.
+Two issues found and fixed:
+1. `test_publisher.py::test_publish_stream_retry_on_apierror` FAILED on JLSE
+   (passed-as-skip locally because nats-py absent). The fake error wasn't a real
+   `nats.js.errors.APIError`, so the retry `except` didn't catch it. Fixed to
+   raise a real APIError(err_code=10167); re-verified locally after
+   `pip install nats-py` (now runs the real branch, 4/4).
+2. `python -m drava_common.cli` failed with ModuleNotFoundError because
+   `examples/common` isn't on the path. Fixed the docs (root README +
+   examples/common/README) to install with `pip install -e examples/common`
+   (provides both the `drava-pipeline` script and the import) or run with
+   `PYTHONPATH=examples/common`. Verified editable install → `drava-pipeline`
+   and module form both work.
+Observation (pre-existing, not from this branch): on the *first* two-stage run
+stage2 died with rc=-11 (SIGSEGV) during XKRT/CUDA init (got to "JetStream
+trying to connect"); the immediate rerun succeeded. Likely a runtime
+startup/init race, worth a separate investigation. Not committed.
+
 ## 2026-08-25 — Publisher redesign onto drava_common; single-stage benchmark archived
 Plan: (continuation of Theme C)
 Decision: Redesigned the example publishers as "payload source + transport",

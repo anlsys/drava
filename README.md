@@ -150,21 +150,31 @@ Shared helpers and a pipeline launcher live in
 
 The `drava-pipeline` CLI (in [examples/common](examples/common)) validates a
 `pipeline.yaml` and launches every stage with the right `DRAVA_STAGE_NAME`
-wired automatically — no need to open one terminal per stage:
+wired automatically — no need to open one terminal per stage.
+
+Install it once so the command (and the `drava_common` import) is available:
+
+```shell
+pip install -e examples/common       # provides the `drava-pipeline` script
+```
 
 ```shell
 # Validate stage wiring (egress of stage N must match ingress of stage N+1):
-python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
+drava-pipeline validate examples/ptychonn/pipeline.yaml
 
 # Launch all stages (downstream first); optionally launch the publisher too:
-python -m drava_common.cli run examples/ptychonn/pipeline.yaml \
+drava-pipeline run examples/ptychonn/pipeline.yaml \
     --publisher "python publisher_jetstream.py"
 
 # Scaffold a new example app + pipeline.yaml:
-python -m drava_common.cli new-app myapp --stages 2
+drava-pipeline new-app myapp --stages 2
 ```
 
-Install it as the `drava-pipeline` command with `pip install -e examples/common`.
+Without installing, run it as a module with `examples/common` on the path:
+
+```shell
+PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
+```
 
 ### Writing an app
 

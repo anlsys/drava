@@ -12,15 +12,23 @@ at the end of each session with the next concrete step. History lives in
 shared package (config reader + validator + publisher helpers + `drava-pipeline`
 CLI) landed and locally verified. Not committed.
 
-**Next concrete step:** On JLSE, exercise end-to-end with the built `drava`
-module + NATS: (1) the launcher —
-`python -m drava_common.cli run examples/ptychonn/pipeline.yaml
---publisher "python publisher_jetstream.py"`; (2) the rewritten publishers
-(all four now route through `drava_common.publish_stream` /
-`socket_publish_stream`). Confirm stages come up, data flows, EOS finalizes, and
-metrics JSONL + publisher metrics files appear. All four publishers were reduced
-to payload-source + transport; verify the tomogan JetStream retry path still
-survives a slow consumer.
+**JLSE status (2026-08-25):** Build OK (NATS on, NVML off → CPU/RAPL energy
+only). `test_config.py` 7/7. Two-stage ptychonn benchmark matched the pre-change
+baseline, so the publisher rewrite is behavior-preserving. Fixed the retry test
+(now uses a real nats APIError) and the CLI docs (`pip install -e examples/common`
+or `PYTHONPATH=examples/common`).
+
+**Next concrete step:** On JLSE, after `pip install -e examples/common`:
+(1) `drava-pipeline validate examples/ptychonn/pipeline.yaml`;
+(2) `drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"`
+from `examples/ptychonn` (with the build dir on PYTHONPATH); confirm both stages
+come up, data flows, stage2 finalizes, and metrics/publisher-metrics files
+appear. Re-run `test_publisher.py` (4/4 expected now that nats-py is present).
+
+**Open issue to investigate:** first two-stage run had stage2 rc=-11 (SIGSEGV)
+during XKRT/CUDA init; rerun succeeded. Looks like a runtime startup race,
+independent of the Python changes — needs a separate look in src/ (drava.cc init
+/ transport_js connect).
 
 **Follow-ups surfaced:**
 - `examples/iris_knn` and `examples/dataflow` ship **no `pipeline.yaml`** → socket
