@@ -279,11 +279,14 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     env = dict(base_env)
     env["XKAAPI_VERBOSE"] = str(args.xkaapi_verbose)
-    env["DRAVA_THREADS"] = str(args.threads)
     env["DRAVA_STAGE_CONFIG"] = str(stage_config_path)
     env["DRAVA_STAGE_NAME"] = "stage1"
+    # NOTE: the runtime reads threads/callback_batch from pipeline.yaml, not env.
+    # This single-stage driver passes the base stage config unmodified, so
+    # --threads and --batches do NOT change the runtime here (unlike
+    # benchmark_two_stages.py, which regenerates a per-run YAML). DRAVA_INFER_BATCH
+    # below is app-side only (app.py warmup batch via config.py).
     env["DRAVA_INFER_BATCH"] = str(batch_size)
-    env["DRAVA_CALLBACK_BATCH"] = str(batch_size)
     env["DRAVA_PUBLISH_RATE_HZ"] = str(
         float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0)
     )

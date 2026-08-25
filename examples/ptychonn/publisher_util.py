@@ -1,132 +1,48 @@
-import json
+"""PtychoNN publisher helpers.
+
+Generic publisher plumbing (config resolution, metrics, EOS, pacing) now lives
+in ``drava_common``; this module only keeps the PtychoNN-specific payload
+generator and thin wrappers that re-export the shared helpers so existing
+imports keep working.
+"""
 import os
-from pathlib import Path
+import sys
+
 import numpy as np
-import yaml
+
+# Make the shared examples/common package importable without installation.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
+
+from drava_common import (  # noqa: E402
+    load_publish_config as _load_publish_config,
+    load_transport_config,
+    write_publisher_metrics,
+)
 
 DATA_DIR = "PtychoNN_data_partial"
 FRAME_SHAPE = (64, 64, 1)
 SYNTHETIC_SEED = 56465
 SYNTHETIC_POOL_SIZE = 3600
 
-
-def _parse_yaml_scalar(path: Path, section: str, key_name: str):
-    if not path.exists():
-        return None
-    in_section = False
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if not line:
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        body = line.strip()
-        if indent == 0 and body == f"{section}:":
-            in_section = True
-            continue
-        if indent == 0 and body.endswith(":") and body != f"{section}:":
-            in_section = False
-            continue
-        if in_section and indent >= 2 and ":" in body:
-            key, value = body.split(":", 1)
-            if key.strip() == key_name:
-                return value.strip().strip("\"'")
-    return None
-
-
-def _load_yaml_config(path: Path | None):
-    if path is None or not path.exists():
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return data if isinstance(data, dict) else {}
-
-
-def load_transport_config():
-    cfg_path = os.getenv("DRAVA_STAGE_CONFIG", "")
-    cfg = _load_yaml_config(Path(cfg_path)) if cfg_path else {}
-    transport = cfg.get("transport", {})
-    if not isinstance(transport, dict):
-        transport = {}
-
-    stages = cfg.get("stages", [])
-    stage1_ingress = {}
-    if isinstance(stages, list):
-        for stage in stages:
-            if not isinstance(stage, dict):
-                continue
-            if stage.get("name") != "stage1":
-                continue
-            ingress = stage.get("ingress", {})
-            if isinstance(ingress, dict):
-                stage1_ingress = ingress
-            break
-
-    nats_url = os.getenv(
-        "NATS_URL",
-        str(transport.get("nats_url", "nats://0.0.0.0:4222")),
-    )
-    stream = os.getenv(
-        "DRAVA_STREAM",
-        str(stage1_ingress.get("stream", "FRAMES")),
-    )
-    subject = os.getenv(
-        "DRAVA_SUBJECT",
-        str(stage1_ingress.get("subject", "frames.raw")),
-    )
-    return nats_url, stream, subject
+__all__ = [
+    "load_transport_config",
+    "load_publish_config",
+    "write_publisher_metrics",
+    "make_payload_generator",
+]
 
 
 def load_publish_config():
-    cfg_path = os.getenv("DRAVA_STAGE_CONFIG", "")
-    cfg = Path(cfg_path) if cfg_path else None
-
-    yaml_rate = _parse_yaml_scalar(cfg, "publisher", "rate_hz") if cfg else None
-    yaml_synth = _parse_yaml_scalar(cfg, "publisher", "synthetic") if cfg else None
-    yaml_num_frames = _parse_yaml_scalar(cfg, "publisher", "num_frames") if cfg else None
-
-    rate_hz = float(os.getenv("DRAVA_PUBLISH_RATE_HZ", yaml_rate or "0"))
-    synthetic_mode = os.getenv(
-        "DRAVA_PUBLISH_SYNTHETIC",
-        yaml_synth if yaml_synth is not None else "0",
-    ) == "1"
-    num_frames_raw = os.getenv("DRAVA_PUBLISH_NUM_FRAMES", yaml_num_frames or "")
-    if not num_frames_raw:
-        raise RuntimeError(
-            "Publisher requires a fixed frame count. Set DRAVA_PUBLISH_NUM_FRAMES "
-            "or publisher.num_frames in the stage config YAML."
-        )
-    num_frames = int(num_frames_raw)
-    print(
-        f"DRAVA_PUBLISH_RATE_HZ: {rate_hz},"
-        f"DRAVA_PUBLISH_SYNTHETIC: {synthetic_mode},"
-        f"DRAVA_PUBLISH_NUM_FRAMES: {num_frames}"
-    )
-    return rate_hz, synthetic_mode, num_frames
-
-
-def write_publisher_metrics(frames, duration_s, avg_fps, eos_seq=None):
-    """Write a single JSON object of publisher-side metrics to the path in
-    DRAVA_PUBLISHER_METRICS_FILE, if set. Mirrors the runtime's file-based
-    metrics so orchestrators read files instead of scraping stdout. No-op when
-    the env var is unset."""
-    path = os.getenv("DRAVA_PUBLISHER_METRICS_FILE")
-    if not path:
-        return
-    obj = {
-        "frames": int(frames),
-        "duration_s": float(duration_s),
-        "avg_fps": float(avg_fps),
-    }
-    if eos_seq is not None:
-        obj["eos_seq"] = int(eos_seq)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f)
+    """Return ``(rate_hz, synthetic_mode, num_frames)`` for PtychoNN."""
+    return _load_publish_config()
 
 
 def make_payload_generator(synthetic_mode):
     if synthetic_mode:
         rng = np.random.default_rng(SYNTHETIC_SEED)
-        synthetic_frames = rng.random((SYNTHETIC_POOL_SIZE, *FRAME_SHAPE), dtype=np.float32)
+        synthetic_frames = rng.random(
+            (SYNTHETIC_POOL_SIZE, *FRAME_SHAPE), dtype=np.float32
+        )
         payloads = [frame.tobytes(order="C") for frame in synthetic_frames]
 
         def next_payload(i):

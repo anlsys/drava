@@ -71,45 +71,66 @@ CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
 ```
-- Set the environment variables:
-```shell
-#app.py
-export DRAVA_TRANSPORT=nats
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_STREAM=FRAMES
-export DRAVA_SUBJECT=frames.raw
-export DRAVA_DURABLE=drava_stage1_run_003
-export DRAVA_OUTPUT_STREAM=PREDICTIONS
-export DRAVA_OUTPUT_SUBJECT=frames.stage1
-export DRAVA_INFER_BATCH=512
-export DRAVA_JS_FETCH_BATCH=512
-export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
-export DRAVA_THREADS=24
 
-# app stage 2
-export DRAVA_TRANSPORT=nats
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_STREAM=PREDICTIONS
-export DRAVA_SUBJECT=frames.stage1
-export DRAVA_DURABLE=drava_stage2_run_003
-export DRAVA_LOG_EVERY=512
-export DRAVA_INFER_BATCH=512
-export DRAVA_JS_FETCH_BATCH=512
-export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
-export DRAVA_THREADS=24
-# export DRAVA_TRANSPORT=socket
-# publisher
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_PUBLISH_RATE_HZ=0
-export DRAVA_PUBLISH_SYNTHETIC=1
-export DRAVA_PUBLISH_DURATION_S=10
-```
-- Set number of threads for XKRT with environment variable (default = 4):
+## Configuration
+
+`pipeline.yaml` is **authoritative for the runtime**. Transport type, thread
+count, callback batching, stream/subject/durable names, fetch sizes, and EOS
+forwarding are all read from the YAML stage config — not from environment
+variables. Each example ships its own `pipeline.yaml`; edit that file to change
+runtime behavior.
+
+### Environment variables the runtime actually reads
+
+The runtime (the process that imports `drava` / runs `app.py`) reads only three
+environment variables:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DRAVA_STAGE_CONFIG` | yes | Absolute path to the `pipeline.yaml` to load. |
+| `DRAVA_STAGE_NAME` | yes | Which `stages:` entry this process is (e.g. `stage1`). |
+| `DRAVA_METRICS_FILE` | no | Override `metrics.output_path`; append one JSON record per snapshot here. |
+
+Everything else about the stage (transport, threads, streams, batching) comes
+from the stage named `DRAVA_STAGE_NAME` inside `DRAVA_STAGE_CONFIG`. If the
+config is not loaded, the runtime defaults to the **socket** transport.
+
+> Note: older docs referenced `DRAVA_TRANSPORT`, `DRAVA_THREADS`,
+> `DRAVA_STREAM`, `DRAVA_SUBJECT`, `DRAVA_DURABLE`, `DRAVA_INFER_BATCH`, etc. for
+> the runtime. **The runtime does not read those.** Set the equivalents in
+> `pipeline.yaml` instead (`transport.type`, `runtime.threads`,
+> `ingress.stream`, `ingress.subject`, `ingress.durable`, `runtime.callback_batch`).
+
+Running a stage manually (the benchmark drivers set these for you):
+
 ```shell
-export DRAVA_THREADS=20
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
+export DRAVA_STAGE_NAME=stage1
+python app.py
 ```
+
+### Environment variables the publishers read
+
+The publishers under `examples/` are separate data-source processes (not the
+runtime). They read `DRAVA_STAGE_CONFIG` for defaults but let a few env vars
+**override** the YAML:
+
+| Variable | Overrides YAML | Default |
+|---|---|---|
+| `NATS_URL` | `transport.nats_url` | `nats://0.0.0.0:4222` |
+| `DRAVA_STREAM` | stage1 `ingress.stream` | `FRAMES` |
+| `DRAVA_SUBJECT` | stage1 `ingress.subject` | `frames.raw` |
+| `DRAVA_PUBLISH_RATE_HZ` | `publisher.rate_hz` | `0` |
+| `DRAVA_PUBLISH_SYNTHETIC` | `publisher.synthetic` | `0` |
+| `DRAVA_PUBLISH_NUM_FRAMES` | `publisher.num_frames` | (required) |
+| `DRAVA_PUBLISHER_METRICS_FILE` | — | unset (no-op) |
+
+### Precedence summary
+
+| Consumer | Source of truth |
+|---|---|
+| Runtime (`app.py`) | `pipeline.yaml` only, except `DRAVA_METRICS_FILE` overrides `metrics.output_path`. |
+| Publishers | env var if set, otherwise `pipeline.yaml`, otherwise built-in default. |
 
 ## Applications
 
@@ -121,6 +142,29 @@ Available applications:
 - [Bare runtime ceiling](examples/bare_runtime)
 - [Iris Inference](examples/iris_knn)
 - [Dataflow](examples/dataflow)
+
+Shared helpers and a pipeline launcher live in
+[examples/common](examples/common).
+
+### Running a pipeline
+
+The `drava-pipeline` CLI (in [examples/common](examples/common)) validates a
+`pipeline.yaml` and launches every stage with the right `DRAVA_STAGE_NAME`
+wired automatically — no need to open one terminal per stage:
+
+```shell
+# Validate stage wiring (egress of stage N must match ingress of stage N+1):
+python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
+
+# Launch all stages (downstream first); optionally launch the publisher too:
+python -m drava_common.cli run examples/ptychonn/pipeline.yaml \
+    --publisher "python publisher_jetstream.py"
+
+# Scaffold a new example app + pipeline.yaml:
+python -m drava_common.cli new-app myapp --stages 2
+```
+
+Install it as the `drava-pipeline` command with `pip install -e examples/common`.
 
 ### Writing an app
 

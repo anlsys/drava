@@ -568,8 +568,12 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
 
     env_stage1 = dict(env_common)
     env_stage1["DRAVA_STAGE_CONFIG"] = str(run_config_path)
+    # Runtime knobs (threads, callback_batch) come from the per-run
+    # pipeline.yaml written above; the runtime does NOT read env vars for those.
+    # DRAVA_INFER_BATCH is an *app-side* var (app.py warmup batch, via config.py)
+    # so it is still set here. DRAVA_STAGE1_CALLBACK_BATCH was dead (assigned in
+    # config.py but never consumed) and has been removed.
     env_stage1["DRAVA_INFER_BATCH"] = str(batch_size)
-    env_stage1["DRAVA_STAGE1_CALLBACK_BATCH"] = str(stage1_callback_batch)
     env_stage1["DRAVA_STAGE_NAME"] = "stage1"
     env_stage1["STAGE1_JOB_ID"] = stage1_job_id
     env_stage1["DRAVA_METRICS_FILE"] = str(stage1_metrics_path)

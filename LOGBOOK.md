@@ -14,6 +14,59 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-25 — Publisher redesign onto drava_common; single-stage benchmark archived
+Plan: (continuation of Theme C)
+Decision: Redesigned the example publishers as "payload source + transport",
+with all generic plumbing shared. Added `connect_jetstream` (connect + idempotent
+add_stream) and folded retry/backoff on JetStream overflow (APIError 10167, from
+tomogan) into `drava_common.publish_stream` for every publisher; `publish_stream`
+now also drains the client. Rewrote all four example publishers
+(ptychonn/tomogan × jetstream/socket) to ~20 lines each — they only pick the
+payload source now. Moved the unmaintained single-stage
+`examples/ptychonn/benchmark.py` to `examples/ptychonn/archive/rough/benchmark.py`
+(paper artifact for the PvaPy comparison); updated experiments.md + the ptychonn
+README to point at it and to prefer `benchmark_two_stages.py`.
+Result: 11/11 pure-Python tests pass (7 config/validator + 4 publisher:
+frames+EOS, metrics file, socket wire format, retry-skips-without-nats). All four
+rewritten publishers import cleanly through `drava_common` (verified with local
+nats/h5py/imageio stubs). Scratch kept under repo `.scratch/` per AGENTS.md §6.
+Not committed.
+
+## 2026-08-25 — Theme C + launcher: examples/common/ shared package
+Plan: [plans/2026-07-13-theme-c-dedup-examples.md](plans/2026-07-13-theme-c-dedup-examples.md) (plus new launcher/validator/scaffolder work)
+Decision: Built a shared `examples/common/drava_common` package to stop the
+copy-paste and make Drava feel more like numaflow: (1) one Python `pipeline.yaml`
+reader + a wiring validator (`config.py`), replacing the ~4 hand-rolled parsers;
+(2) shared publisher helpers (config/metrics/EOS/pacing) in `publisher.py`;
+(3) a `drava-pipeline` CLI (`cli.py`) with `validate` / `run` (launches every
+stage with the correct DRAVA_STAGE_NAME, downstream-first, refuses on broken
+wiring) / `new-app` scaffolder. Refactored ptychonn+tomogan `publisher_util.py`
+to delegate to the package. Cleaned dead benchmark env vars: kept app-side
+`DRAVA_INFER_BATCH` (app.py warmup), removed truly-dead `DRAVA_THREADS`,
+`DRAVA_CALLBACK_BATCH`, `DRAVA_STAGE1_CALLBACK_BATCH` (+ its unused config.py
+assignment). Noted single-stage benchmark.py passes base YAML unmodified so
+--threads/--batches don't reach the runtime (documented, not yet fixed).
+Result: 7/7 config/validator unit tests pass with and without PyYAML; CLI
+validate/run/new-app verified locally (launch order, env wiring, broken-wiring
+rejection, scaffold+validate round-trip); refactored publisher_util imports
+verified. Pure-Python; no JLSE build needed. Also added a hard filesystem-scope
+rule to AGENTS.md (work only inside the repo). Not committed.
+
+## 2026-08-25 — Theme A executed: config docs made honest
+Plan: [plans/2026-07-13-theme-a-config-clarity.md](plans/2026-07-13-theme-a-config-clarity.md)
+Decision: Confirmed via `src/drava_internal.cc` that the runtime reads only
+`DRAVA_STAGE_CONFIG`, `DRAVA_STAGE_NAME`, and `DRAVA_METRICS_FILE`; transport,
+threads, streams, batching all come from `pipeline.yaml`. Rewrote the root README
+config section (pipeline.yaml authoritative + real-env-var + precedence tables)
+and removed dead `DRAVA_TRANSPORT`/`DRAVA_THREADS`/etc. instructions from the
+ptychonn, iris_knn, dataflow, and tomogan READMEs and the iris_knn app.py comment.
+Noted that iris_knn and dataflow ship **no** `pipeline.yaml`, so they only run on
+the socket transport with defaults unless a stage config is created.
+Result: README + 4 example READMEs + iris_knn/app.py updated; iris_knn/app.py
+re-parsed OK. Grep confirms remaining dead-var mentions are only in meta files
+(HANDOFF/AGENTS/plans), the intentional README "older docs" note, and preserved
+`experiments/logs/archive/`. Doc-only change; no C++ rebuild needed. Not committed.
+
 ## 2026-07-13 — Improvement roadmap authored (planning only)
 Plan: [plans/2026-07-13-roadmap.md](plans/2026-07-13-roadmap.md)
 Decision: Surveyed the codebase for maintainability/user-friendliness gaps and

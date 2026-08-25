@@ -51,7 +51,9 @@ python experiments/figures/sc5_bare_runtime_ceiling/plot_bare_runtime_ceiling.py
 
 ## Baseline Comparison With PvaPy
 
-- Drava benchmark: `examples/ptychonn/benchmark.py`
+- Drava benchmark: `examples/ptychonn/archive/rough/benchmark.py`
+  (single-stage driver, archived; the maintained driver is
+  `examples/ptychonn/benchmark_two_stages.py`)
 - PvaPy benchmark: `examples/ptychonn/pvapy_baseline/benchmark.py`
 - Captured log: `experiments/logs/pvapy_drava_comparison.md`
 - Figure package: `experiments/figures/pvapy_drava_comparison/`

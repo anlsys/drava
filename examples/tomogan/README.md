@@ -153,7 +153,9 @@ Terminal 3:
 ```shell
 cd examples/tomogan
 source venv/bin/activate
-export DRAVA_TRANSPORT=socket
+# Set transport.type: socket in pipeline.yaml, then point the runtime at it:
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
+export DRAVA_STAGE_NAME=stage1
 python app.py
 ```
 

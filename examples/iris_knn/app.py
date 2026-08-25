@@ -21,6 +21,6 @@ def func(frames):
 
         print(f"prediction={predicted_species}")
 
-# Set the transport using env var variable
-# export DRAVA_TRANSPORT=nats/socket
+# Transport comes from pipeline.yaml (transport.type) via DRAVA_STAGE_CONFIG.
+# With no stage config set, the runtime defaults to the socket transport.
 drava.run(func)

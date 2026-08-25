@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drava-common"
+version = "0.1.0"
+description = "Shared helpers and pipeline launcher for Drava example apps"
+requires-python = ">=3.9"
+dependencies = ["pyyaml"]
+
+[project.scripts]
+drava-pipeline = "drava_common.cli:main"
+
+[tool.setuptools]
+packages = ["drava_common"]
