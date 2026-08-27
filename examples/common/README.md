@@ -60,9 +60,10 @@ Behavior:
 ## Tests
 
 ```shell
-python examples/common/tests/test_config.py      # no pytest needed
-# or: python -m pytest examples/common/tests -q
+python examples/common/tests/run_tests.py        # all modules, no pytest needed
+# or a single module: python examples/common/tests/test_cli.py
+# or under pytest:     python -m pytest examples/common/tests -q
 ```
 
-These are pure-Python and run on any machine (they do not need the JLSE
-runtime).
+Pure-Python; runs on any machine (no JLSE runtime needed). See
+[tests/README.md](tests/README.md) for what each module covers.

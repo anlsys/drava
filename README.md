@@ -214,6 +214,83 @@ drava.run(func)
 - Knobs (`threads`, `callback_batch`, `callback_serialize`, `forward_eos`) live
   in the stage's `pipeline.yaml`, not in app code.
 
+### Adding a new example app
+
+A new app needs only a **stage callback** (`app.py`) and a **`pipeline.yaml`**;
+everything generic (config parsing, the publisher loop, EOS, metrics, launching)
+comes from [examples/common](examples/common). Steps:
+
+1. **Scaffold** the skeleton (creates `pipeline.yaml` + `app.py`, and
+   `app_stageN.py` for extra stages):
+
+   ```shell
+   ./drava-pipeline new-app myapp --stages 1     # or --stages 2 for a pipeline
+   # creates examples/myapp/
+   ```
+
+2. **Write the callback** in `app.py`. It receives a batch of raw payloads; the
+   runtime already stripped EOS and assigns `base_index`:
+
+   ```python
+   import drava
+
+   def func(frames, base_index):
+       for raw in frames:
+           result = process(raw)          # your decode + compute
+           drava.publish_py(result)       # transform stages publish downstream
+   drava.run(func)
+   ```
+
+   For a **terminal** stage, use an `on_end_of_stream` hook and set
+   `egress.forward_eos: false` (the scaffolder does this for the last stage).
+
+3. **Edit `pipeline.yaml`** — set `transport.type`, each stage's
+   `runtime.threads` / `callback_batch`, and the `ingress`/`egress`
+   stream/subject names. For a multi-stage pipeline, **stage N's `egress` must
+   match stage N+1's `ingress`** (the launcher validates this).
+
+4. **Add a publisher** (the data source is the only app-specific publisher part).
+   Reuse the shared loop from `drava_common`:
+
+   ```python
+   # examples/myapp/publisher_jetstream.py
+   import asyncio, os, sys
+   sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
+   from drava_common import (connect_jetstream, load_transport_config,
+                             load_publish_config, publish_stream)
+
+   def make_payload(i: int) -> bytes:
+       ...                                  # your bytes for frame i
+
+   async def main():
+       url, stream, subject = load_transport_config()
+       rate_hz, synthetic, num_frames = load_publish_config()
+       js = await connect_jetstream(url, stream, subject)
+       await publish_stream(js, subject, make_payload, num_frames, rate_hz=rate_hz)
+
+   asyncio.run(main())
+   ```
+
+   For the socket transport, use `socket_publish_stream` instead (see
+   `examples/ptychonn/publisher_socket.py`).
+
+5. **Validate and run:**
+
+   ```shell
+   ./drava-pipeline validate examples/myapp/pipeline.yaml
+   ./drava-pipeline run examples/myapp/pipeline.yaml --start-nats \
+       --publisher "python publisher_jetstream.py"
+   ```
+
+Conventions the runtime relies on (don't regress):
+- The app callback must **not** parse the `DRAVA_EOS:` marker — the runtime owns
+  EOS. Publishers (the data source) still emit it; `publish_stream` does this.
+- Keep example-specific code minimal (payload source + the callback). Put shared
+  helpers in `drava_common`, not per-example copies.
+- Generated outputs (`bench_logs*/`, `drava_output/`, `aggregate.csv`, result
+  HDF5/PNGs) are git-ignored; don't commit them. Retired/unused files go in an
+  `archive/` subfolder of the example.
+
 ### Runtime metrics
 
 At end-of-stream the runtime logs a human-readable `[drava-metrics] ...` line to

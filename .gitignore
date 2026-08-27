@@ -1,6 +1,13 @@
 build*/
 .scratch/
 
+# Generated example outputs (produced by benchmarks/tuners/apps, not sources)
+examples/*/bench_logs*/
+examples/*/bench_logs_two_stages/
+examples/ptychonn/aggregate.csv
+examples/tomogan/drava_output/
+examples/*/drava_*_output.h5
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

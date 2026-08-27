@@ -14,6 +14,25 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-27 — Tidy examples (archive/gitignore); add-new-app docs; CLI tests
+Plan: (Theme C polish)
+Decision: Audited every examples/ dir for unused/generated files.
+- Archived `examples/dataflow/dummy.py` (an unused near-empty app.py duplicate)
+  to `examples/dataflow/archive/`.
+- Untracked + gitignored generated outputs that had been committed:
+  `examples/ptychonn/aggregate.csv` (tuner output) and
+  `examples/tomogan/drava_output/` (result PNGs/HDF5); added ignore rules for
+  `bench_logs*/`, `drava_*_output.h5`. Kept `nats.conf`/`config.nats` (benchmark
+  inputs), `app.c`/`CMakeLists.txt` (C example), and the tuners (used).
+Docs: added an "Adding a new example app" section to the root README (scaffold →
+callback → pipeline.yaml wiring → shared publisher via drava_common → validate/run),
+with the don't-regress conventions.
+Tests: added `examples/common/tests/test_cli.py` (9 tests: stage-cmd resolution
+incl. the stage2→app_stage2.py regression, new-app scaffolder, validate
+accept/reject), a `run_tests.py` runner, and `tests/README.md`.
+Result: full suite 20/20 (7 config + 4 publisher + 9 CLI) green locally with
+nats-py present. Not committed.
+
 ## 2026-08-27 — Fix launcher busy-loop on stage death; surface stage1 SIGSEGV
 Plan: (launcher UX bugfix)
 Decision: On JLSE, stage1 exited rc=-11 (SIGSEGV) and the launcher spammed
