@@ -18,14 +18,15 @@ baseline, so the publisher rewrite is behavior-preserving. Fixed the retry test
 (now uses a real nats APIError) and the CLI docs (`pip install -e examples/common`
 or `PYTHONPATH=examples/common`).
 
-**Next concrete step:** On JLSE (no install — use repo-root `./drava-pipeline`),
-with the build dir on PYTHONPATH, run the now self-contained launcher:
+**Next concrete step:** Re-run on JLSE (no install — repo-root `./drava-pipeline`,
+build dir on PYTHONPATH):
 `./drava-pipeline run examples/ptychonn/pipeline.yaml --start-nats
---publisher "python publisher_jetstream.py"`. `--start-nats` starts/stops
-`nats-server -js`; without it, the launcher preflights and errors clearly if no
-server is reachable (this was the cause of the earlier ConnectionRefused wall —
-no NATS was running). Confirm both stages come up, data flows, stage2 finalizes,
-and metrics/publisher-metrics files appear.
+--publisher "python publisher_jetstream.py"`. Two launcher bugs are now fixed:
+(1) it starts/preflights NATS (`--start-nats`); (2) stage2 now runs
+`app_stage2.py` (previously ran app.py from the repo-root CWD → "payload
+mismatch: got 524469 bytes, expected 16384"). Confirm stage2 runs app_stage2.py,
+data flows end-to-end, stage2 finalizes, and metrics files appear. The two-stage
+benchmark remains the behavior baseline.
 
 **Open issue to investigate:** first two-stage run had stage2 rc=-11 (SIGSEGV)
 during XKRT/CUDA init; rerun succeeded. Looks like a runtime startup race,

@@ -14,6 +14,19 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-27 — Fix launcher stage-app resolution (stage2 ran app.py)
+Plan: (launcher UX bugfix)
+Decision: JLSE `drava-pipeline run` (invoked from ~/drava) had stage2 crash with
+"payload mismatch: got 524469 bytes, expected 16384" — it was running app.py
+(stage1's raw-frame code) instead of app_stage2.py, so it parsed stage1's
+prediction messages as input frames. Root cause: `_default_app_cmd` checked
+`Path("app_stageN.py").exists()` relative to the launcher's CWD, not the stage
+workdir (the config's dir), so the file was "not found" and it fell back to
+app.py. Fixed to resolve `app_stageN.py` against the workdir.
+Result: verified with a 2-stage scaffold run from the repo root — stage2 now
+launches app_stage2.py, stage1 app.py (previously both got app.py). 7/7 config +
+4/4 publisher tests still pass. Not committed.
+
 ## 2026-08-27 — Launcher manages NATS (preflight + --start-nats)
 Plan: (continuation of Theme C / launcher UX)
 Decision: JLSE run of `drava-pipeline run` failed with a wall of

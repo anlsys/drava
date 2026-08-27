@@ -61,17 +61,15 @@ def cmd_validate(args) -> int:
 # --------------------------------------------------------------------------- #
 # run
 # --------------------------------------------------------------------------- #
-def _default_app_cmd(stage_name: str) -> list[str]:
-    """Guess the per-stage command.
+def _default_app_cmd(stage_name: str, workdir: Path) -> list[str]:
+    """Guess the per-stage command, resolving files against ``workdir``.
 
-    stage1 -> ``python app.py``; stageN -> ``python app_stageN.py`` if present,
-    else ``python app.py``.
+    stage1 -> ``app.py``; stageN -> ``app_stageN.py`` if it exists in workdir,
+    else ``app.py``. Existence is checked in ``workdir`` (where the stage
+    subprocess runs), not the launcher's CWD.
     """
-    if stage_name == "stage1":
-        return [sys.executable, "app.py"]
-    candidate = Path(f"app_{stage_name}.py")
-    if candidate.exists():
-        return [sys.executable, str(candidate)]
+    if stage_name != "stage1" and (workdir / f"app_{stage_name}.py").is_file():
+        return [sys.executable, f"app_{stage_name}.py"]
     return [sys.executable, "app.py"]
 
 
@@ -194,7 +192,7 @@ def cmd_run(args) -> int:
 
     try:
         for stage in launch_order:
-            cmd = overrides.get(stage.name, _default_app_cmd(stage.name))
+            cmd = overrides.get(stage.name, _default_app_cmd(stage.name, workdir))
             env = dict(os.environ)
             env["DRAVA_STAGE_CONFIG"] = cfg_abs
             env["DRAVA_STAGE_NAME"] = stage.name
