@@ -287,9 +287,8 @@ Conventions the runtime relies on (don't regress):
   EOS. Publishers (the data source) still emit it; `publish_stream` does this.
 - Keep example-specific code minimal (payload source + the callback). Put shared
   helpers in `drava_common`, not per-example copies.
-- Generated outputs (`bench_logs*/`, `drava_output/`, `aggregate.csv`, result
-  HDF5/PNGs) are git-ignored; don't commit them. Retired/unused files go in an
-  `archive/` subfolder of the example.
+- Retired or unused code files go in an `archive/` subfolder of the example
+  (e.g. `examples/dataflow/archive/`), not deleted.
 
 ### Runtime metrics
 

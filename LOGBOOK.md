@@ -16,14 +16,14 @@ Result: <what landed / verification outcome>
 
 ## 2026-08-27 — Tidy examples (archive/gitignore); add-new-app docs; CLI tests
 Plan: (Theme C polish)
-Decision: Audited every examples/ dir for unused/generated files.
+Decision: Audited every examples/ dir for unused **code** files.
 - Archived `examples/dataflow/dummy.py` (an unused near-empty app.py duplicate)
   to `examples/dataflow/archive/`.
-- Untracked + gitignored generated outputs that had been committed:
-  `examples/ptychonn/aggregate.csv` (tuner output) and
-  `examples/tomogan/drava_output/` (result PNGs/HDF5); added ignore rules for
-  `bench_logs*/`, `drava_*_output.h5`. Kept `nats.conf`/`config.nats` (benchmark
-  inputs), `app.c`/`CMakeLists.txt` (C example), and the tuners (used).
+- Kept `nats.conf`/`config.nats` (benchmark inputs), `app.c`/`CMakeLists.txt`
+  (C example), and the tuners (used).
+- NOTE: initially also untracked/gitignored generated outputs
+  (`aggregate.csv`, `tomogan/drava_output/`) — reverted per user: the request
+  was about code files only, output files/charts stay tracked.
 Docs: added an "Adding a new example app" section to the root README (scaffold →
 callback → pipeline.yaml wiring → shared publisher via drava_common → validate/run),
 with the don't-regress conventions.
