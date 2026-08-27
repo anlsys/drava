@@ -38,9 +38,10 @@ Run the `drava-pipeline` script at the repo root (no install, no `PYTHONPATH`):
 ./drava-pipeline validate examples/ptychonn/pipeline.yaml
 
 # Launch every stage with the correct DRAVA_STAGE_NAME wired automatically
-# (downstream stages start first). Run the publisher separately, or pass one:
-./drava-pipeline run examples/ptychonn/pipeline.yaml
-./drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"
+# (downstream stages start first). --start-nats runs/stops a local server for
+# the NATS transport; add --publisher to also start the data source:
+./drava-pipeline run examples/ptychonn/pipeline.yaml --start-nats \
+    --publisher "python publisher_jetstream.py"
 
 # Scaffold a new example (single- or multi-stage):
 ./drava-pipeline new-app myapp --stages 2
@@ -48,8 +49,13 @@ Run the `drava-pipeline` script at the repo root (no install, no `PYTHONPATH`):
 
 `run` sets `DRAVA_STAGE_CONFIG` and `DRAVA_STAGE_NAME` per stage — the only two
 env vars the runtime reads for stage identity — so you never hand-export them.
-It refuses to launch if the config fails validation (e.g. stage1's egress
-stream/subject doesn't match stage2's ingress).
+Behavior:
+- refuses to launch if the config fails validation (e.g. stage1's egress
+  stream/subject doesn't match stage2's ingress);
+- for the NATS transport, verifies a server is reachable first (stages abort on
+  connect failure) and prints a clear message if not. `--start-nats` starts
+  `nats-server -js` and stops it on exit; `--nats-command` / `--nats-config`
+  customize that.
 
 ## Tests
 

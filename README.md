@@ -157,13 +157,21 @@ self-bootstraps (no `pip install`, no `PYTHONPATH`):
 # Validate stage wiring (egress of stage N must match ingress of stage N+1):
 ./drava-pipeline validate examples/ptychonn/pipeline.yaml
 
-# Launch all stages (downstream first); optionally launch the publisher too:
+# Launch all stages (downstream first); optionally launch the publisher too.
+# For the NATS transport, a server must be reachable; --start-nats runs and
+# stops one for you (otherwise start `nats-server -js` yourself first):
 ./drava-pipeline run examples/ptychonn/pipeline.yaml \
+    --start-nats \
     --publisher "python publisher_jetstream.py"
 
 # Scaffold a new example app + pipeline.yaml:
 ./drava-pipeline new-app myapp --stages 2
 ```
+
+For the NATS transport the launcher checks that a server is reachable before
+launching stages (they abort on connect failure) and prints a clear message if
+not. `--start-nats` starts `nats-server -js` (override the binary with
+`--nats-command`, or pass a config with `--nats-config`) and stops it on exit.
 
 ### Writing an app
 

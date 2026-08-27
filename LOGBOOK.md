@@ -14,6 +14,21 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-27 — Launcher manages NATS (preflight + --start-nats)
+Plan: (continuation of Theme C / launcher UX)
+Decision: JLSE run of `drava-pipeline run` failed with a wall of
+ConnectionRefused tracebacks + stage FATAL "No server available" because no NATS
+server was running — the launcher (unlike benchmark_two_stages.py) didn't start
+or check for one. Made `cmd_run` NATS-aware: for `transport.type: nats` it now
+(a) preflights reachability and exits with one clear actionable line if no server
+is up, and (b) with `--start-nats` starts `nats-server -js` (or `--nats-config`),
+waits until reachable, and stops it on exit. Added `--nats-command`/`--nats-config`.
+Result: verified locally with a fake nats-server — full start→ready→launch→stop
+flow returns rc=0; the no-server path fails fast with the guidance message; 7/7
+config + 4/4 publisher tests still pass. (Fixed a missing `import time` in cli.py
+found during testing.) The two-stage benchmark remains the behavior baseline
+(publisher≈999.8/stage1≈919.5/stage2≈646.1 on the latest JLSE run). Not committed.
+
 ## 2026-08-25 — Drop `pip install -e` for the CLI; add repo-root launcher script
 Plan: (continuation of Theme C)
 Decision: User dislikes `pip install -e examples/common` for the CLI. Replaced it

@@ -30,6 +30,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from .config import (
@@ -90,6 +91,51 @@ def _stream(proc: subprocess.Popen, prefix: str):
         sys.stdout.flush()
 
 
+def _parse_nats_host_port(nats_url: str):
+    hostport = nats_url.replace("nats://", "").rsplit("/", 1)[0]
+    host, _, port = hostport.partition(":")
+    host = host or "127.0.0.1"
+    if host in ("0.0.0.0", "::", "[::]"):
+        host = "127.0.0.1"
+    return host, int(port or "4222")
+
+
+def _nats_reachable(nats_url: str, timeout_s: float = 1.0) -> bool:
+    import socket
+
+    host, port = _parse_nats_host_port(nats_url)
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def _start_nats(nats_command: str, nats_config: str, nats_url: str):
+    """Start a local nats-server with JetStream enabled. Returns (proc, logfile)."""
+    _host, port = _parse_nats_host_port(nats_url)
+    if nats_config:
+        cmd = [nats_command, "-c", nats_config]
+    else:
+        cmd = [nats_command, "-js", "-p", str(port)]
+    print(f"[drava-pipeline] starting nats-server: {' '.join(cmd)}")
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+    )
+    t = threading.Thread(target=_stream, args=(proc, "nats"), daemon=True)
+    t.start()
+    return proc
+
+
+def _wait_nats(nats_url: str, timeout_s: float = 20.0) -> bool:
+    end = time.time() + timeout_s
+    while time.time() < end:
+        if _nats_reachable(nats_url, timeout_s=0.5):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def cmd_run(args) -> int:
     try:
         cfg = load_pipeline_config(args.config)
@@ -103,6 +149,29 @@ def cmd_run(args) -> int:
     overrides = _parse_app_cmd_overrides(args.app_cmd)
     workdir = Path(args.workdir).resolve() if args.workdir else cfg.path.parent
     cfg_abs = str(cfg.path.resolve())
+
+    # For the NATS transport, ensure a server is reachable before launching
+    # stages (they FATAL-exit on connect failure). Optionally start one.
+    nats_proc = None
+    if cfg.transport_type == "nats":
+        if args.start_nats:
+            nats_proc = _start_nats(args.nats_command, args.nats_config, cfg.nats_url)
+            if not _wait_nats(cfg.nats_url):
+                print(
+                    f"[drava-pipeline] nats-server did not become reachable at "
+                    f"{cfg.nats_url}",
+                    file=sys.stderr,
+                )
+                nats_proc.send_signal(signal.SIGINT)
+                return 1
+            print(f"[drava-pipeline] nats ready ({cfg.nats_url})")
+        elif not _nats_reachable(cfg.nats_url):
+            print(
+                f"[drava-pipeline] no NATS server reachable at {cfg.nats_url}. "
+                f"Start one (e.g. `nats-server -js`) or pass --start-nats.",
+                file=sys.stderr,
+            )
+            return 1
 
     # Launch downstream stages first so they are listening before upstream
     # stages start emitting.
@@ -191,6 +260,13 @@ def cmd_run(args) -> int:
         return 130
     finally:
         shutdown()
+        if nats_proc is not None and nats_proc.poll() is None:
+            print("[drava-pipeline] stopping nats-server")
+            try:
+                nats_proc.send_signal(signal.SIGINT)
+                nats_proc.wait(timeout=5)
+            except Exception:
+                nats_proc.kill()
 
 
 # --------------------------------------------------------------------------- #
@@ -344,6 +420,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--workdir",
         default="",
         help="Directory to launch stage commands in (default: config's dir).",
+    )
+    r.add_argument(
+        "--start-nats",
+        action="store_true",
+        help="Start (and stop) a local nats-server -js for the NATS transport.",
+    )
+    r.add_argument(
+        "--nats-command",
+        default="nats-server",
+        help="nats-server executable used with --start-nats (default: nats-server).",
+    )
+    r.add_argument(
+        "--nats-config",
+        default="",
+        help="Optional nats-server config file for --start-nats (else -js -p PORT).",
     )
     r.set_defaults(func=cmd_run)
 
