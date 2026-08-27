@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Repo-root launcher for the Drava pipeline CLI.
+
+Self-bootstraps so no install (`pip install`) and no `PYTHONPATH` is needed:
+just run `./drava-pipeline ...` from anywhere. It adds `examples/common` to
+sys.path, mirroring how the example publishers locate `drava_common`.
+
+    ./drava-pipeline validate examples/ptychonn/pipeline.yaml
+    ./drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"
+    ./drava-pipeline new-app myapp --stages 2
+"""
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "examples", "common"))
+
+from drava_common.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())

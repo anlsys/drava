@@ -18,12 +18,14 @@ baseline, so the publisher rewrite is behavior-preserving. Fixed the retry test
 (now uses a real nats APIError) and the CLI docs (`pip install -e examples/common`
 or `PYTHONPATH=examples/common`).
 
-**Next concrete step:** On JLSE, after `pip install -e examples/common`:
-(1) `drava-pipeline validate examples/ptychonn/pipeline.yaml`;
-(2) `drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"`
-from `examples/ptychonn` (with the build dir on PYTHONPATH); confirm both stages
-come up, data flows, stage2 finalizes, and metrics/publisher-metrics files
-appear. Re-run `test_publisher.py` (4/4 expected now that nats-py is present).
+**Next concrete step:** On JLSE (no install needed — use the repo-root
+`./drava-pipeline` script, which self-bootstraps `sys.path`):
+(1) `./drava-pipeline validate examples/ptychonn/pipeline.yaml`;
+(2) with the build dir on PYTHONPATH and NATS running,
+`./drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"`;
+confirm both stages come up, data flows, stage2 finalizes, and
+metrics/publisher-metrics files appear. Re-run `test_publisher.py` (4/4 expected
+now that nats-py is present).
 
 **Open issue to investigate:** first two-stage run had stage2 rc=-11 (SIGSEGV)
 during XKRT/CUDA init; rerun succeeded. Looks like a runtime startup race,

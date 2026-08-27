@@ -14,6 +14,19 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-25 — Drop `pip install -e` for the CLI; add repo-root launcher script
+Plan: (continuation of Theme C)
+Decision: User dislikes `pip install -e examples/common` for the CLI. Replaced it
+with a self-bootstrapping `drava-pipeline` script at the repo root (adds
+`examples/common` to sys.path, then calls `drava_common.cli.main`), mirroring how
+the example publishers already locate `drava_common`. No install, no PYTHONPATH.
+Removed `examples/common/pyproject.toml` (its only purpose was the install path)
+and updated root + examples/common READMEs to use `./drava-pipeline ...`.
+Result: `./drava-pipeline validate|run|new-app` verified locally (also via
+explicit interpreter); 7/7 config + 4/4 publisher tests still pass. Publishers
+were already install-free via their sys.path shim; nothing else depended on the
+package being installed. Not committed.
+
 ## 2026-08-25 — JLSE verification of publisher redesign + launcher; two fixes
 Plan: (continuation of Theme C)
 Decision/Result: First JLSE build+run of this branch. Build succeeded (NATS

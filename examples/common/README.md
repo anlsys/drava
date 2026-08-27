@@ -17,37 +17,33 @@ publisher/benchmark boilerplate.
   and `write_publisher_metrics`.
 - `drava_common/cli.py` — the `drava-pipeline` command.
 
-## Install
+## No install needed
 
-```shell
-pip install -e examples/common      # provides the `drava-pipeline` script
-```
+Nothing here requires `pip install`:
 
-This puts both the `drava-pipeline` command and the `drava_common` package on
-the path. (The example `publisher_*.py` files also add `examples/common` to
-`sys.path` themselves, so the *publishers* import `drava_common` without an
-install; the CLI, however, needs either the install above or
-`PYTHONPATH=examples/common`.)
+- The example `publisher_*.py` files add `examples/common` to `sys.path`
+  themselves, so they import `drava_common` directly.
+- The CLI is run via the `drava-pipeline` script at the repo root, which
+  self-bootstraps `sys.path`.
+
+The only hard dependency is **PyYAML** (already in the example requirements);
+without it, `config.py` falls back to a minimal built-in parser.
 
 ## The `drava-pipeline` CLI
 
+Run the `drava-pipeline` script at the repo root (no install, no `PYTHONPATH`):
+
 ```shell
 # Validate a pipeline (checks stage wiring, EOS forwarding, required fields):
-drava-pipeline validate examples/ptychonn/pipeline.yaml
+./drava-pipeline validate examples/ptychonn/pipeline.yaml
 
 # Launch every stage with the correct DRAVA_STAGE_NAME wired automatically
 # (downstream stages start first). Run the publisher separately, or pass one:
-drava-pipeline run examples/ptychonn/pipeline.yaml
-drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"
+./drava-pipeline run examples/ptychonn/pipeline.yaml
+./drava-pipeline run examples/ptychonn/pipeline.yaml --publisher "python publisher_jetstream.py"
 
 # Scaffold a new example (single- or multi-stage):
-drava-pipeline new-app myapp --stages 2
-```
-
-Without installing, run it as a module (note the `PYTHONPATH`):
-
-```shell
-PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
+./drava-pipeline new-app myapp --stages 2
 ```
 
 `run` sets `DRAVA_STAGE_CONFIG` and `DRAVA_STAGE_NAME` per stage — the only two
