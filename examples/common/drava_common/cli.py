@@ -230,28 +230,43 @@ def cmd_run(args) -> int:
             t.start()
             threads.append(t)
 
-        # Wait until any stage exits (or Ctrl-C).
+        # Monitor: report each process's exit exactly once. If any *stage* exits
+        # (for any reason), the pipeline is broken — tear everything down. The
+        # publisher exiting is normal (it finishes its data), so we wait for the
+        # stages to drain after it does.
+        stage_names = {s.name for s in cfg.stages}
+        reported: set[str] = set()
         rc = 0
         while True:
-            alive = [(n, p) for n, p in procs if p.poll() is None]
-            if len(alive) != len(procs):
-                for n, p in procs:
-                    if p.poll() not in (None, 0):
+            for n, p in procs:
+                code = p.poll()
+                if code is not None and n not in reported:
+                    reported.add(n)
+                    if code != 0:
                         print(
-                            f"[drava-pipeline] stage '{n}' exited rc={p.poll()}",
+                            f"[drava-pipeline] '{n}' exited rc={code}",
                             file=sys.stderr,
                         )
-                        rc = p.poll() or 1
-                if not any(n != "publisher" for n, p in alive):
-                    break
-                if all(p.poll() is not None for _n, p in procs):
-                    break
-            try:
-                for _n, p in procs:
-                    p.wait(timeout=0.5)
+                        rc = rc or code
+                    else:
+                        print(f"[drava-pipeline] '{n}' finished ok")
+
+            # A stage dying is fatal: stop the whole pipeline now.
+            stage_died = any(
+                n in stage_names and p.poll() not in (None, 0) for n, p in procs
+            )
+            if stage_died:
+                print(
+                    "[drava-pipeline] a stage exited abnormally; shutting down.",
+                    file=sys.stderr,
+                )
                 break
-            except subprocess.TimeoutExpired:
-                continue
+
+            # Otherwise stop once every process has exited (clean completion).
+            if all(p.poll() is not None for _n, p in procs):
+                break
+
+            time.sleep(0.3)
         return rc
     except KeyboardInterrupt:
         print("\n[drava-pipeline] interrupted; shutting down stages...")

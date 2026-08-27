@@ -14,6 +14,22 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-27 — Fix launcher busy-loop on stage death; surface stage1 SIGSEGV
+Plan: (launcher UX bugfix)
+Decision: On JLSE, stage1 exited rc=-11 (SIGSEGV) and the launcher spammed
+"stage 'stage1' exited rc=-11" hundreds of times and hung until ^C. The
+`cmd_run` wait-loop re-detected the same dead proc every iteration and its break
+conditions never fired. Rewrote the monitor: report each process exit once; if
+any *stage* exits abnormally, tear down the whole pipeline and return its code;
+otherwise stop when all procs have exited. Verified locally by simulating a
+stage crash — exactly one report, immediate teardown of the other stage + NATS,
+correct non-zero rc, no spin/hang.
+Open (runtime, not launcher): stage1's rc=-11 SIGSEGV at startup is the recurring
+C++ runtime crash (seen intermittently before); stage2's later
+`FATAL "Fetch error: Limit reached"` (transport_js.cc:322, a LOGGER_FATAL) is a
+downstream symptom + a Theme-E abort-on-error case. Needs a JLSE stack trace
+(gdb/core) to fix; cannot reproduce off-JLSE. Not committed [superseded by commit].
+
 ## 2026-08-27 — Fix launcher stage-app resolution (stage2 ran app.py)
 Plan: (launcher UX bugfix)
 Decision: JLSE `drava-pipeline run` (invoked from ~/drava) had stage2 crash with
