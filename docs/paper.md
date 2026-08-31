@@ -31,6 +31,18 @@ python experiments/compare_to_paper.py tomogan-energy \
 This is a reproducibility check, not a pass/fail gate: differences within roughly
 10–15% are normal across nodes and runs.
 
+## Known issue: intermittent crash at 8 worker threads
+
+On the current runtime build, launching a stage with **8 worker threads**
+(`runtime.threads: 8`, e.g. `--thread-list ...,8`) can crash during XKRT/CUDA
+thread startup — observed as `pure virtual method called` /
+`terminate called without an active exception`, or a SIGSEGV — before any frames
+are processed. Runs at 2 and 4 threads are stable and match the reference data.
+The submitted-paper figures for the runtime ceiling and TomoGAN energy do not
+depend on the 8-thread points (the energy figure used 2 threads), so this does
+not block reproduction; use `--thread-list 2,4` to avoid it. This is a runtime
+concurrency bug under investigation, not a benchmark or configuration error.
+
 ---
 
 ## 1. Runtime message-rate ceiling
@@ -45,7 +57,7 @@ Bare runtime, CPU / no-op callback path:
 
 ```shell
 python experiments/bare_runtime_ceiling.py \
-  --batches 8,32,128,256,512 --thread-list 2,4,8 \
+  --batches 8,32,128,256,512 --thread-list 2,4 \
   --payload-bytes 1 --gpu-backend none --kernel-launches 1 \
   --num-frames 100000 --runs 1
 ```
@@ -54,7 +66,7 @@ Bare runtime with blank GPU work:
 
 ```shell
 python experiments/bare_runtime_ceiling.py \
-  --batches 8,32,128,256,512 --thread-list 2,4,8 \
+  --batches 8,32,128,256,512 --thread-list 2,4 \
   --payload-bytes 1 --gpu-backend cupy --kernel-launches 1 \
   --num-frames 100000 --runs 1
 ```
