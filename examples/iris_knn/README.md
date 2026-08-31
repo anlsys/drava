@@ -131,7 +131,7 @@ python app.py
 While running `python app.py` may raise the following error:
 ```shell
 Traceback (most recent call last):
-File "/home/ashovon/drava/examples/iris_knn/app.py", line 1, in <module>
+File "/path/to/drava/examples/iris_knn/app.py", line 1, in <module>
 import drava
 ModuleNotFoundError: No module named 'drava'
 ```

@@ -14,6 +14,22 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-31 — Slim README to a landing page; expand docs/ (build, examples, new-app, jlse)
+Plan: (public-release polish)
+Decision: README was still too long and mixed how-to detail with the overview.
+Rewrote it as a concise landing page (429→173 lines): what/why Drava, what it
+reports (metrics/energy), a documentation table, a short quick tour, examples
+list, condensed config + metrics. Moved how-to into docs/: new `docs/build.md`
+(generic build), `docs/examples.md` (running examples + dataset pointers),
+`docs/new-app.md` (writing/adding/modifying an app). Expanded `docs/jlse.md`
+into a full copy-to-JLSE guide including the PtychoNN Hugging Face download and
+the TomoGAN dataset/checkpoint setup + running both benchmarks. Also fixed the
+tomogan benchmark NATS max_payload issue (defaults to bundled config.nats;
+max_payload in the -js fallback) and removed personal paths from the tomogan/iris
+READMEs.
+Result: README 173 lines; docs/ has build, jlse, examples, new-app, paper, utils.
+All internal links resolve; no personal identifiers remain; test suite 23/23.
+
 ## 2026-08-31 — Split docs into docs/; fix tomogan publisher; add example-import test
 Plan: (public-release polish)
 Decision: (1) Fixed a JLSE-blocking bug — tomogan `publisher_jetstream.py` /

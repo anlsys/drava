@@ -1,9 +1,9 @@
-# Building Drava on JLSE
+# Drava on JLSE — build, datasets, and running the examples
 
-Drava has been developed and tested on the ALCF **JLSE** cluster, where the
-dependencies (xkrt, LLVM/Clang, CUDA, a no-GIL Python build) are preinstalled as
-modules. This document gives the exact, site-specific steps used there. For a
-generic dependency list, see the [main README](../README.md#building-from-source).
+Drava is developed and tested on the ALCF **JLSE** cluster, where the native
+dependencies are preinstalled as modules. This is a copy-paste-ready guide to go
+from a fresh checkout to running the PtychoNN and TomoGAN examples, including
+their datasets and model weights.
 
 ## 1. Load modules
 
@@ -20,7 +20,7 @@ module load intel/oneapi/release/2024.1
 module load cuda/12.3.0
 module load hwloc
 
-# xkrt (xkaapi) runtime — this build targets A40/A100/H100 nodes
+# xkrt (xkaapi) runtime — targets A40/A100/H100 nodes
 module load xkaapi/502226c375a8/Debug-cuda
 
 # SWIG for the Python bindings
@@ -37,11 +37,11 @@ git clone git@github.com:jbeder/yaml-cpp.git
 cd yaml-cpp && mkdir build && cd build
 CC=clang CXX=clang++ cmake .. -DYAML_BUILD_SHARED_LIBS=ON \
     -DCMAKE_INSTALL_PREFIX=$HOME/opt/yaml-cpp-install
-make -j
-make install
+make -j && make install
+cd ~
 ```
 
-## 3. (Optional) NATS for the JetStream transport
+## 3. NATS (for the JetStream transport)
 
 Install the NATS server:
 
@@ -56,66 +56,136 @@ Build the NATS C client:
 git clone git@github.com:nats-io/nats.c.git
 cd nats.c && mkdir build && cd build
 cmake .. -DNATS_BUILD_STREAMING=OFF -DCMAKE_INSTALL_PREFIX=$HOME/opt/nats
-make -j
-make install
+make -j && make install
+cd ~
+```
+
+Add to your `~/.bashrc` / `~/.zshrc`:
+
+```shell
+export NATS_ROOT="$HOME/opt/nats"
+export PATH="$HOME/nats_binary:$PATH"
 ```
 
 ## 4. Build Drava
 
 ```shell
-export NATS_ROOT=$HOME/opt/nats     # only if using the JetStream transport
-export NVML_ROOT=$CUDA_HOME         # only if you want GPU energy
-mkdir build-debug-nats && cd build-debug-nats
+cd ~/drava
+export NATS_ROOT=$HOME/opt/nats     # JetStream transport
+export NVML_ROOT=$CUDA_HOME         # GPU energy
+mkdir build && cd build
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
-export PYTHONPATH="$(pwd):$PYTHONPATH"   # so `import drava` finds the built module
+export PYTHONPATH="$(pwd):$PYTHONPATH"   # so `import drava` works
+python -c "import drava; print('drava OK')"
+cd ~/drava
 ```
 
-CMake prints whether the NATS and NVML backends were enabled. On JLSE nodes
-without readable RAPL domains, CPU energy is disabled and only GPU energy (if
-NVML is enabled) is reported.
+CMake prints whether NATS and NVML were enabled. On nodes without readable RAPL
+domains, CPU energy is disabled; GPU energy still works when NVML is enabled.
 
-## 5. Run an example
+## 5. Python environment for the examples
+
+The example apps (TensorFlow, NumPy, h5py, nats-py, …) need a Python env. Use a
+no-GIL venv:
 
 ```shell
-source ~/venvs/no-gil-3.13/bin/activate     # a venv with the example deps
-cd ~/drava/build-debug-nats
-export PYTHONPATH="$(pwd):$PYTHONPATH"
-cd ../examples/ptychonn
-
-# start nats-server -js in another terminal, then:
-export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml DRAVA_STAGE_NAME=stage1
-python app.py
+python -m venv ~/venvs/no-gil-3.13
+source ~/venvs/no-gil-3.13/bin/activate
+# On a JLSE interactive node, use the ALCF proxy for pip:
+pip install --proxy http://proxy.ftm.alcf.anl.gov:3128 -r ~/drava/examples/ptychonn/requirements.txt
+pip install --proxy http://proxy.ftm.alcf.anl.gov:3128 -r ~/drava/examples/tomogan/requirements.txt
 ```
 
-See [docs/paper.md](paper.md) for the full benchmark commands used in the paper.
+Always put the build directory on `PYTHONPATH` before running an app:
+
+```shell
+export PYTHONPATH="$HOME/drava/build:$PYTHONPATH"
+```
+
+## 6. PtychoNN dataset + model weights
+
+The PtychoNN test data and pretrained weights come from the
+[PtychoNN_data](https://huggingface.co/datasets/mcherukara/PtychoNN_data)
+Hugging Face dataset. Download the partial set (test frames + one weight file):
+
+```shell
+cd ~/drava/examples/ptychonn
+source ~/venvs/no-gil-3.13/bin/activate
+python download_partial.py
+# creates PtychoNN_data_partial/{X_test.npy, wts4/min_epoch.npy, wts4/weights.66.hdf5}
+```
+
+Run the two-stage benchmark (starts NATS with the bundled `nats.conf`, wires both
+stages, prints throughput):
+
+```shell
+cd ~/drava/examples/ptychonn
+python benchmark_two_stages.py --batches 256 --runs 1 --num-frames 10000 \
+    --threads 4 --timeout-ms 200 --rate-hz 1000 --nats-url nats://127.0.0.1:4222
+```
+
+## 7. TomoGAN dataset + model weights
+
+TomoGAN uses a sample dataset (`dataset/demo-dataset-real.h5`) and a trained
+generator checkpoint (`dataset/testjob-it00500.h5`). Copy them into the example's
+`dataset/` directory (from wherever you keep them, e.g. a local checkout):
+
+```shell
+# from your workstation:
+scp -r <local>/drava/examples/tomogan/dataset \
+    jlse:~/drava/examples/tomogan/dataset
+# expected files:
+#   ~/drava/examples/tomogan/dataset/demo-dataset-real.h5
+#   ~/drava/examples/tomogan/dataset/testjob-it00500.h5
+```
+
+If you need to regenerate the checkpoint on the cluster, the original training
+script writes generator checkpoints usable directly by the Drava app:
+
+```shell
+cd ~/drava/examples/tomogan/tf2
+python main-gan.py -gpus=0 -expName=testjob -dsfn=../dataset/demo-dataset-real.h5
+export DRAVA_TOMOGAN_MODEL_PATH=$PWD/../dataset/testjob-it00500.h5
+```
+
+You can override the dataset/model paths via `TOMOGAN_DATASET_PATH` /
+`DRAVA_TOMOGAN_MODEL_PATH`. Run the energy benchmark (uses the bundled
+`config.nats`, which sets `max_payload=8MB` for the multi-MB frames):
+
+```shell
+cd ~/drava/examples/tomogan
+python benchmark.py --batches 2,4,8,16 --thread-list 2,4,8 \
+    --num-frames 512 --runs 3 --rate-hz 0 --gpu-sample-interval-s 0.2
+```
+
+## 8. Reproducing the paper
+
+All paper experiments and their exact commands are in [docs/paper.md](paper.md).
 
 ## Setting up the test dependencies (Check + Bats)
 
 The C runtime tests use [Check](https://libcheck.github.io/check/); the
 integration tests use [Bats](https://bats-core.readthedocs.io/).
 
-Install Check:
-
 ```shell
+# Check
 wget https://github.com/libcheck/check/archive/refs/tags/0.15.2.zip
 unzip 0.15.2.zip && cd check-0.15.2
 module load cmake
 mkdir build-gcc && cd build-gcc
 CC=gcc CXX=g++ cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/opt/check-0.15.2
-make -j
-make install
-```
+make -j && make install
+cd ~
 
-Install Bats:
-
-```shell
+# Bats
 git clone https://github.com/bats-core/bats-core.git
 cd bats-core && git checkout v1.13.0
 ./install.sh "$HOME/opt/bats-1.13.0"
+cd ~
 ```
 
-Environment (add to `~/.zshrc` / `~/.bashrc`):
+Environment (add to your shell rc):
 
 ```shell
 export CHECK_ROOT="$HOME/opt/check-0.15.2"
