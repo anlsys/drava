@@ -101,34 +101,59 @@ python experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py
 - Drava benchmark: `examples/ptychonn/benchmark_two_stages.py`
   (the archived single-stage driver used originally is at
   `examples/ptychonn/archive/rough/benchmark.py`)
-- PvaPy benchmark: `examples/ptychonn/pvapy_baseline/benchmark.py`
+- PvaPy benchmarks: `examples/ptychonn/pvapy_baseline/` (`benchmark.py`,
+  `benchmark_two_stage.py`, `benchmark_hpc_two_stage.py`)
 - Log: `experiments/logs/pvapy_drava_comparison.md`
 - Figure package: `experiments/figures/pvapy_drava_comparison/`
-- Submitted figure: `docs/figures/paper_figs/pvapy_drava_ptychonn.pdf`
+- Submitted figures: `docs/figures/paper_figs/pvapy_drava_ptychonn.pdf`,
+  `pvapy_drava_two_stage.pdf`, `pvapy_distributor_scaling.pdf`
 
-Drava arm (two-stage):
+**Finding.** The comparison sweeps the publisher rate. A single PvaPy consumer
+keeps up and stays loss-free up to about 2000 Hz; beyond that it drops frames
+(e.g. at 2500 Hz it misses frames and effective throughput collapses). Drava
+completes the same stream loss-free across all tested rates, including the
+uncapped (max-rate) case. The PvaPy **HPC distributor** (multiple consumers
+behind a distributor plugin) sustains higher rates by fanning frames across
+consumers, at the cost of added consumers; its scaling is reported separately.
+
+Reproducing the sweep requires running each rate. The reference data used rates
+`1000, 2000, 2500, 3000` Hz (plus uncapped for Drava) and `--runs 5`.
+
+Drava arm (per rate; loop the rate values):
 
 ```shell
 cd examples/ptychonn
-python benchmark_two_stages.py \
-  --batches 128,256,512 --runs 1 --num-frames 3600 \
-  --threads 4 --timeout-ms 200 --rate-hz 1000 \
-  --nats-url nats://127.0.0.1:4222
+for r in 1000 2000 2500 3000; do
+  python benchmark_two_stages.py --batches 128,256,512 --runs 5 --num-frames 3600 \
+    --threads 4 --timeout-ms 200 --rate-hz "$r" --nats-url nats://127.0.0.1:4222
+done
 ```
 
-PvaPy arm:
+PvaPy single-consumer arm (per rate):
 
 ```shell
 cd examples/ptychonn/pvapy_baseline
-python benchmark.py \
-  --batches 128,256,512 --runs 1 --num-frames 3600 \
-  --rate-hz 1000 --monitor-queue 1024 --start-settle-s 2
+for r in 1000 2000 2500 3000; do
+  python benchmark.py --batches 128,256,512 --runs 5 --num-frames 3600 \
+    --rate-hz "$r" --monitor-queue 1024 --start-settle-s 2
+done
 ```
 
-Regenerate the figure:
+PvaPy HPC distributor scaling (consumer and rate sweep):
+
+```shell
+cd examples/ptychonn/pvapy_baseline
+python benchmark_hpc_two_stage.py \
+  --n-consumers 1,2,4,8 --rate-hz 1000,2000,2500,3000 \
+  --num-frames 3600 --runs 3
+```
+
+Regenerate the figures:
 
 ```shell
 python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_ptychonn.py
+python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_two_stage.py
+python experiments/figures/pvapy_drava_comparison/plot_pvapy_distributor_scaling.py
 ```
 
 ---
