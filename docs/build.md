@@ -1,9 +1,9 @@
 # Building Drava from source
 
-The C++ runtime depends on several native libraries. If you are on the ALCF
-**JLSE** cluster, use [docs/jlse.md](jlse.md) instead — the dependencies are
-preinstalled there and that guide is copy-paste ready. This page is the generic
-build for other environments.
+The C++ runtime depends on several native libraries. On the ALCF **JLSE**
+cluster, use [docs/jlse.md](jlse.md) instead — the dependencies are preinstalled
+there and that guide is copy-paste ready. This page is the generic build for
+other environments.
 
 > The example apps and the `drava-pipeline` CLI are pure Python and run anywhere;
 > only the C++ runtime (the `drava` module) needs the build below.
@@ -46,7 +46,7 @@ make -j && make install
 
 ```shell
 export NATS_ROOT=$HOME/opt/nats     # only if using the JetStream transport
-export NVML_ROOT=$CUDA_HOME         # only if you want GPU energy
+export NVML_ROOT=$CUDA_HOME         # only for GPU energy
 mkdir build && cd build
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j

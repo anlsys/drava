@@ -60,7 +60,7 @@ make -j && make install
 cd ~
 ```
 
-Add to your `~/.bashrc` / `~/.zshrc`:
+Add to the shell profile (`~/.bashrc` / `~/.zshrc`):
 
 ```shell
 export NATS_ROOT="$HOME/opt/nats"
@@ -129,10 +129,10 @@ python benchmark_two_stages.py --batches 256 --runs 1 --num-frames 10000 \
 
 TomoGAN uses a sample dataset (`dataset/demo-dataset-real.h5`) and a trained
 generator checkpoint (`dataset/testjob-it00500.h5`). Copy them into the example's
-`dataset/` directory (from wherever you keep them, e.g. a local checkout):
+`dataset/` directory (from a local checkout or shared location):
 
 ```shell
-# from your workstation:
+# from a workstation:
 scp -r <local>/drava/examples/tomogan/dataset \
     jlse:~/drava/examples/tomogan/dataset
 # expected files:
@@ -140,7 +140,7 @@ scp -r <local>/drava/examples/tomogan/dataset \
 #   ~/drava/examples/tomogan/dataset/testjob-it00500.h5
 ```
 
-If you need to regenerate the checkpoint on the cluster, the original training
+To regenerate the checkpoint on the cluster, the original training
 script writes generator checkpoints usable directly by the Drava app:
 
 ```shell
@@ -149,7 +149,7 @@ python main-gan.py -gpus=0 -expName=testjob -dsfn=../dataset/demo-dataset-real.h
 export DRAVA_TOMOGAN_MODEL_PATH=$PWD/../dataset/testjob-it00500.h5
 ```
 
-You can override the dataset/model paths via `TOMOGAN_DATASET_PATH` /
+The dataset and model paths can be overridden via `TOMOGAN_DATASET_PATH` /
 `DRAVA_TOMOGAN_MODEL_PATH`. Run the energy benchmark (uses the bundled
 `config.nats`, which sets `max_payload=8MB` for the multi-MB frames):
 
@@ -185,7 +185,7 @@ cd bats-core && git checkout v1.13.0
 cd ~
 ```
 
-Environment (add to your shell rc):
+Environment (add to the shell profile):
 
 ```shell
 export CHECK_ROOT="$HOME/opt/check-0.15.2"

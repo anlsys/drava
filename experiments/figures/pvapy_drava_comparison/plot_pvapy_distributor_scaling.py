@@ -36,7 +36,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 SWEEP_CSV = HERE / "pvapy_hpc_distributor_sweep.csv"
 DRAVA_TS_CSV = HERE / "drava_two_stage_summary.csv"
-FIGS_DIR = REPO_ROOT / "figs" / "paper_figs"
+FIGS_DIR = REPO_ROOT / "docs" / "figures" / "paper_figs"
 NUM_FRAMES = 3600
 
 # Shared comparison palette (Drava vs PvaPy) used across all comparison figures.

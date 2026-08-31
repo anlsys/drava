@@ -4,9 +4,9 @@ Drava is a streaming runtime for scientific data pipelines. It moves data frames
 from an instrument or data source, through one or more processing or inference
 stages, and on to the next stage or an output — at high rate, on HPC hardware.
 
-You write a small Python function for each stage; Drava handles the rest:
-receiving data, grouping it into batches, running your function across threads,
-signaling the end of a run, and recording performance and energy measurements.
+Each stage is a small Python function; Drava handles the rest: receiving data,
+grouping it into batches, running the function across threads, signaling the end
+of a run, and recording performance and energy measurements.
 
 Drava is developed at Argonne National Laboratory and is built on the
 [xkrt](https://gitlab.inria.fr/xkaapi/dev-v2) task runtime. It has been used for
@@ -17,24 +17,24 @@ ptychographic reconstruction (PtychoNN) and tomographic denoising (TomoGAN).
 Detector and inference pipelines usually re-implement the same plumbing for every
 experiment: connecting to a message system, batching frames, spreading work
 across threads, and cleaning up at the end of a run. Drava provides that plumbing
-once so you can focus on the science:
+once, leaving applications to focus on the science:
 
-- **Write only the stage logic.** A stage is a Python function plus one call to
-  `drava.run(func)`.
+- **Only the stage logic is application code.** A stage is a Python function plus
+  one call to `drava.run(func)`.
 - **Configure, don't code.** Threads, batch sizes, transport, and stage wiring
-  live in a `pipeline.yaml` file, not in your program.
+  live in a `pipeline.yaml` file, not in application code.
 - **Choose a transport.** Frames can arrive over NATS JetStream or a Unix socket.
 - **Measure everything.** Each stage records throughput, latency, and (where
   available) GPU/CPU energy, written as JSON for analysis.
 
 ## How it works
 
-![Drava workflow](figs/workflow.png)
+![Drava workflow](docs/figures/workflow.png)
 
-You write the stage logic and a small YAML configuration; Drava runs your
-callbacks across workers and GPUs and reports metrics:
+An application provides the stage logic and a small YAML configuration; Drava
+runs the callbacks across workers and GPUs and reports metrics:
 
-1. **Interface** — wire your stage callback to Drava with `drava.run(func)`.
+1. **Interface** — register a stage callback with `drava.run(func)`.
 2. **Configure** — describe stages, transport, threads, and batching in
    `pipeline.yaml`.
 3. **Execute** — Drava schedules work across threads and GPUs via the xkrt
@@ -43,7 +43,7 @@ callbacks across workers and GPUs and reports metrics:
    and tuning.
 
 Each stage is a separate process. A stage reads its settings from `pipeline.yaml`
-and runs your callback on each incoming batch of frames. Transform stages publish
+and runs the callback on each incoming batch of frames. Transform stages publish
 their results to the next stage; the final stage writes the output.
 
 A minimal stage:
@@ -69,7 +69,7 @@ rate) are assembled from these per-stage records by the benchmark drivers.
 | --- | --- |
 | `stage_total_fps` | Frames processed per second by the stage. |
 | `stage_avg_ms` / `stage_max_ms` | Average / maximum per-frame processing latency. |
-| `cb_total_s` | Total time spent in your callback. |
+| `cb_total_s` | Total time spent in the callback. |
 | `compute_total_s` | Callback time excluding downstream publishing. |
 | `publish_total_s` | Time spent publishing results downstream. |
 | `rx_items` / `rx_bytes` | Frames / bytes received. |
@@ -103,7 +103,7 @@ their hardware source is available.
        --threads 4 --rate-hz 1000 --nats-url nats://127.0.0.1:4222
    ```
 
-3. **Write your own app** — see [docs/new-app.md](docs/new-app.md).
+3. **Add a new app** — see [docs/new-app.md](docs/new-app.md).
 
 ## Documentation
 

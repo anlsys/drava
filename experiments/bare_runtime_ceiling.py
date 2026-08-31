@@ -545,7 +545,7 @@ def main():
     if args.num_frames <= 0:
         raise SystemExit("--num-frames must be positive")
 
-    run_dir = make_run_dir("sc5_bare_runtime_ceiling")
+    run_dir = make_run_dir("bare_runtime_ceiling")
     print(f"[sc5-bare-runtime] writing to {run_dir}")
 
     nats_proc = None
@@ -595,8 +595,8 @@ def main():
                     f"stage_fps={float(row['stage_total_fps']):.2f} "
                     f"cb_avg_ms={float(row['cb_avg_ms']):.3f}"
                 )
-        raw_path = run_dir / "sc5_bare_runtime_ceiling_summary.csv"
-        agg_path = run_dir / "sc5_bare_runtime_ceiling_aggregate.csv"
+        raw_path = run_dir / "bare_runtime_ceiling_summary.csv"
+        agg_path = run_dir / "bare_runtime_ceiling_aggregate.csv"
         write_rows(raw_path, rows, RAW_COLUMNS)
         write_rows(agg_path, summarize(rows), AGG_COLUMNS)
         print_table(rows)

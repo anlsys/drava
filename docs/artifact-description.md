@@ -94,7 +94,7 @@ export PYTHONPATH="$(pwd):$PYTHONPATH"
 All experiments and their exact commands are indexed in `docs/paper.md`. Each
 benchmark writes a timestamped `bench_logs*/` (or `experiments/results/`)
 directory with per-run logs and a `summary.csv`; plot scripts consume those CSVs
-and emit PDF/PNG into `figs/paper_figs/`.
+and emit PDF/PNG into `docs/figures/paper_figs/`.
 
 Reproducibility policy: the bulky per-run run directories (`bench_logs*/`,
 `experiments/results/`) are git-ignored. The curated figure-source CSVs that
@@ -240,10 +240,10 @@ Notes:
 
 | Paper item | Driver | Plot | Output figure |
 |---|---|---|---|
-| Runtime ceiling | `experiments/sc5_bare_runtime_ceiling.py` | `experiments/figures/sc5_bare_runtime_ceiling` | `bare_runtime_ceiling.pdf` |
+| Runtime ceiling | `experiments/bare_runtime_ceiling.py` | `experiments/figures/sc5_bare_runtime_ceiling` | `bare_runtime_ceiling.pdf` |
 | PvaPy vs Drava (single + two stage) | `pvapy_baseline/benchmark.py`, `pvapy_baseline/benchmark_two_stage.py`, `ptychonn/benchmark_two_stages.py` | `pvapy_drava_comparison/plot_pvapy_drava_combined.py` | `pvapy_drava_combined.pdf` |
 | Manual config sweep | `ptychonn/visualize_manual_config.py` | same | `throughput_vs_latency.pdf` |
-| Observability sweep | `experiments/exp1_runtime_overhead.py` | `experiments/visualize_exp1_runtime_observability.py` | `exp1_runtime_observability.pdf` |
+| Observability sweep | `experiments/runtime_overhead.py` | `experiments/visualize_exp1_runtime_observability.py` | `exp1_runtime_observability.pdf` |
 | Agentic search | `ptychonn/tune_two_stage_ytopt.py` | `ptychonn/visualize_agentic_search.py` | `convergence.pdf` |
 | TomoGAN energy | `tomogan/benchmark.py` | `tomogan_energy/plot_tomogan_energy_efficiency.py` | `tomogan_energy_efficiency.pdf` |
 | TomoGAN power trace | `tomogan/benchmark.py --save-power-trace` | `tomogan_energy/plot_tomogan_power_trace.py` | (revision) |

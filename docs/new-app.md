@@ -1,9 +1,9 @@
 # Writing and adding a Drava app
 
 A Drava stage is a callback plus one call to `drava.run`. The runtime owns the
-stream lifecycle — it strips the end-of-stream (EOS) marker before your callback
+stream lifecycle — it strips the end-of-stream (EOS) marker before the callback
 runs, tracks each frame's global position, drives finalization once the stream
-drains, and forwards EOS to the next stage — so your callback only handles data.
+drains, and forwards EOS to the next stage — so the callback only handles data.
 
 ## Writing a stage callback
 
@@ -81,7 +81,7 @@ adapt it.
                              load_publish_config, publish_stream)
 
    def make_payload(i: int) -> bytes:
-       ...                                  # your bytes for frame i
+       ...                                  # bytes for frame i
 
    async def main():
        url, stream, subject = load_transport_config()

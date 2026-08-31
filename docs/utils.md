@@ -28,13 +28,13 @@ Run the `drava-pipeline` script at the repo root; it self-bootstraps, so no
 # Scaffold a new app + pipeline.yaml:
 ./drava-pipeline new-app myapp --stages 2
 
-# Launch all stages plus the publisher, managing NATS for you:
+# Launch all stages plus the publisher, managing NATS automatically:
 ./drava-pipeline run examples/ptychonn/pipeline.yaml \
     --start-nats \
     --publisher "python publisher_jetstream.py"
 ```
 
-Without installing, you can also run it as a module (note the `PYTHONPATH`):
+It can also run as a module without installing (note the `PYTHONPATH`):
 
 ```shell
 PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn/pipeline.yaml
@@ -43,7 +43,7 @@ PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn
 ### `run` behavior
 
 - Sets `DRAVA_STAGE_CONFIG` and `DRAVA_STAGE_NAME` per stage — the only two env
-  vars the runtime reads for stage identity — so you never hand-export them.
+  vars the runtime reads for stage identity — so they are never hand-exported.
 - Refuses to launch if the config fails validation (e.g. stage1's egress
   stream/subject doesn't match stage2's ingress).
 - For the NATS transport, verifies a server is reachable before launching stages

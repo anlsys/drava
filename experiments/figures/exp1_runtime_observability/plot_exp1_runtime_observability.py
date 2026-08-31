@@ -2,7 +2,7 @@
 """
 Generate the Experiment 1 figure used by the evaluation subsection.
 
-Consumes exp1_summary.csv from exp1_runtime_overhead.py and writes:
+Consumes exp1_summary.csv from runtime_overhead.py and writes:
 
   exp1_runtime_observability.{pdf,png}
 

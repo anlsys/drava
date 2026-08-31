@@ -3,7 +3,7 @@
 This directory contains the experiment drivers, preserved outputs, and
 figure-generation packages used for the Drava paper. The short version:
 
-- `exp1_runtime_overhead.py` and `sc5_bare_runtime_ceiling.py` are active
+- `runtime_overhead.py` and `bare_runtime_ceiling.py` are active
   top-level drivers.
 - `figures/` contains reproducible figure packages: plotting script, input CSV
   or embedded data, and generated PDF/PNG output.
@@ -20,11 +20,11 @@ For the submitted-paper experiment map, start with `../experiments.md`.
 
 ### Observability-Guided Runtime Tuning
 
-`exp1_runtime_overhead.py` sweeps callback batch size for the PtychoNN pipeline
+`runtime_overhead.py` sweeps callback batch size for the PtychoNN pipeline
 and records the latency decomposition used by the observability figure.
 
 ```bash
-python experiments/exp1_runtime_overhead.py \
+python experiments/runtime_overhead.py \
     --workload ptychonn \
     --runs 1 \
     --ptychonn-num-frames 10000
@@ -45,12 +45,12 @@ python experiments/figures/exp1_runtime_observability/plot_exp1_runtime_observab
 
 ### Runtime Message-Rate Ceiling
 
-`sc5_bare_runtime_ceiling.py` removes dataset loading and model inference while
+`bare_runtime_ceiling.py` removes dataset loading and model inference while
 preserving the normal publisher, JetStream, Drava listen/callback, EOS, and
 metrics cycle. Use it to characterize the runtime message-rate ceiling.
 
 ```bash
-python experiments/sc5_bare_runtime_ceiling.py \
+python experiments/bare_runtime_ceiling.py \
     --batches 8,32,128,256,512 \
     --thread-list 2,4,8 \
     --payload-bytes 1 \
@@ -64,10 +64,10 @@ Useful variants:
 
 ```bash
 # Blank GPU kernel path.
-python experiments/sc5_bare_runtime_ceiling.py --gpu-backend cupy --kernel-launches 1 --runs 1
+python experiments/bare_runtime_ceiling.py --gpu-backend cupy --kernel-launches 1 --runs 1
 
 # Exercise egress by publishing one cached output payload per input.
-python experiments/sc5_bare_runtime_ceiling.py --publish-mode one_per_frame --runs 1
+python experiments/bare_runtime_ceiling.py --publish-mode one_per_frame --runs 1
 ```
 
 Outputs land under:
@@ -90,7 +90,7 @@ searching through examples:
 | Agentic search | `figures/agentic_config_search/` | `python experiments/figures/agentic_config_search/plot_agentic_search.py <aggregate.csv>` |
 | TomoGAN energy | `figures/tomogan_energy/` | `python experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py` |
 
-Final paper-ready copies are in `../figs/paper_figs/`.
+Final paper-ready copies are in `../docs/figures/paper_figs/`.
 
 ## Logs
 

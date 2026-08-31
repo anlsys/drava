@@ -3,9 +3,9 @@
 Plot direct PtychoNN SC experiment CSVs.
 
 Usage examples:
-  python experiments/plot_sc_ptychonn_results.py --kind callback --csv <sc1.csv>
-  python experiments/plot_sc_ptychonn_results.py --kind inference --csv <sc2.csv>
-  python experiments/plot_sc_ptychonn_results.py --kind threads --csv <sc3.csv>
+  python experiments/plot_ptychonn_results.py --kind callback --csv <sc1.csv>
+  python experiments/plot_ptychonn_results.py --kind inference --csv <sc2.csv>
+  python experiments/plot_ptychonn_results.py --kind threads --csv <sc3.csv>
 """
 from __future__ import annotations
 

@@ -4,8 +4,8 @@ Top-level map for reproducing and auditing the submitted-paper experiments.
 Experiment drivers live in `experiments/`, application code under `examples/`,
 captured command/output logs in `experiments/logs/`, and figure-generation
 packages in `experiments/figures/`. Final submitted figures are collected in
-`figs/paper_figs/`; drafts and older exploratory material are under
-`figs/archive/` and `experiments/archive/`.
+`docs/figures/paper_figs/`; drafts and older exploratory material are under
+`docs/figures/archive/` and `experiments/archive/`.
 
 All commands assume Drava is built and importable (see [docs/jlse.md](jlse.md))
 and are run from the repository root unless noted. Each stage's runtime knobs
@@ -16,16 +16,16 @@ override them per run.
 
 ## 1. Runtime message-rate ceiling
 
-- Driver: `experiments/sc5_bare_runtime_ceiling.py`
+- Driver: `experiments/bare_runtime_ceiling.py`
 - App: `examples/bare_runtime/`
 - Log: `experiments/logs/sc5_bare_runtime_ceiling.md`
 - Figure package: `experiments/figures/sc5_bare_runtime_ceiling/`
-- Submitted figure: `figs/paper_figs/bare_runtime_ceiling.pdf`
+- Submitted figure: `docs/figures/paper_figs/bare_runtime_ceiling.pdf`
 
 Bare runtime, CPU / no-op callback path:
 
 ```shell
-python experiments/sc5_bare_runtime_ceiling.py \
+python experiments/bare_runtime_ceiling.py \
   --batches 8,32,128,256,512 --thread-list 2,4,8 \
   --payload-bytes 1 --gpu-backend none --kernel-launches 1 \
   --num-frames 100000 --runs 1
@@ -34,7 +34,7 @@ python experiments/sc5_bare_runtime_ceiling.py \
 Bare runtime with blank GPU work:
 
 ```shell
-python experiments/sc5_bare_runtime_ceiling.py \
+python experiments/bare_runtime_ceiling.py \
   --batches 8,32,128,256,512 --thread-list 2,4,8 \
   --payload-bytes 1 --gpu-backend cupy --kernel-launches 1 \
   --num-frames 100000 --runs 1
@@ -53,7 +53,7 @@ python experiments/figures/sc5_bare_runtime_ceiling/plot_bare_runtime_ceiling.py
 - App benchmark: `examples/tomogan/benchmark.py`
 - Logs: `experiments/logs/tomogan_energy.md`, `experiments/logs/tomogan_baseline.md`
 - Figure package: `experiments/figures/tomogan_energy/`
-- Submitted figure: `figs/paper_figs/tomogan_energy_efficiency.pdf`
+- Submitted figure: `docs/figures/paper_figs/tomogan_energy_efficiency.pdf`
 
 ```shell
 cd examples/tomogan
@@ -87,7 +87,7 @@ python experiments/figures/tomogan_energy/plot_tomogan_energy_efficiency.py
 - PvaPy benchmark: `examples/ptychonn/pvapy_baseline/benchmark.py`
 - Log: `experiments/logs/pvapy_drava_comparison.md`
 - Figure package: `experiments/figures/pvapy_drava_comparison/`
-- Submitted figure: `figs/paper_figs/pvapy_drava_ptychonn.pdf`
+- Submitted figure: `docs/figures/paper_figs/pvapy_drava_ptychonn.pdf`
 
 Drava arm (two-stage):
 
@@ -118,15 +118,15 @@ python experiments/figures/pvapy_drava_comparison/plot_pvapy_drava_ptychonn.py
 
 ## 4. Observability-guided runtime tuning
 
-- Driver: `experiments/exp1_runtime_overhead.py`
+- Driver: `experiments/runtime_overhead.py`
 - App benchmark: `examples/ptychonn/benchmark_two_stages.py`
 - Log: `experiments/logs/exp1_runtime_observability.md`
 - Result CSV: `experiments/results/exp1_20260513_205018/exp1_summary.csv`
 - Figure package: `experiments/figures/exp1_runtime_observability/`
-- Submitted figure: `figs/paper_figs/exp1_runtime_observability.pdf`
+- Submitted figure: `docs/figures/paper_figs/exp1_runtime_observability.pdf`
 
 ```shell
-python experiments/exp1_runtime_overhead.py \
+python experiments/runtime_overhead.py \
   --workload ptychonn --runs 1 --ptychonn-num-frames 10000
 ```
 
@@ -144,7 +144,7 @@ python experiments/figures/exp1_runtime_observability/plot_exp1_runtime_observab
 - Tuning driver: `examples/ptychonn/tune_two_stage_ytopt.py`
 - Log: `experiments/logs/agentic_config_search.md`
 - Figure package: `experiments/figures/agentic_config_search/`
-- Submitted figure: `figs/paper_figs/convergence.pdf`
+- Submitted figure: `docs/figures/paper_figs/convergence.pdf`
 - Older agent prototype: `experiments/archive/ptychonn_agents_old/`
 
 ```shell
@@ -172,7 +172,7 @@ python experiments/figures/agentic_config_search/plot_agentic_search.py \
 
 - Log: `experiments/logs/manual_config_throughput_latency.md`
 - Figure package: `experiments/figures/manual_config/`
-- Submitted figure: `figs/paper_figs/throughput_vs_latency.pdf`
+- Submitted figure: `docs/figures/paper_figs/throughput_vs_latency.pdf`
 
 The plotting script embeds the selected manual-configuration rows used for the
 submitted figure:

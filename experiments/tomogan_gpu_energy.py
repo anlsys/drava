@@ -246,7 +246,7 @@ def main():
     if args.rate_hz != 0:
         print(f"[sc4-tomogan-energy] warning: rate_hz={args.rate_hz}; SC default is integer 0")
 
-    out_dir = make_run_dir("sc4_tomogan_gpu_energy")
+    out_dir = make_run_dir("tomogan_gpu_energy")
     bench_dir = run_benchmark(args, out_dir)
     rows = [row_from_benchmark(args, bench_dir, r) for r in read_rows(bench_dir / "summary.csv")]
 
@@ -271,8 +271,8 @@ def main():
         "gpu_avg_power_w_mean", "gpu_avg_util_pct_mean",
     ]
 
-    raw_csv = out_dir / "sc4_tomogan_gpu_energy_summary.csv"
-    agg_csv = out_dir / "sc4_tomogan_gpu_energy_aggregate.csv"
+    raw_csv = out_dir / "tomogan_gpu_energy_summary.csv"
+    agg_csv = out_dir / "tomogan_gpu_energy_aggregate.csv"
     write_rows(raw_csv, rows, raw_columns)
     write_rows(agg_csv, summarize(rows), agg_columns)
     print(f"[sc4-tomogan-energy] wrote {len(rows)} rows -> {raw_csv}")

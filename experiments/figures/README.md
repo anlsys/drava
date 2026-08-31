@@ -4,7 +4,7 @@ Each subdirectory keeps the plotting script, plot input data, and generated
 PDF/PNG output for one paper experiment. This keeps generated figures out of
 the repository root and makes reruns predictable.
 
-Final submitted copies are collected separately in `../../figs/paper_figs/`.
+Final submitted copies are collected separately in `../../docs/figures/paper_figs/`.
 
 | Package | Purpose |
 |---|---|

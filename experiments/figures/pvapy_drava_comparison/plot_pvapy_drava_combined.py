@@ -30,7 +30,7 @@ REPO_ROOT = HERE.parents[2]
 SINGLE_CSV = HERE / "pvapy_drava_ptychonn.csv"
 PVAPY_TS_CSV = HERE / "pvapy_two_stage_summary.csv"
 DRAVA_TS_CSV = HERE / "drava_two_stage_summary.csv"
-FIGS_DIR = REPO_ROOT / "figs" / "paper_figs"
+FIGS_DIR = REPO_ROOT / "docs" / "figures" / "paper_figs"
 NUM_FRAMES = 3600
 
 COLORS = {"Drava": "#27667B", "PvaPy": "#C1662D"}
