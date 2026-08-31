@@ -34,10 +34,12 @@ This is a reproducibility check, not a pass/fail gate: differences within roughl
 ## Known issue: intermittent crash at 8 worker threads
 
 On the current runtime build, launching a stage with **8 worker threads**
-(`runtime.threads: 8`, e.g. `--thread-list ...,8`) can crash during XKRT/CUDA
-thread startup — observed as `pure virtual method called` /
+(`runtime.threads: 8`, e.g. `--thread-list ...,8`) can crash during XKRT team
+startup — observed as `pure virtual method called` /
 `terminate called without an active exception`, or a SIGSEGV — before any frames
-are processed. Runs at 2 and 4 threads are stable and match the reference data.
+are processed. It appears to be a concurrency bug in the task-runtime team
+startup that surfaces at higher thread counts. Runs at 2 and 4 threads are stable
+and match the reference data.
 The submitted-paper figures for the runtime ceiling and TomoGAN energy do not
 depend on the 8-thread points (the energy figure used 2 threads), so this does
 not block reproduction; use `--thread-list 2,4` to avoid it. This is a runtime
