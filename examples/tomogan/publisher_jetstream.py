@@ -13,11 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
 
 from drava_common import (  # noqa: E402
     connect_jetstream,
-    load_publish_config,
     load_transport_config,
     publish_stream,
 )
-from publisher_util import load_dataset_payloads  # noqa: E402
+# TomoGAN's load_publish_config returns (rate_hz, num_frames) — no synthetic
+# mode — and defaults num_frames to the dataset size.
+from publisher_util import load_dataset_payloads, load_publish_config  # noqa: E402
 
 
 async def main():

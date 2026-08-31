@@ -14,8 +14,10 @@ import sys
 # Make the shared examples/common package importable without installation.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
 
-from drava_common import load_publish_config, socket_publish_stream  # noqa: E402
-from publisher_util import load_dataset_payloads  # noqa: E402
+from drava_common import socket_publish_stream  # noqa: E402
+# TomoGAN's load_publish_config returns (rate_hz, num_frames) and defaults
+# num_frames to the dataset size.
+from publisher_util import load_dataset_payloads, load_publish_config  # noqa: E402
 
 FIFO_PATH = os.getenv("DRAVA_OUTPUT_FIFO_PATH", "/tmp/drava_in")
 
