@@ -8,9 +8,7 @@ Each stage is a small Python function; Drava handles the rest: receiving data,
 grouping it into batches, running the function across threads, signaling the end
 of a run, and recording performance and energy measurements.
 
-Drava targets a single GPU node — a near-facility or edge inference node that
-uses HPC-class hardware — rather than multi-node distribution. It is developed at
-Argonne National Laboratory and built on the
+Drava is developed at Argonne National Laboratory and built on the
 [xkrt](https://gitlab.inria.fr/xkaapi/dev-v2) task runtime. It has been evaluated
 on ptychographic reconstruction (PtychoNN) and tomographic denoising (TomoGAN)
 on a single NVIDIA A100 node.

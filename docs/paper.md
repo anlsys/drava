@@ -31,19 +31,20 @@ python experiments/compare_to_paper.py tomogan-energy \
 This is a reproducibility check, not a pass/fail gate: differences within roughly
 10–15% are normal across nodes and runs.
 
-## Known issue: intermittent crash at 8 worker threads
+## Known issue: intermittent crash during long sweeps
 
-On the current runtime build, launching a stage with **8 worker threads**
-(`runtime.threads: 8`, e.g. `--thread-list ...,8`) can crash during XKRT team
-startup — observed as `pure virtual method called` /
-`terminate called without an active exception`, or a SIGSEGV — before any frames
-are processed. It appears to be a concurrency bug in the task-runtime team
-startup that surfaces at higher thread counts. Runs at 2 and 4 threads are stable
-and match the reference data.
-The submitted-paper figures for the runtime ceiling and TomoGAN energy do not
-depend on the 8-thread points (the energy figure used 2 threads), so this does
-not block reproduction; use `--thread-list 2,4` to avoid it. This is a runtime
-concurrency bug under investigation, not a benchmark or configuration error.
+During long multi-configuration sweeps (many stage processes launched back to
+back), a stage occasionally crashes during XKRT team startup — observed as
+`pure virtual method called` / `terminate called without an active exception`, or
+a SIGSEGV — before any frames are processed. It is **intermittent**: rerunning
+the same configuration on its own succeeds and matches the reference data
+(including the 8-thread points, which reproduce the paper). The likely cause is a
+transient during rapid process churn / accumulated transport state across runs,
+under investigation.
+
+Workarounds: run configurations in smaller groups (e.g. one thread count at a
+time), or rerun a failed cell individually. This does not affect the correctness
+of the numbers that do complete, and is not a benchmark or configuration error.
 
 ---
 
@@ -59,7 +60,7 @@ Bare runtime, CPU / no-op callback path:
 
 ```shell
 python experiments/bare_runtime_ceiling.py \
-  --batches 8,32,128,256,512 --thread-list 2,4 \
+  --batches 8,32,128,256,512 --thread-list 2,4,8 \
   --payload-bytes 1 --gpu-backend none --kernel-launches 1 \
   --num-frames 100000 --runs 1
 ```
@@ -68,7 +69,7 @@ Bare runtime with blank GPU work:
 
 ```shell
 python experiments/bare_runtime_ceiling.py \
-  --batches 8,32,128,256,512 --thread-list 2,4 \
+  --batches 8,32,128,256,512 --thread-list 2,4,8 \
   --payload-bytes 1 --gpu-backend cupy --kernel-launches 1 \
   --num-frames 100000 --runs 1
 ```
@@ -100,7 +101,7 @@ python benchmark.py \
 ```
 
 To also sweep higher thread counts (not part of the submitted figure), extend
-`--thread-list`, e.g. `--thread-list 2,4`.
+`--thread-list`, e.g. `--thread-list 2,4,8`.
 
 Regenerate the figure:
 
