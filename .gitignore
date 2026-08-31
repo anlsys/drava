@@ -227,3 +227,32 @@ examples/ptychonn/PtychoNN_data_partial/
 
 # Tomogan data
 examples/tomogan/dataset/
+
+# Experiment run outputs are ignored wholesale to keep the repo lean. To make
+# figures reproducible, the figure-source CSVs (summary.csv, power_trace_*.csv)
+# are committed explicitly with `git add -f` into a curated location; see
+# experiments/figures/*/ data CSVs. Do NOT commit the bulky per-run
+# app/pub/nats logs, generated pipeline YAMLs, or .h5/.png outputs.
+bench_logs/
+bench_logs_*/
+tune_logs_*/
+tune_ytopt_*/
+experiments/results/
+.matplotlib-cache/
+
+# Generated per-run artifacts (always excluded).
+**/jsdata/
+**/drava_output/
+*.h5
+*.png
+*.jpg
+*.jpeg
+*.npy
+*.npz
+# Keep committed paper/figure images (these live outside run dirs).
+!figs/**/*.png
+!figs/**/*.pdf
+!experiments/figures/**/*.png
+!experiments/figures/**/*.pdf
+no_gil_requirements.txt
+examples/tomogan/no_gil_requirements.txt

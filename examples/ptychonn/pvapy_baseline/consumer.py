@@ -38,6 +38,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", default=os.getenv("PTYCHONN_DATA_DIR", "../PtychoNN_data_partial"))
     parser.add_argument("--infer-batch", type=int, default=int(os.getenv("PVAPY_INFER_BATCH", "128")))
     parser.add_argument("--publish-chunk", type=int, default=16)
+    parser.add_argument("--publish-rate-hz", type=float, default=0.0,
+                        help="Pace stage-1 prediction output to this msgs/s (0 = unpaced). "
+                             "Paces update() like the single-stage publisher so the "
+                             "overwrite-record monitor can keep up.")
     parser.add_argument("--job-id", type=int, default=1)
     parser.add_argument("--monitor-queue", type=int, default=int(os.getenv("PVAPY_MONITOR_QUEUE", "0")))
     parser.add_argument("--warmup-runs", type=int, default=2)
@@ -93,12 +97,31 @@ class PtychoNNPvaConsumer:
         self.output_unique_id = 0
         self.t0: float | None = None
         self.t_final: float | None = None
+        # Optional pacing of stage-1 output so the overwrite-record monitor keeps up.
+        self.pub_period_s = (1.0 / args.publish_rate_hz) if getattr(args, "publish_rate_hz", 0.0) > 0 else 0.0
+        self._next_pub_t: float | None = None
 
         self.output_server = None
         if args.publish_output:
             output_pv = make_initial_prediction_object(self.pvaccess)
             self.output_server = self.pvaccess.PvaServer(args.output_channel, output_pv)
             print(f"[pvapy-consumer] PVA output channel ready: {args.output_channel}", flush=True)
+
+    def paced_update(self, pv) -> None:
+        """Publish one output record, optionally rate-limited so the stage-2
+        monitor on the single overwrite record can keep up (mirrors how the
+        single-stage publisher paces its record updates)."""
+        if self.pub_period_s > 0.0:
+            now = time.perf_counter()
+            if self._next_pub_t is None or self._next_pub_t < now:
+                # Don't try to "catch up" after inter-batch inference gaps;
+                # just enforce a minimum spacing between consecutive updates.
+                self._next_pub_t = now
+            sleep_s = self._next_pub_t - now
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+            self._next_pub_t += self.pub_period_s
+        self.output_server.update(pv)
 
     def warmup(self, runs: int) -> None:
         if runs <= 0:
@@ -205,7 +228,7 @@ class PtychoNNPvaConsumer:
                 n_total=n_total,
                 payload=payload,
             )
-            self.output_server.update(pv)
+            self.paced_update(pv)
             self.output_unique_id += 1
             self.output_msgs += 1
         self.publish_total_s += time.perf_counter() - publish_t0
@@ -215,7 +238,7 @@ class PtychoNNPvaConsumer:
             return
         n_total = self.expected_frames or self.rx_items
         publish_t0 = time.perf_counter()
-        self.output_server.update(make_eos_prediction_object(self.pvaccess, self.output_unique_id, n_total))
+        self.paced_update(make_eos_prediction_object(self.pvaccess, self.output_unique_id, n_total))
         self.output_unique_id += 1
         self.output_msgs += 1
         self.publish_total_s += time.perf_counter() - publish_t0

@@ -58,6 +58,8 @@ def read_metrics_record(path: Path, stage=None, reasons=("rx_eos", "tx_eos")):
 def parse_args():
     p = argparse.ArgumentParser(description="Run PtychoNN two-stage benchmark matrix.")
     p.add_argument("--batches", default="128,256,512", help="Comma-separated stage1 infer batch sizes.")
+    p.add_argument("--max-retries", type=int, default=3,
+                   help="Retries per run on intermittent native runtime crashes (e.g. XKRT free() abort).")
     p.add_argument("--timeout-ms", type=int, default=500, help="DRAVA_FETCH_TIMEOUT_MS.")
     p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
     p.add_argument("--stage1-threads", type=int, default=None, help="Override DRAVA_THREADS for stage1.")
@@ -595,7 +597,11 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     stage1_ready = threading.Event()
     stage2_ready = threading.Event()
     stage2_final = {}
-    marks = {"pub_start": None, "stage2_final": None}
+    # Publisher metrics come from DRAVA_PUBLISHER_METRICS_FILE (read below), not
+    # stdout. pub_first_frame is captured from the publisher's first-frame log to
+    # measure end-to-end latency from the first send (matching the pvaPy baseline,
+    # which starts timing at its release signal).
+    marks = {"pub_start": None, "pub_first_frame": None, "stage2_final": None}
 
     def on_stage1_line(line: str):
         if "JetStream ready:" in line:
@@ -608,6 +614,14 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         if m:
             stage2_final.update(m.groupdict())
             marks["stage2_final"] = time.monotonic()
+
+    def on_pub_line(line: str):
+        # Mark the actual first-frame send (harness clock) so end-to-end latency
+        # excludes publisher process/connection startup and matches the pvaPy
+        # baseline, which starts timing at its release signal (first frame).
+        # Publisher throughput/frames come from the metrics file, not stdout.
+        if marks.get("pub_first_frame") is None and "first frame at" in line:
+            marks["pub_first_frame"] = time.monotonic()
 
     print(f"[batch={batch_size} run={run_idx}] starting app_stage2.py")
     stage2_proc = subprocess.Popen(
@@ -666,7 +680,7 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         text=True,
         bufsize=1,
     )
-    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log), daemon=True)
+    pub_thread = threading.Thread(target=stream_lines, args=(pub_proc, pub_log, on_pub_line), daemon=True)
     pub_thread.start()
 
     pub_timeout_s = max(120, int(max(1, configured_num_frames) / 1000) + 120)
@@ -734,8 +748,11 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
     )
     row["stage2_side"] = int(stage2_final["side"])
 
-    if marks["pub_start"] is not None and marks["stage2_final"] is not None:
-        row["pipeline_e2e_s"] = marks["stage2_final"] - marks["pub_start"]
+    # Measure end-to-end from the first frame actually sent (fair vs pvaPy),
+    # falling back to publisher-launch time if the marker was missed.
+    e2e_start = marks.get("pub_first_frame") or marks["pub_start"]
+    if e2e_start is not None and marks["stage2_final"] is not None:
+        row["pipeline_e2e_s"] = marks["stage2_final"] - e2e_start
 
     return row
 
@@ -800,7 +817,26 @@ def main():
             for b in batches:
                 for run_idx in range(1, args.runs + 1):
                     print(f"Running batch={b} run={run_idx} ...")
-                    row = run_one(args, base_env, run_dir, b, run_idx)
+                    # Retry intermittent native runtime crashes (e.g. XKRT
+                    # "free(): invalid size" at stage init) instead of aborting
+                    # the whole sweep. A fresh process usually starts cleanly.
+                    attempts = max(1, args.max_retries + 1)
+                    row = None
+                    last_err = None
+                    for attempt in range(1, attempts + 1):
+                        try:
+                            row = run_one(args, base_env, run_dir, b, run_idx)
+                            break
+                        except RuntimeError as exc:
+                            last_err = exc
+                            print(f"  [retry] batch={b} run={run_idx} attempt "
+                                  f"{attempt}/{attempts} failed: "
+                                  f"{str(exc).splitlines()[0]}", flush=True)
+                            time.sleep(2.0)
+                    if row is None:
+                        print(f"  [skip] batch={b} run={run_idx} failed after "
+                              f"{attempts} attempts; continuing sweep.", flush=True)
+                        continue
                     rows.append(row)
                     print(
                         f"  done: publisher_fps={fmt(row['publisher_avg_fps'])} "
