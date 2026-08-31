@@ -10,7 +10,12 @@ import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_MODULES = ["test_config.py", "test_publisher.py", "test_cli.py"]
+_MODULES = [
+    "test_config.py",
+    "test_publisher.py",
+    "test_cli.py",
+    "test_examples_import.py",
+]
 
 
 def main() -> int:

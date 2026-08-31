@@ -31,31 +31,9 @@ without it, `config.py` falls back to a minimal built-in parser.
 
 ## The `drava-pipeline` CLI
 
-Run the `drava-pipeline` script at the repo root (no install, no `PYTHONPATH`):
-
-```shell
-# Validate a pipeline (checks stage wiring, EOS forwarding, required fields):
-./drava-pipeline validate examples/ptychonn/pipeline.yaml
-
-# Launch every stage with the correct DRAVA_STAGE_NAME wired automatically
-# (downstream stages start first). --start-nats runs/stops a local server for
-# the NATS transport; add --publisher to also start the data source:
-./drava-pipeline run examples/ptychonn/pipeline.yaml --start-nats \
-    --publisher "python publisher_jetstream.py"
-
-# Scaffold a new example (single- or multi-stage):
-./drava-pipeline new-app myapp --stages 2
-```
-
-`run` sets `DRAVA_STAGE_CONFIG` and `DRAVA_STAGE_NAME` per stage — the only two
-env vars the runtime reads for stage identity — so you never hand-export them.
-Behavior:
-- refuses to launch if the config fails validation (e.g. stage1's egress
-  stream/subject doesn't match stage2's ingress);
-- for the NATS transport, verifies a server is reachable first (stages abort on
-  connect failure) and prints a clear message if not. `--start-nats` starts
-  `nats-server -js` and stops it on exit; `--nats-command` / `--nats-config`
-  customize that.
+The optional `drava-pipeline` launcher/validator/scaffolder is documented in
+[docs/utils.md](../../docs/utils.md). Run it from the repo root
+(`./drava-pipeline validate|run|new-app ...`); no install or `PYTHONPATH` needed.
 
 ## Tests
 

@@ -30,14 +30,13 @@ tomographic denoising (TomoGAN).
 
 - [Quickstart](#quickstart)
 - [Writing an app](#writing-an-app)
-- [Adding a new example app](#adding-a-new-example-app)
+- [Adding a new app](#adding-a-new-app)
 - [Configuration](#configuration)
 - [Metrics and energy](#metrics-and-energy)
 - [Example applications](#example-applications)
 - [Building from source](#building-from-source)
 - [Tests](#tests)
-- [Paper experiments](#paper-experiments)
-- [Developer utilities](#developer-utilities)
+- [Documentation](#documentation)
 
 ## Quickstart
 
@@ -72,8 +71,8 @@ python benchmark_two_stages.py --batches 256 --runs 1 --num-frames 10000 \
     --threads 4 --rate-hz 1000 --nats-url nats://127.0.0.1:4222
 ```
 
-See each example's README for details, and
-[Developer utilities](#developer-utilities) for an optional launcher/scaffolder.
+An optional [`drava-pipeline`](docs/utils.md) helper can validate, scaffold, and
+launch all stages with a single command.
 
 ## Writing an app
 
@@ -115,40 +114,26 @@ drava.run(func)
 - Knobs (`threads`, `callback_batch`, `callback_serialize`, `forward_eos`) live
   in the stage's `pipeline.yaml`, not in app code.
 
-## Adding a new example app
+## Adding a new app
 
 A new app needs only a **stage callback** (`app.py`) and a **`pipeline.yaml`**;
 everything generic (config parsing, the publisher loop, EOS, metrics) comes from
-[examples/common](examples/common). The quickest starting point is to copy an
-existing example directory (e.g. `examples/iris_knn` for a single stage, or
-`examples/ptychonn` for two stages) and adapt it.
+[examples/common](examples/common). The quickest start is to copy an existing
+example directory (`examples/iris_knn` for one stage, `examples/ptychonn` for
+two) and adapt it.
 
-1. **Write the callback** in `app.py`. It receives a batch of raw payloads; the
-   runtime already stripped EOS and assigns `base_index`:
-
-   ```python
-   import drava
-
-   def func(frames, base_index):
-       for raw in frames:
-           result = process(raw)          # your decode + compute
-           drava.publish_py(result)       # transform stages publish downstream
-   drava.run(func)
-   ```
-
-   For a **terminal** stage, use an `on_end_of_stream` hook and set
-   `egress.forward_eos: false` in `pipeline.yaml`.
+1. **Write the callback** in `app.py` (see [Writing an app](#writing-an-app)).
+   A terminal stage uses an `on_end_of_stream` hook and `egress.forward_eos: false`.
 
 2. **Write `pipeline.yaml`** — set `transport.type`, each stage's
    `runtime.threads` / `callback_batch`, and the `ingress`/`egress`
    stream/subject names. For a multi-stage pipeline, **stage N's `egress` must
    match stage N+1's `ingress`**.
 
-3. **Add a publisher** (the data source is the only app-specific part). Reuse the
+3. **Add a publisher** — the data source is the only app-specific part. Reuse the
    shared loop from `drava_common`:
 
    ```python
-   # examples/myapp/publisher_jetstream.py
    import asyncio, os, sys
    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
    from drava_common import (connect_jetstream, load_transport_config,
@@ -166,29 +151,26 @@ existing example directory (e.g. `examples/iris_knn` for a single stage, or
    asyncio.run(main())
    ```
 
-   For the socket transport, use `socket_publish_stream` instead (see
+   For the socket transport, use `socket_publish_stream` (see
    `examples/ptychonn/publisher_socket.py`).
 
-4. **Run it** as shown in [Quickstart](#quickstart) (one process per stage plus
-   the publisher). The optional [`drava-pipeline`](#developer-utilities) helper
-   can scaffold, validate, and launch all stages with one command.
+4. **Run it** as in [Quickstart](#quickstart) (one process per stage plus the
+   publisher), or with the [`drava-pipeline`](docs/utils.md) helper.
 
 Conventions the runtime relies on:
 
 - The app callback must **not** parse the `DRAVA_EOS:` marker — the runtime owns
   EOS. Publishers (the data source) still emit it; `publish_stream` does this.
-- Keep example-specific code minimal (payload source + the callback). Put shared
+- Keep example-specific code minimal (payload source + callback). Put shared
   helpers in `drava_common`, not per-example copies.
-- Retired or unused code files go in an `archive/` subfolder of the example,
-  rather than being deleted.
+- Retired or unused code files go in an `archive/` subfolder of the example.
 
 ## Configuration
 
 `pipeline.yaml` is **authoritative for the runtime**. Transport type, thread
 count, callback batching, stream/subject/durable names, fetch sizes, and EOS
 forwarding are all read from the YAML stage config — not from environment
-variables. Each example ships its own `pipeline.yaml`; edit that file to change
-runtime behavior.
+variables. Each example ships its own `pipeline.yaml`.
 
 ### Environment variables the runtime reads
 
@@ -204,16 +186,8 @@ environment variables:
 Everything else about the stage (transport, threads, streams, batching) comes
 from the stage named `DRAVA_STAGE_NAME` inside `DRAVA_STAGE_CONFIG`. If no config
 is loaded, the runtime defaults to the **socket** transport. The benchmark
-drivers (and the optional [`drava-pipeline`](#developer-utilities) helper) set
-these two required variables for each stage automatically.
-
-Running a single stage manually:
-
-```shell
-export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
-export DRAVA_STAGE_NAME=stage1
-python app.py
-```
+drivers (and the [`drava-pipeline`](docs/utils.md) helper) set these two required
+variables per stage automatically.
 
 ### Environment variables the publishers read
 
@@ -231,74 +205,39 @@ runtime). They read `DRAVA_STAGE_CONFIG` for defaults but let a few env vars
 | `DRAVA_PUBLISH_NUM_FRAMES` | `publisher.num_frames` | (required) |
 | `DRAVA_PUBLISHER_METRICS_FILE` | — | unset (no-op) |
 
-### Precedence summary
-
-| Consumer | Source of truth |
-|---|---|
-| Runtime (`app.py`) | `pipeline.yaml` only, except `DRAVA_METRICS_FILE` overrides `metrics.output_path`. |
-| Publishers | env var if set, otherwise `pipeline.yaml`, otherwise built-in default. |
+**Precedence:** the runtime uses `pipeline.yaml` only (except `DRAVA_METRICS_FILE`);
+publishers use an env var if set, otherwise `pipeline.yaml`, otherwise a built-in
+default.
 
 ## Metrics and energy
 
 At end-of-stream the runtime logs a human-readable `[drava-metrics] ...` line to
-the console. For machine consumption (benchmarks, tuners), point the runtime at
-a structured sink instead of scraping that log line:
+the console. For machine consumption, point the runtime at a structured JSON sink
+per stage in `pipeline.yaml`:
 
-- Per stage in `pipeline.yaml`:
-
-  ```yaml
-  stages:
-    - name: stage1
-      metrics:
-        output_path: /tmp/drava_stage1_metrics.jsonl
-  ```
-
-- Or via environment variable (overrides the YAML value):
-
-  ```shell
-  export DRAVA_METRICS_FILE=/tmp/drava_metrics.jsonl
-  ```
-
-When set, the runtime **appends one JSON object per metrics snapshot** to that
-file. Each record carries `reason` (`rx_eos`/`tx_eos`), `stage`, the raw counters
-(`rx_items`, `tx_msgs`, `cb_batches`, …), and the derived fields
-(`stage_total_s`, `stage_total_fps`, `cb_avg_ms`, `compute_total_s`,
-`publish_total_s`, …). Readers should filter by `stage`/`reason` and ignore
-unknown keys, so the schema can grow without breaking consumers.
-
-### Publisher metrics
-
-The publishers are separate data-source processes (plain NATS/socket clients that
-do not link the runtime), so their throughput is not visible to the runtime. Each
-publisher reports its own metrics to a file instead of only to stdout:
-
-```shell
-export DRAVA_PUBLISHER_METRICS_FILE=/tmp/drava_pub_metrics.json
+```yaml
+stages:
+  - name: stage1
+    metrics:
+      output_path: /tmp/drava_stage1_metrics.jsonl
 ```
 
-When set, the publisher writes a **single JSON object** at completion:
+or via `DRAVA_METRICS_FILE` (which overrides the YAML value). The runtime then
+**appends one JSON object per metrics snapshot**. Each record carries `reason`
+(`rx_eos`/`tx_eos`), `stage`, raw counters (`rx_items`, `tx_msgs`, `cb_batches`,
+…), and derived fields (`stage_total_s`, `stage_total_fps`, `cb_avg_ms`,
+`compute_total_s`, `publish_total_s`, …). Readers should filter by
+`stage`/`reason` and ignore unknown keys, so the schema can grow safely.
+
+Publishers are separate processes, so each writes its own single-object metrics
+file when `DRAVA_PUBLISHER_METRICS_FILE` is set:
 `{"frames": N, "duration_s": X, "avg_fps": Y[, "eos_seq": S]}`.
 
-### Energy
-
-When available, the runtime reports **energy** in the same metrics record,
-measured from hardware counters over the runtime's stage window (first frame to
-end-of-stream) — not sampled and integrated in Python:
-
-- `gpu_energy_j` — GPU energy from NVML's `nvmlDeviceGetTotalEnergyConsumption`
-  (a monotonic counter, Volta+). Present only in an NVML-enabled build.
-- `cpu_energy_j` — CPU package energy from the Linux RAPL powercap sysfs
-  (`/sys/class/powercap/intel-rapl:*`), when the domains are readable.
-- `total_energy_j`, `total_energy_j_per_frame` — sum of the available sources.
-
-Any field whose source is unavailable is simply omitted, so consumers treat
-these as optional. To enable GPU energy, build with NVML discoverable (NVML ships
-with the CUDA toolkit/driver):
-
-```shell
-export NVML_ROOT=$CUDA_HOME        # or e.g. /usr/local/cuda
-# then configure/build as usual; CMake prints whether NVML was enabled.
-```
+**Energy** (optional) is reported in the same record, from exact hardware
+counters over the stage window: `gpu_energy_j` (NVML, Volta+, NVML-enabled build
+only), `cpu_energy_j` (Linux RAPL powercap sysfs), plus `total_energy_j` and
+`total_energy_j_per_frame`. Fields whose source is unavailable are omitted. To
+enable GPU energy, build with NVML discoverable (`export NVML_ROOT=$CUDA_HOME`).
 
 ## Example applications
 
@@ -318,8 +257,8 @@ Shared helpers and the pipeline launcher live in [examples/common](examples/comm
 > The C++ runtime depends on [xkrt](https://gitlab.inria.fr/xkaapi/dev-v2),
 > yaml-cpp, optionally NATS (nats.c) and NVML/CUDA, and a no-GIL Python (3.13+
 > built with `--disable-gil`). It has been developed and tested on the ALCF
-> **JLSE** cluster, where these dependencies are preinstalled; building elsewhere
-> requires providing them yourself. The example apps and the `drava-pipeline`
+> **JLSE** cluster; for the exact, preconfigured build there, see
+> **[docs/jlse.md](docs/jlse.md)**. The example apps and the `drava-pipeline`
 > CLI are pure Python and run anywhere.
 
 ### Dependencies
@@ -332,49 +271,14 @@ Shared helpers and the pipeline launcher live in [examples/common](examples/comm
 - Optional: NATS server + [nats.c](https://github.com/nats-io/nats.c) client for
   the JetStream transport; NVML/CUDA for GPU energy.
 
-<details>
-<summary>Example environment setup on JLSE (module load)</summary>
+### Build
+
+With the dependencies available (see [docs/jlse.md](docs/jlse.md) for building
+yaml-cpp / NATS and the module setup on JLSE):
 
 ```shell
-module use /soft/modulefiles
-module load spack/gcc-0.6.1
-module use <shared-modules-path>            # site-provided xkaapi modules
-
-module load llvm/master-nightly cmake intel/oneapi/release/2024.1 cuda/12.3.0 hwloc
-module load xkaapi/<version>/Debug-cuda     # for A40/A100/H100 nodes
-module load swig/4.4.1
-module load python/3.14.3-no-gil
-```
-</details>
-
-### Build yaml-cpp
-
-```shell
-git clone https://github.com/jbeder/yaml-cpp.git
-cd yaml-cpp && mkdir build && cd build
-CC=clang CXX=clang++ cmake .. -DYAML_BUILD_SHARED_LIBS=ON \
-    -DCMAKE_INSTALL_PREFIX=$HOME/opt/yaml-cpp-install
-make -j && make install
-```
-
-### (Optional) NATS for the JetStream transport
-
-```shell
-# NATS server
-curl -fsSL https://binaries.nats.dev/nats-io/nats-server/v2@v2.11.6 | sh
-
-# NATS C client
-git clone https://github.com/nats-io/nats.c.git
-cd nats.c && mkdir build && cd build
-cmake .. -DNATS_BUILD_STREAMING=OFF -DCMAKE_INSTALL_PREFIX=$HOME/opt/nats
-make -j && make install
-```
-
-### Build Drava
-
-```shell
-export NATS_ROOT=$HOME/opt/nats     # only if using the JetStream transport
-export NVML_ROOT=$CUDA_HOME         # only if you want GPU energy
+export NATS_ROOT=/path/to/nats     # only for the JetStream transport
+export NVML_ROOT=$CUDA_HOME        # only for GPU energy
 mkdir build && cd build
 CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
@@ -392,58 +296,22 @@ python examples/common/tests/run_tests.py
 ```
 
 The C runtime tests use [Check](https://libcheck.github.io/check/) and
-[Bats](https://bats-core.readthedocs.io/); they run against a build directory:
+[Bats](https://bats-core.readthedocs.io/) and run against a build directory:
 
 ```shell
 ctest --test-dir build/tests --output-on-failure
-
-# Transport-specific tests (opt-in; require a running server/endpoint):
-USE_NATS=1  ctest --test-dir build/tests -R transport_nats -V
-USE_SOCKET=1 ctest --test-dir build/tests -R transport_socket -V
-
-# Python integration tests:
-ctest --test-dir build/tests -R integration_transport_jetstream_python -V
-ctest --test-dir build/tests -R integration_transport_socket_python -V
 ```
 
-Point `CHECK_ROOT` / `NATS_ROOT` at your installs and put `nats-server` and
-`bats` on `PATH` before running the C tests.
+Setup and transport-specific/integration test invocations are in
+[docs/jlse.md](docs/jlse.md).
 
-## Paper experiments
+## Documentation
 
-The submitted-paper experiment index is in [experiments.md](experiments.md).
-Experiment drivers, preserved logs, result CSVs, and figure-generation packages
-are organized under [experiments](experiments); final figures are in
-[figs/paper_figs](figs/paper_figs).
-
-## Developer utilities
-
-`drava-pipeline` is an optional convenience CLI (in
-[examples/common](examples/common)) for working with pipelines during
-development — it is **not** required to run apps or reproduce the paper
-experiments (those use the manual flow and the example benchmark drivers). It
-validates a `pipeline.yaml`, scaffolds a new app, and launches every stage with
-the right `DRAVA_STAGE_NAME` wired automatically.
-
-Run the `drava-pipeline` script at the repo root; it self-bootstraps, so no
-install and no `PYTHONPATH` are needed:
-
-```shell
-# Validate stage wiring (egress of stage N must match ingress of stage N+1):
-./drava-pipeline validate examples/ptychonn/pipeline.yaml
-
-# Scaffold a new app + pipeline.yaml (adds app_stageN.py for extra stages):
-./drava-pipeline new-app myapp --stages 2
-
-# Launch all stages (downstream first) plus the publisher, managing NATS for you:
-./drava-pipeline run examples/ptychonn/pipeline.yaml \
-    --start-nats \
-    --publisher "python publisher_jetstream.py"
-```
-
-For the NATS transport, `run` verifies a server is reachable before launching
-stages (they abort on connect failure); `--start-nats` runs and stops
-`nats-server -js` for you (customize with `--nats-command` / `--nats-config`).
+- [docs/jlse.md](docs/jlse.md) — building on the JLSE cluster (exact module and
+  dependency paths).
+- [docs/paper.md](docs/paper.md) — reproducing the paper experiments and
+  benchmarks.
+- [docs/utils.md](docs/utils.md) — the optional `drava-pipeline` developer CLI.
 
 ## References
 

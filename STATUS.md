@@ -18,6 +18,12 @@ baseline, so the publisher rewrite is behavior-preserving. Fixed the retry test
 (now uses a real nats APIError) and the CLI docs (`pip install -e examples/common`
 or `PYTHONPATH=examples/common`).
 
+**Docs (2026-08-31):** README split into a generic main README + `docs/jlse.md`
+(exact build paths), `docs/paper.md` (paper experiments/benchmarks), `docs/utils.md`
+(drava-pipeline). Tomogan publisher 2-tuple bug fixed; `test_examples_import.py`
+added (suite now 23/23). Open decision: merge `origin/paper/xloop` (66 commits,
+6 overlapping files incl. both benchmarks) — held for now.
+
 **Next concrete step:** Re-run on JLSE (no install — repo-root `./drava-pipeline`,
 build dir on PYTHONPATH):
 `./drava-pipeline run examples/ptychonn/pipeline.yaml --start-nats

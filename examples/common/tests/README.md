@@ -27,6 +27,7 @@ python -m pytest examples/common/tests -q
 | `test_config.py` | `pipeline.yaml` reader + wiring validator: field parsing, broken-wiring rejection, duplicate/missing stages, terminal `forward_eos` warning, missing file. |
 | `test_publisher.py` | Shared publish loop: frame count + EOS marker, metrics-file output, retry on a real NATS `APIError` (skipped if `nats-py` absent), socket wire format `[len][bytes]`. |
 | `test_cli.py` | Launcher logic: per-stage command resolution (stage2 → `app_stage2.py`, resolved against the stage workdir), `new-app` scaffolder (single/multi-stage, refuses non-empty dir), `validate` accept/reject. |
+| `test_examples_import.py` | Smoke-imports the example publishers with heavy deps stubbed; asserts each example's `load_publish_config` return arity matches how the publishers unpack it (guards against integration drift like the TomoGAN 2-tuple bug). |
 
 ## Notes
 

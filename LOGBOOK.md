@@ -14,6 +14,25 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-31 — Split docs into docs/; fix tomogan publisher; add example-import test
+Plan: (public-release polish)
+Decision: (1) Fixed a JLSE-blocking bug — tomogan `publisher_jetstream.py` /
+`publisher_socket.py` imported `load_publish_config` from `drava_common`
+(3-tuple) but unpacked 2; switched them to import tomogan's `publisher_util`
+version (2-tuple, dataset-size default). (2) Split the long README into a
+generic main README plus `docs/jlse.md` (exact JLSE module/dep build paths incl.
+rpereira modules, NATS, Check/Bats), `docs/paper.md` (all reproducible paper
+experiments + benchmark commands, folding in experiments.md), and `docs/utils.md`
+(the optional drava-pipeline CLI). `experiments.md` now points to docs/paper.md;
+examples/common/README points to docs/utils.md. (3) Added
+`test_examples_import.py` that stubs heavy deps and asserts each example's
+`load_publish_config` arity matches usage — this class of bug (the tomogan one)
+now has coverage.
+Result: full pure-Python suite 23/23 (7 config + 4 publisher + 9 cli + 3
+examples-import). tomogan publishers verified importing + returning the 2-tuple.
+All README/docs links resolve. Deferred: merging origin/paper/xloop (66 commits;
+6 overlapping files, mainly the 2 benchmarks) — reviewed, decided to hold.
+
 ## 2026-08-27 — Tidy examples (archive/gitignore); add-new-app docs; CLI tests
 Plan: (Theme C polish)
 Decision: Audited every examples/ dir for unused **code** files.
