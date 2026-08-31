@@ -30,8 +30,8 @@ export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml   # which config
 export DRAVA_STAGE_NAME=stage1                 # which stage in it
 ```
 
-See the [Configuration section of the README](../README.md#configuration) for the
-full list of variables and precedence.
+See [docs/configuration.md](configuration.md) for the full list of variables and
+precedence.
 
 ## Running a pipeline manually
 

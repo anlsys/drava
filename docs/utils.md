@@ -5,8 +5,8 @@
 `drava-pipeline` is an optional convenience CLI (implemented in
 [examples/common](../examples/common)) for working with pipelines during
 development. It is **not** required to run apps or reproduce the paper
-experiments — those use the manual flow (see the
-[main README](../README.md#quickstart)) and the example benchmark drivers.
+experiments — those use the manual flow (see
+[docs/examples.md](examples.md)) and the example benchmark drivers.
 
 It can:
 

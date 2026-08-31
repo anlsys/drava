@@ -256,3 +256,9 @@ experiments/results/
 !experiments/figures/**/*.pdf
 no_gil_requirements.txt
 examples/tomogan/no_gil_requirements.txt
+
+# Internal dev/session tracking (not for public repo)
+STATUS.md
+HANDOFF.md
+LOGBOOK.md
+plans/

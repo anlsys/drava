@@ -114,5 +114,5 @@ adapt it.
 
 - EOS is runtime-owned; callbacks never parse `DRAVA_EOS:`.
 - Metrics go to files, not stdout (see the
-  [Metrics section of the README](../README.md#metrics-and-energy)).
+  [Metrics section of the README](../README.md#metrics)).
 - `pipeline.yaml` is authoritative for runtime knobs.

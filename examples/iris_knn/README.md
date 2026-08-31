@@ -83,7 +83,7 @@ python app.py
 ```
 
 > Without `DRAVA_STAGE_CONFIG`, the runtime uses the **socket** transport with
-> default stream/subject names (see the [root README config section](../../README.md#configuration)).
+> default stream/subject names (see [docs/configuration.md](../../docs/configuration.md)).
 
 ## Socket Transport
 
