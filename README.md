@@ -18,7 +18,7 @@ tomographic denoising (TomoGAN).
 - **Pluggable transports** — NATS JetStream or Unix-domain socket, selected in
   `pipeline.yaml`.
 - **Declarative pipelines** — stages, wiring, threads, and batching live in a
-  single `pipeline.yaml`; a `drava-pipeline` CLI validates and launches them.
+  single `pipeline.yaml`.
 - **File-based metrics** — per-stage throughput, latency, and compute/publish
   breakdown are written as JSON for benchmarks and tuners.
 - **Optional energy accounting** — exact GPU (NVML) and CPU (RAPL) energy
@@ -37,31 +37,43 @@ tomographic denoising (TomoGAN).
 - [Building from source](#building-from-source)
 - [Tests](#tests)
 - [Paper experiments](#paper-experiments)
+- [Developer utilities](#developer-utilities)
 
 ## Quickstart
 
 Once Drava is built and importable (see [Building from source](#building-from-source)),
-run a full pipeline with the launcher — it starts NATS, wires every stage, and
-launches the data source:
+run one of the example pipelines. Each stage is a separate process pointed at its
+`pipeline.yaml` via two environment variables; a data-source publisher feeds
+stage 1.
+
+Using the NATS JetStream transport (start `nats-server -js` first):
 
 ```shell
-# Validate stage wiring (egress of stage N must match ingress of stage N+1):
-./drava-pipeline validate examples/ptychonn/pipeline.yaml
+cd examples/ptychonn
 
-# Launch all stages (downstream first) plus the publisher, managing NATS for you:
-./drava-pipeline run examples/ptychonn/pipeline.yaml \
-    --start-nats \
-    --publisher "python publisher_jetstream.py"
+# Terminal 1 — stage 1:
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml DRAVA_STAGE_NAME=stage1
+python app.py
 
-# Scaffold a brand-new app + pipeline.yaml:
-./drava-pipeline new-app myapp --stages 2
+# Terminal 2 — stage 2:
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml DRAVA_STAGE_NAME=stage2
+python app_stage2.py
+
+# Terminal 3 — the data source:
+python publisher_jetstream.py
 ```
 
-The `drava-pipeline` script lives at the repo root and self-bootstraps, so no
-install and no `PYTHONPATH` are needed. For the NATS transport it verifies a
-server is reachable before launching stages (they abort on connect failure);
-`--start-nats` runs and stops `nats-server -js` for you (customize with
-`--nats-command` / `--nats-config`).
+To run and measure a full multi-stage pipeline in one command, use the example
+benchmark driver, which manages NATS, wires the stages, and reports throughput:
+
+```shell
+cd examples/ptychonn
+python benchmark_two_stages.py --batches 256 --runs 1 --num-frames 10000 \
+    --threads 4 --rate-hz 1000 --nats-url nats://127.0.0.1:4222
+```
+
+See each example's README for details, and
+[Developer utilities](#developer-utilities) for an optional launcher/scaffolder.
 
 ## Writing an app
 
@@ -106,17 +118,12 @@ drava.run(func)
 ## Adding a new example app
 
 A new app needs only a **stage callback** (`app.py`) and a **`pipeline.yaml`**;
-everything generic (config parsing, the publisher loop, EOS, metrics, launching)
-comes from [examples/common](examples/common).
+everything generic (config parsing, the publisher loop, EOS, metrics) comes from
+[examples/common](examples/common). The quickest starting point is to copy an
+existing example directory (e.g. `examples/iris_knn` for a single stage, or
+`examples/ptychonn` for two stages) and adapt it.
 
-1. **Scaffold** the skeleton (creates `pipeline.yaml` + `app.py`, and
-   `app_stageN.py` for extra stages):
-
-   ```shell
-   ./drava-pipeline new-app myapp --stages 1     # or --stages 2 for a pipeline
-   ```
-
-2. **Write the callback** in `app.py`. It receives a batch of raw payloads; the
+1. **Write the callback** in `app.py`. It receives a batch of raw payloads; the
    runtime already stripped EOS and assigns `base_index`:
 
    ```python
@@ -130,14 +137,14 @@ comes from [examples/common](examples/common).
    ```
 
    For a **terminal** stage, use an `on_end_of_stream` hook and set
-   `egress.forward_eos: false` (the scaffolder does this for the last stage).
+   `egress.forward_eos: false` in `pipeline.yaml`.
 
-3. **Edit `pipeline.yaml`** — set `transport.type`, each stage's
+2. **Write `pipeline.yaml`** — set `transport.type`, each stage's
    `runtime.threads` / `callback_batch`, and the `ingress`/`egress`
    stream/subject names. For a multi-stage pipeline, **stage N's `egress` must
-   match stage N+1's `ingress`** (the launcher validates this).
+   match stage N+1's `ingress`**.
 
-4. **Add a publisher** (the data source is the only app-specific part). Reuse the
+3. **Add a publisher** (the data source is the only app-specific part). Reuse the
    shared loop from `drava_common`:
 
    ```python
@@ -162,13 +169,9 @@ comes from [examples/common](examples/common).
    For the socket transport, use `socket_publish_stream` instead (see
    `examples/ptychonn/publisher_socket.py`).
 
-5. **Validate and run:**
-
-   ```shell
-   ./drava-pipeline validate examples/myapp/pipeline.yaml
-   ./drava-pipeline run examples/myapp/pipeline.yaml --start-nats \
-       --publisher "python publisher_jetstream.py"
-   ```
+4. **Run it** as shown in [Quickstart](#quickstart) (one process per stage plus
+   the publisher). The optional [`drava-pipeline`](#developer-utilities) helper
+   can scaffold, validate, and launch all stages with one command.
 
 Conventions the runtime relies on:
 
@@ -200,8 +203,9 @@ environment variables:
 
 Everything else about the stage (transport, threads, streams, batching) comes
 from the stage named `DRAVA_STAGE_NAME` inside `DRAVA_STAGE_CONFIG`. If no config
-is loaded, the runtime defaults to the **socket** transport. The `drava-pipeline`
-launcher sets these two required variables for each stage automatically.
+is loaded, the runtime defaults to the **socket** transport. The benchmark
+drivers (and the optional [`drava-pipeline`](#developer-utilities) helper) set
+these two required variables for each stage automatically.
 
 Running a single stage manually:
 
@@ -411,6 +415,35 @@ The submitted-paper experiment index is in [experiments.md](experiments.md).
 Experiment drivers, preserved logs, result CSVs, and figure-generation packages
 are organized under [experiments](experiments); final figures are in
 [figs/paper_figs](figs/paper_figs).
+
+## Developer utilities
+
+`drava-pipeline` is an optional convenience CLI (in
+[examples/common](examples/common)) for working with pipelines during
+development — it is **not** required to run apps or reproduce the paper
+experiments (those use the manual flow and the example benchmark drivers). It
+validates a `pipeline.yaml`, scaffolds a new app, and launches every stage with
+the right `DRAVA_STAGE_NAME` wired automatically.
+
+Run the `drava-pipeline` script at the repo root; it self-bootstraps, so no
+install and no `PYTHONPATH` are needed:
+
+```shell
+# Validate stage wiring (egress of stage N must match ingress of stage N+1):
+./drava-pipeline validate examples/ptychonn/pipeline.yaml
+
+# Scaffold a new app + pipeline.yaml (adds app_stageN.py for extra stages):
+./drava-pipeline new-app myapp --stages 2
+
+# Launch all stages (downstream first) plus the publisher, managing NATS for you:
+./drava-pipeline run examples/ptychonn/pipeline.yaml \
+    --start-nats \
+    --publisher "python publisher_jetstream.py"
+```
+
+For the NATS transport, `run` verifies a server is reachable before launching
+stages (they abort on connect failure); `--start-nats` runs and stops
+`nats-server -js` for you (customize with `--nats-command` / `--nats-config`).
 
 ## References
 
