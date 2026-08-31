@@ -18,6 +18,11 @@ baseline, so the publisher rewrite is behavior-preserving. Fixed the retry test
 (now uses a real nats APIError) and the CLI docs (`pip install -e examples/common`
 or `PYTHONPATH=examples/common`).
 
+**Merged (2026-08-31):** `origin/paper/xloop` merged in (docs kept from this
+branch; functionality from xloop). Backup at `backup/pre-xloop-merge-20260831`.
+Paper experiments (pvapy HPC baselines, tomogan power-trace/energy, ytopt tuner,
+AD.md) are now on this branch. Needs JLSE to verify the merged benchmarks run.
+
 **Docs (2026-08-31):** README split into a generic main README + `docs/jlse.md`
 (exact build paths), `docs/paper.md` (paper experiments/benchmarks), `docs/utils.md`
 (drava-pipeline). Tomogan publisher 2-tuple bug fixed; `test_examples_import.py`

@@ -14,6 +14,31 @@ Result: <what landed / verification outcome>
 
 ---
 
+## 2026-08-31 — Merged origin/paper/xloop (functionality) into this branch
+Plan: (bring paper experiments into the simplification branch)
+Decision: Merged xloop (66 commits) with rule "docs → prefer this branch;
+functionality → take xloop". Backup branch `backup/pre-xloop-merge-20260831`
+created first. Six conflicts:
+- experiments.md → ours (points to docs/paper.md).
+- .gitignore → took xloop's experiment-output-hygiene rules; kept our data dirs.
+- examples/tomogan/benchmark.py → took xloop's (934 lines w/ power-trace + energy
+  + `--nats-max-payload`; supersedes my interim config.nats/max_payload fix).
+  xloop did NOT touch the tomogan publishers or examples/common, so our
+  drava_common-based publishers remain and work with it.
+- examples/ptychonn/benchmark_two_stages.py → hand-merged: kept our file-based
+  publisher metrics (xloop had reverted to PUB_DONE_RE stdout scraping, which
+  wouldn't match our publisher's log format), but adopted xloop's `pub_first_frame`
+  end-to-end timing, adapting the marker to our publisher's "first frame at" line
+  and wiring on_pub_line into the pub stream reader.
+  - two sc5/tomogan figure plot scripts auto-merged.
+Brought in (clean adds): SC Artifact Description (AD.md, AD_form_submission.txt),
+pvapy HPC baselines (benchmark_two_stage.py, consumer_stage2.py,
+pvapy_hpc_stage2_processor.py), tune_ytopt.py, check_perf_energy.py,
+sc4_tomogan_gpu_energy.py, power-trace CSVs + figures.
+Result: no conflict markers anywhere; docs/ intact, README still 173 lines,
+drava-pipeline present, publishers still drava_common-based; pure-Python suite
+23/23; all xloop-added Python parses. Runtime/benchmarks need JLSE to verify.
+
 ## 2026-08-31 — Slim README to a landing page; expand docs/ (build, examples, new-app, jlse)
 Plan: (public-release polish)
 Decision: README was still too long and mixed how-to detail with the overview.
