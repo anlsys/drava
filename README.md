@@ -29,10 +29,18 @@ once so you can focus on the science:
 
 ## How it works
 
-```
- data source ──▶ stage 1 ──▶ stage 2 ──▶ ... ──▶ output
- (publisher)    (your func)  (your func)
-```
+![Drava workflow](figs/workflow.png)
+
+You write the stage logic and a small YAML configuration; Drava runs your
+callbacks across workers and GPUs and reports metrics:
+
+1. **Interface** — wire your stage callback to Drava with `drava.run(func)`.
+2. **Configure** — describe stages, transport, threads, and batching in
+   `pipeline.yaml`.
+3. **Execute** — Drava schedules work across threads and GPUs via the xkrt
+   runtime.
+4. **Observe** — each stage reports throughput, latency, and energy for analysis
+   and tuning.
 
 Each stage is a separate process. A stage reads its settings from `pipeline.yaml`
 and runs your callback on each incoming batch of frames. Transform stages publish

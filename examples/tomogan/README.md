@@ -170,7 +170,7 @@ CSV results.
 Paper experiment logs and figure-generation scripts are organized from the
 repository root:
 
-- Experiment index: [../../experiments.md](../../experiments.md)
+- Experiment index: [../../docs/paper.md](../../docs/paper.md)
 - Preserved TomoGAN logs: [../../experiments/logs/tomogan_energy.md](../../experiments/logs/tomogan_energy.md), [../../experiments/logs/tomogan_baseline.md](../../experiments/logs/tomogan_baseline.md)
 - TomoGAN energy figure package: [../../experiments/figures/tomogan_energy](../../experiments/figures/tomogan_energy)
 

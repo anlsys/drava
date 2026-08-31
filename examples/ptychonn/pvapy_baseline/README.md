@@ -297,7 +297,7 @@ Drava's `benchmark.py` also writes a `comparison_summary.csv` in the same
 side by side. Group both by `batch`/`rate`, take mean/std of `stage_total_fps`
 (and `pipeline_e2e_s` for two-stage), and plot with error bars or a shaded
 band. The chart-generation script is referenced in
-`drava/experiments.md` (Baseline comparison with PvaPy).
+`drava/docs/paper.md` (Baseline comparison with PvaPy).
 
 ### Notes
 

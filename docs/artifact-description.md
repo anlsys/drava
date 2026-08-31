@@ -91,7 +91,7 @@ export PYTHONPATH="$(pwd):$PYTHONPATH"
 
 ## 5. Experiment workflow
 
-All experiments and their exact commands are indexed in `experiments.md`. Each
+All experiments and their exact commands are indexed in `docs/paper.md`. Each
 benchmark writes a timestamped `bench_logs*/` (or `experiments/results/`)
 directory with per-run logs and a `summary.csv`; plot scripts consume those CSVs
 and emit PDF/PNG into `figs/paper_figs/`.

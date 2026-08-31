@@ -23,7 +23,7 @@ python experiments/sc5_bare_runtime_ceiling.py \
 
 Paper artifacts:
 
-- Experiment index: [../../experiments.md](../../experiments.md)
+- Experiment index: [../../docs/paper.md](../../docs/paper.md)
 - Preserved run log: [../../experiments/logs/sc5_bare_runtime_ceiling.md](../../experiments/logs/sc5_bare_runtime_ceiling.md)
 - Figure package: [../../experiments/figures/sc5_bare_runtime_ceiling](../../experiments/figures/sc5_bare_runtime_ceiling)
 
