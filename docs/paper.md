@@ -74,21 +74,19 @@ python experiments/figures/sc5_bare_runtime_ceiling/plot_bare_runtime_ceiling.py
 - Figure package: `experiments/figures/tomogan_energy/`
 - Submitted figure: `docs/figures/paper_figs/tomogan_energy_efficiency.pdf`
 
+The submitted energy figure was measured at **2 worker threads** across batch
+sizes; that is the configuration to reproduce:
+
 ```shell
 cd examples/tomogan
 python benchmark.py \
-  --batches 2,4,8,16 --thread-list 2,4,8 \
-  --num-frames 512 --runs 3 --rate-hz 0 \
+  --batches 2,4,8,16 --thread-list 2 \
+  --num-frames 512 --runs 5 --rate-hz 0 \
   --gpu-sample-interval-s 0.2
 ```
 
-If the benchmark cannot find NATS automatically, pass it explicitly:
-
-```shell
-python benchmark.py --batches 2,4,8,16 --thread-list 2,4,8 --num-frames 512 \
-  --runs 3 --rate-hz 0 --gpu-sample-interval-s 0.2 \
-  --nats-command ~/nats_binary/nats-server --nats-config ~/nats_binary/config.nats
-```
+To also sweep higher thread counts (not part of the submitted figure), extend
+`--thread-list`, e.g. `--thread-list 2,4`.
 
 Regenerate the figure:
 
