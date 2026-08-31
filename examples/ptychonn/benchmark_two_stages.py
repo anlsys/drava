@@ -61,7 +61,9 @@ def parse_args():
     p.add_argument("--max-retries", type=int, default=3,
                    help="Retries per run on intermittent native runtime crashes (e.g. XKRT free() abort).")
     p.add_argument("--timeout-ms", type=int, default=500, help="DRAVA_FETCH_TIMEOUT_MS.")
-    p.add_argument("--threads", type=int, default=1, help="DRAVA_THREADS for both apps.")
+    p.add_argument("--threads", type=int, default=None,
+                   help="Worker threads for both stages. Overrides runtime.threads "
+                        "in the stage config; if unset, the config value is used.")
     p.add_argument("--stage1-threads", type=int, default=None, help="Override DRAVA_THREADS for stage1.")
     p.add_argument("--stage2-threads", type=int, default=None, help="Override DRAVA_THREADS for stage2.")
     p.add_argument("--stage1-callback-batch", type=int, default=None,
@@ -505,17 +507,22 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         else float(yaml_app_timeout_s) if yaml_app_timeout_s is not None
         else 45.0
     )
+    # Precedence: per-stage flag > --threads (explicit) > stage config > 1.
     stage1_threads = (
         args.stage1_threads
         if args.stage1_threads is not None
-        else int(yaml_stage1_threads) if yaml_stage1_threads is not None
         else args.threads
+        if args.threads is not None
+        else int(yaml_stage1_threads) if yaml_stage1_threads is not None
+        else 1
     )
     stage2_threads = (
         args.stage2_threads
         if args.stage2_threads is not None
-        else int(yaml_stage2_threads) if yaml_stage2_threads is not None
         else args.threads
+        if args.threads is not None
+        else int(yaml_stage2_threads) if yaml_stage2_threads is not None
+        else 1
     )
     stage1_callback_batch = (
         args.stage1_callback_batch
