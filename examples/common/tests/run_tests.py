@@ -15,6 +15,7 @@ _MODULES = [
     "test_publisher.py",
     "test_cli.py",
     "test_examples_import.py",
+    "test_reconstruction_accuracy.py",
 ]
 
 
