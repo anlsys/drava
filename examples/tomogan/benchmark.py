@@ -68,8 +68,10 @@ def parse_args():
     p.add_argument("--reuse-nats", action="store_true", help="Use an existing NATS server.")
     p.add_argument("--nats-url", default="", help="NATS URL. Defaults to transport.nats_url from --stage-config.")
     p.add_argument("--nats-command", default="nats-server", help="nats-server executable when launching NATS.")
-    p.add_argument("--nats-config", default="",
-                   help="Optional nats-server config file. When set, launches '<nats-command> -c <file>'.")
+    p.add_argument("--nats-config", default="config.nats",
+                   help="nats-server config file (relative to this dir if not absolute). "
+                        "The bundled config.nats sets max_payload=8MB, required for "
+                        "TomoGAN's multi-MB frames. Pass '' to fall back to -js flags.")
     p.add_argument("--stage-config", default="pipeline.yaml", help="Base stage config YAML path.")
     p.add_argument("--out-dir", default="bench_logs", help="Output directory under examples/tomogan.")
     p.add_argument("--app-timeout-s", type=float, default=None, help="Max wait for app metrics after publisher exits.")
@@ -159,19 +161,33 @@ def tail_text(path: Path, n: int = 60):
 
 
 def start_nats(args, run_dir: Path, nats_url: str):
-    if args.nats_config:
-        cmd = [args.nats_command, "-c", str(Path(args.nats_config).expanduser())]
-        log_path = run_dir / "nats.log"
-        f = open(log_path, "w", encoding="utf-8")
-        proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
-        return proc, f, log_path
-
-    host_port = nats_url.replace("nats://", "")
-    if ":" not in host_port:
-        raise RuntimeError(f"Invalid --nats-url: {nats_url}")
-    host, port = host_port.rsplit(":", 1)
-    cmd = [args.nats_command, "-js", "-a", host, "-p", port]
     log_path = run_dir / "nats.log"
+
+    # Resolve a config path relative to this benchmark's directory if it is not
+    # absolute (so `--nats-config config.nats` finds the bundled file).
+    cfg = ""
+    if args.nats_config:
+        p = Path(args.nats_config).expanduser()
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent / p
+        if p.exists():
+            cfg = str(p)
+        else:
+            print(f"[global] warning: nats-config {p} not found; "
+                  f"falling back to -js flags with an explicit max_payload.")
+
+    if cfg:
+        cmd = [args.nats_command, "-c", cfg]
+    else:
+        host_port = nats_url.replace("nats://", "")
+        if ":" not in host_port:
+            raise RuntimeError(f"Invalid --nats-url: {nats_url}")
+        host, port = host_port.rsplit(":", 1)
+        # TomoGAN frames are several MB; the NATS default max_payload is 1MB, so
+        # set it explicitly even without a config file.
+        cmd = [args.nats_command, "-js", "-a", host, "-p", port,
+               "--max_payload", "16MB"]
+
     f = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
     return proc, f, log_path
