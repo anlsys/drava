@@ -622,6 +622,15 @@ def run_one(args, base_env, run_dir: Path, base_config: dict, batch_size: int, t
     rate_hz = float(args.rate_hz) if args.rate_hz is not None else float(yaml_rate_hz or 0.0)
     effective_threads = threads if threads is not None else (
         args.threads if args.threads is not None else int(yaml_threads))
+    # The NATS transport reserves one worker thread (tid 0) for JetStream I/O;
+    # with callback_serialize=false the callback runs on the other threads, so a
+    # stage needs at least 2 threads or no frames are ever processed.
+    if effective_threads is not None and effective_threads < 2:
+        raise SystemExit(
+            f"threads={effective_threads} is invalid for the NATS transport: one "
+            f"thread is reserved for I/O, leaving no worker to run the callback. "
+            f"Use threads >= 2 (or set callback_serialize: true)."
+        )
     effective_timeout_ms = args.timeout_ms if args.timeout_ms is not None else int(yaml_timeout_ms)
 
     run_tag = f"{run_dir.name}_b{batch_size}_r{run_idx}"

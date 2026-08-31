@@ -580,6 +580,17 @@ def main():
     rows = []
     try:
         for cell in cells:
+            # The NATS transport reserves one worker thread (tid 0) for I/O. With
+            # callback_serialize=false the callback runs on the other threads, so
+            # a non-serialized stage needs >= 2 threads. Skip invalid cells rather
+            # than aborting the whole sweep. (serialize=true runs inline on tid 0.)
+            if cell["threads"] < 2 and not cell["callback_serialize"]:
+                print(
+                    f"[sc5-bare-runtime] skip batch={cell['batch']} "
+                    f"threads={cell['threads']} serialize=0: needs >= 2 threads "
+                    f"(1 is reserved for I/O)."
+                )
+                continue
             for run_idx in range(1, args.runs + 1):
                 print(
                     "[sc5-bare-runtime] "
