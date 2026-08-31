@@ -26,8 +26,10 @@ DRAVA_METRICS_RE = re.compile(
     r"stage_total_s=(?P<stage_total_s>[0-9.]+)\s+stage_total_fps=(?P<stage_total_fps>[0-9.]+)\s+"
     r"stage=(?P<stage>\S+)"
 )
+# Matches the shared drava_common publisher's completion line, e.g.:
+#   [publisher] done: 512 frames in 1.473s (avg_fps=347.54) eos_seq=513
 PUB_DONE_RE = re.compile(
-    r"Done:\s+published\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
+    r"\[publisher\]\s+done:\s+(?P<frames>\d+)\s+frames\s+in\s+(?P<time>[0-9.]+)s\s+"
     r"\(avg_fps=(?P<fps>[0-9.]+)\)"
 )
 
