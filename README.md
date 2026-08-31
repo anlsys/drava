@@ -1,16 +1,19 @@
 # Drava
 
-Drava is a streaming runtime for scientific data pipelines. It moves data frames
-from an instrument or data source, through one or more processing or inference
-stages, and on to the next stage or an output — at high rate, on HPC hardware.
+Drava is an event-driven runtime for scientific streaming pipelines. It moves
+data frames from an instrument or data source, through one or more processing or
+inference stages, and on to the next stage or an output.
 
 Each stage is a small Python function; Drava handles the rest: receiving data,
 grouping it into batches, running the function across threads, signaling the end
 of a run, and recording performance and energy measurements.
 
-Drava is developed at Argonne National Laboratory and is built on the
-[xkrt](https://gitlab.inria.fr/xkaapi/dev-v2) task runtime. It has been used for
-ptychographic reconstruction (PtychoNN) and tomographic denoising (TomoGAN).
+Drava targets a single GPU node — a near-facility or edge inference node that
+uses HPC-class hardware — rather than multi-node distribution. It is developed at
+Argonne National Laboratory and built on the
+[xkrt](https://gitlab.inria.fr/xkaapi/dev-v2) task runtime. It has been evaluated
+on ptychographic reconstruction (PtychoNN) and tomographic denoising (TomoGAN)
+on a single NVIDIA A100 node.
 
 ## Why Drava
 
@@ -44,20 +47,8 @@ runs the callbacks across workers and GPUs and reports metrics:
 
 Each stage is a separate process. A stage reads its settings from `pipeline.yaml`
 and runs the callback on each incoming batch of frames. Transform stages publish
-their results to the next stage; the final stage writes the output.
-
-A minimal stage:
-
-```python
-import drava
-
-def process(frames, base_index):
-    for frame in frames:            # frames: list of raw byte payloads
-        result = run_model(frame)
-        drava.publish_py(result)    # send downstream
-
-drava.run(process)
-```
+their results to the next stage; the final stage writes the output. See
+[docs/new-app.md](docs/new-app.md) for the stage callback API.
 
 ## Metrics
 
@@ -67,16 +58,16 @@ rate) are assembled from these per-stage records by the benchmark drivers.
 
 | Metric | Meaning |
 | --- | --- |
-| `stage_total_fps` | Frames processed per second by the stage. |
-| `stage_avg_ms` / `stage_max_ms` | Average / maximum per-frame processing latency. |
-| `cb_total_s` | Total time spent in the callback. |
-| `compute_total_s` | Callback time excluding downstream publishing. |
-| `publish_total_s` | Time spent publishing results downstream. |
-| `rx_items` / `rx_bytes` | Frames / bytes received. |
-| `tx_msgs` / `tx_bytes` | Messages / bytes published downstream. |
-| `gpu_energy_j` | GPU energy over the run (NVML; when available). |
-| `cpu_energy_j` | CPU package energy over the run (RAPL on Linux). |
-| `total_energy_j_per_frame` | Energy per frame from the available sources. |
+| `stage_total_fps` | Frames processed per second by the stage |
+| `stage_avg_ms` / `stage_max_ms` | Average / maximum per-frame processing latency |
+| `cb_total_s` | Total time spent in the callback |
+| `compute_total_s` | Callback time excluding downstream publishing |
+| `publish_total_s` | Time spent publishing results downstream |
+| `rx_items` / `rx_bytes` | Frames / bytes received |
+| `tx_msgs` / `tx_bytes` | Messages / bytes published downstream |
+| `gpu_energy_j` | GPU energy over the run (NVML; when available) |
+| `cpu_energy_j` | CPU package energy over the run (RAPL on Linux) |
+| `total_energy_j_per_frame` | Energy per frame from the available sources |
 
 To capture metrics in a file, set an output path per stage in `pipeline.yaml`:
 
@@ -94,15 +85,7 @@ their hardware source is available.
 
 1. **Build the runtime** — see [docs/build.md](docs/build.md) (generic) or
    [docs/jlse.md](docs/jlse.md) (the Argonne JLSE cluster, with datasets).
-2. **Run an example** — see [docs/examples.md](docs/examples.md). For example,
-   the two-stage PtychoNN pipeline:
-
-   ```shell
-   cd examples/ptychonn
-   python benchmark_two_stages.py --batches 256 --runs 1 --num-frames 10000 \
-       --threads 4 --rate-hz 1000 --nats-url nats://127.0.0.1:4222
-   ```
-
+2. **Run an example** — see [docs/examples.md](docs/examples.md).
 3. **Add a new app** — see [docs/new-app.md](docs/new-app.md).
 
 ## Documentation
@@ -123,11 +106,11 @@ Each example has its own README under [examples/](examples):
 
 | Example | Description |
 | --- | --- |
-| [PtychoNN](examples/ptychonn) | Two-stage ptychographic inference. |
-| [TomoGAN](examples/tomogan) | Tomographic denoising with energy reporting. |
-| [Iris KNN](examples/iris_knn) | Minimal single-stage inference. |
-| [Bare runtime](examples/bare_runtime) | Runtime message-rate ceiling (no model). |
-| [Dataflow](examples/dataflow) | Minimal transport demonstration. |
+| [PtychoNN](examples/ptychonn) | Two-stage ptychographic inference |
+| [TomoGAN](examples/tomogan) | Tomographic denoising with energy reporting |
+| [Iris KNN](examples/iris_knn) | Minimal single-stage inference |
+| [Bare runtime](examples/bare_runtime) | Runtime message-rate ceiling (no model) |
+| [Dataflow](examples/dataflow) | Minimal transport demonstration |
 
 Shared helpers live in [examples/common](examples/common).
 

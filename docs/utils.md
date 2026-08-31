@@ -57,14 +57,14 @@ PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn
 
 | Flag | Applies to | Purpose |
 |---|---|---|
-| `--publisher "CMD"` | `run` | Launch a data-source command after stages are up. |
-| `--start-nats` | `run` | Start/stop a local `nats-server -js` for the NATS transport. |
-| `--nats-command` | `run` | nats-server executable (default `nats-server`). |
-| `--nats-config` | `run` | nats-server config file (else `-js -p PORT`). |
-| `--app-cmd STAGE=CMD` | `run` | Override the command used to launch a stage. |
-| `--workdir DIR` | `run` | Directory to launch stage commands in (default: config's dir). |
-| `--dir DIR` | `new-app` | Target directory (default `examples/NAME`). |
-| `--stages N` | `new-app` | Number of stages to scaffold. |
+| `--publisher "CMD"` | `run` | Launch a data-source command after stages are up |
+| `--start-nats` | `run` | Start/stop a local `nats-server -js` for the NATS transport |
+| `--nats-command` | `run` | nats-server executable (default `nats-server`) |
+| `--nats-config` | `run` | nats-server config file (else `-js -p PORT`) |
+| `--app-cmd STAGE=CMD` | `run` | Override the command used to launch a stage |
+| `--workdir DIR` | `run` | Directory to launch stage commands in (default: config's dir) |
+| `--dir DIR` | `new-app` | Target directory (default `examples/NAME`) |
+| `--stages N` | `new-app` | Number of stages to scaffold |
 
 ## Tests
 

@@ -12,6 +12,25 @@ and are run from the repository root unless noted. Each stage's runtime knobs
 (threads, batch sizes, streams) come from `pipeline.yaml`; benchmark CLI flags
 override them per run.
 
+The paper results were measured on a **single GPU node** (dual-socket AMD EPYC
+7532, 256 GB, one NVIDIA A100-PCIE-40GB), representative of a near-facility or
+edge inference node. Absolute numbers depend on the node; small run-to-run and
+node-to-node variation is expected.
+
+## Verifying a run against the paper
+
+The paper's per-run measurements are committed under
+`experiments/figures/<experiment>/`. To compare a fresh benchmark's `summary.csv`
+against that reference and print the percent difference per configuration:
+
+```shell
+python experiments/compare_to_paper.py tomogan-energy \
+    examples/tomogan/bench_logs/<timestamp>/summary.csv
+```
+
+This is a reproducibility check, not a pass/fail gate: differences within roughly
+10–15% are normal across nodes and runs.
+
 ---
 
 ## 1. Runtime message-rate ceiling

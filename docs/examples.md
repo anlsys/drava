@@ -7,11 +7,11 @@ This page covers how to run them; for the full JLSE walkthrough with datasets se
 
 | Example | Stages | Notes |
 |---|---|---|
-| [PtychoNN](../examples/ptychonn) | 2 | Ptychographic inference; dataset + weights from Hugging Face. |
-| [TomoGAN](../examples/tomogan) | 1 | Tomographic denoising; multi-MB frames + energy reporting. |
-| [Bare runtime](../examples/bare_runtime) | 1 | Message-rate ceiling; no model. |
-| [Iris KNN](../examples/iris_knn) | 1 | Minimal single-row inference. |
-| [Dataflow](../examples/dataflow) | 1 | Minimal transport demo. |
+| [PtychoNN](../examples/ptychonn) | 2 | Ptychographic inference; dataset + weights from Hugging Face |
+| [TomoGAN](../examples/tomogan) | 1 | Tomographic denoising; multi-MB frames + energy reporting |
+| [Bare runtime](../examples/bare_runtime) | 1 | Message-rate ceiling; no model |
+| [Iris KNN](../examples/iris_knn) | 1 | Minimal single-row inference |
+| [Dataflow](../examples/dataflow) | 1 | Minimal transport demo |
 
 ## Prerequisites
 

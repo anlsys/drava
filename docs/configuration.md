@@ -11,9 +11,9 @@ The process that runs a stage (`app.py`) reads only three environment variables:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DRAVA_STAGE_CONFIG` | yes | Path to the `pipeline.yaml` to load. |
-| `DRAVA_STAGE_NAME` | yes | Which `stages:` entry this process is (e.g. `stage1`). |
-| `DRAVA_METRICS_FILE` | no | Override `metrics.output_path`; append one JSON record per run here. |
+| `DRAVA_STAGE_CONFIG` | yes | Path to the `pipeline.yaml` to load |
+| `DRAVA_STAGE_NAME` | yes | Which `stages:` entry this process is (e.g. `stage1`) |
+| `DRAVA_METRICS_FILE` | no | Override `metrics.output_path`; append one JSON record per run here |
 
 Everything else about a stage comes from the entry named `DRAVA_STAGE_NAME`
 inside `DRAVA_STAGE_CONFIG`. If no config is loaded, the runtime defaults to the
