@@ -524,6 +524,17 @@ def run_one(args, base_env, run_dir: Path, batch_size: int, run_idx: int):
         else int(yaml_stage2_threads) if yaml_stage2_threads is not None
         else 1
     )
+    # The NATS transport dedicates one worker thread (tid 0) to JetStream I/O;
+    # with callback_serialize=false the callbacks run on the *other* threads, so
+    # a stage needs at least 2 threads or no frames are ever processed.
+    for name, nthreads in (("stage1", stage1_threads), ("stage2", stage2_threads)):
+        if nthreads is not None and nthreads < 2:
+            raise SystemExit(
+                f"{name} threads={nthreads} is invalid for the NATS transport: "
+                f"one thread is reserved for I/O, leaving no worker to run the "
+                f"callback. Use --threads >= 2 (or set callback_serialize: true)."
+            )
+
     stage1_callback_batch = (
         args.stage1_callback_batch
         if args.stage1_callback_batch is not None
