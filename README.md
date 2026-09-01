@@ -34,6 +34,8 @@ which decouples application logic from runtime policy.
 
 Drava is a layered runtime.
 
+![Drava layered architecture](docs/figures/architecture.png)
+
 - **Application interface.** Callbacks are registered through a C or Python API.
 - **Pipeline configuration.** A YAML file binds each stage to its transport,
   batching policy, and thread team.
@@ -41,9 +43,13 @@ Drava is a layered runtime.
   transport. Compute threads run callback tasks with work-stealing. A
   microbatching layer accumulates messages and flushes them on a size threshold,
   an end-of-stream event, or a timeout. Lock-free atomic counters record metrics.
-- **Transport.** Two interchangeable backends. Unix sockets for intra-node
-  communication and NATS JetStream (publish/subscribe) for streaming across
-  nodes.
+- **Transport.** Stages communicate by passing events over a transport, using a
+  publish/subscribe model. Each stage subscribes to its ingress subject and
+  publishes derived events to its egress subject. Two backends are
+  interchangeable. Unix sockets are used for low-latency intra-node
+  communication. NATS JetStream is used for durable publish/subscribe streaming
+  across nodes, where a stage reads from a subject and a durable consumer
+  redelivers messages after a disconnection.
 
 ## Measurement
 
