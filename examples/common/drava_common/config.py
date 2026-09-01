@@ -134,31 +134,46 @@ def _fallback_parse(text: str) -> dict:  # pragma: no cover - simple indent pars
 # --------------------------------------------------------------------------- #
 @dataclass
 class StageConfig:
-    name: str
-    runtime: dict = field(default_factory=dict)
-    ingress: dict = field(default_factory=dict)
-    egress: dict = field(default_factory=dict)
-    metrics: dict = field(default_factory=dict)
+    """One ``stages:`` entry from a ``pipeline.yaml``.
+
+    The ``runtime``, ``ingress``, ``egress``, and ``metrics`` sections are kept
+    as raw dicts so unknown keys are preserved.
+    """
+
+    name: str                                    #: Stage name (e.g. ``"stage1"``).
+    runtime: dict = field(default_factory=dict)  #: ``runtime:`` block (threads, batching).
+    ingress: dict = field(default_factory=dict)  #: ``ingress:`` block (input stream/subject).
+    egress: dict = field(default_factory=dict)   #: ``egress:`` block (output stream/subject, forward_eos).
+    metrics: dict = field(default_factory=dict)  #: ``metrics:`` block (output_path).
 
     @property
     def threads(self) -> Optional[int]:
+        """Worker thread count (``runtime.threads``), or None if unset."""
         return self.runtime.get("threads")
 
     @property
     def callback_batch(self) -> Optional[int]:
+        """Callback batch size (``runtime.callback_batch``), or None if unset."""
         return self.runtime.get("callback_batch")
 
 
 @dataclass
 class PipelineConfig:
-    path: Path
-    raw: dict
-    name: str
-    transport_type: str
-    nats_url: str
-    stages: list[StageConfig]
+    """A parsed, normalized ``pipeline.yaml``.
+
+    Returned by :func:`load_pipeline_config`. ``raw`` holds the full parsed
+    mapping; the other fields are convenience views over it.
+    """
+
+    path: Path                    #: Path the config was loaded from.
+    raw: dict                     #: The full parsed YAML mapping.
+    name: str                     #: Pipeline name (``pipeline.name``).
+    transport_type: str           #: Transport backend (``transport.type``: ``nats``/``socket``).
+    nats_url: str                 #: NATS URL (``transport.nats_url``).
+    stages: list[StageConfig]     #: Stages in declaration order.
 
     def stage(self, name: str) -> StageConfig:
+        """Return the stage named ``name``, or raise :class:`PipelineConfigError`."""
         for s in self.stages:
             if s.name == name:
                 return s
@@ -169,6 +184,7 @@ class PipelineConfig:
 
     @property
     def stage_names(self) -> list[str]:
+        """Stage names in declaration order."""
         return [s.name for s in self.stages]
 
 
