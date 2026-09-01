@@ -63,12 +63,22 @@ int drava_t::init(void)
     this->runtime.init();
     this->frame_routine = NULL;
     this->frame_routine_user_data = NULL;
+    this->eos_routine = NULL;
+    this->eos_routine_user_data = NULL;
+    this->eos_payload.clear();
+    this->eos_expected_frames = 0;
+    this->eos_seen = false;
+    this->eos_finalized = false;
+    this->forward_eos = this->egress_cfg.forward_eos;
+    this->next_data_index.store(0);
     this->callback_batch_size = this->runtime_cfg.callback_batch;
     this->callback_flush_timeout_ms =
             this->runtime_cfg.callback_flush_timeout_ms;
     this->callback_serialize = this->runtime_cfg.callback_serialize;
     this->next_batch_id.store(1);
     this->next_frame_id.store(1);
+    if (this->energy_sampler == NULL)
+        this->energy_sampler = drava_energy_create();
     this->stats_reset();
     return DRAVA_SUCCESS;
 }
@@ -78,6 +88,13 @@ int drava_t::register_frame_routine(drava_frame_routine_t routine,
 {
     this->frame_routine = routine;
     this->frame_routine_user_data = user_data;
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::register_eos_routine(drava_eos_routine_t routine, void *user_data)
+{
+    this->eos_routine = routine;
+    this->eos_routine_user_data = user_data;
     return DRAVA_SUCCESS;
 }
 
@@ -143,6 +160,10 @@ int drava_t::deinit(void)
     if (this->transport_type == DRAVA_TRANSPORT_NATS)
         (void)drava_transport_nats_shutdown(this);
 #endif
+    if (this->energy_sampler != NULL) {
+        drava_energy_destroy(this->energy_sampler);
+        this->energy_sampler = NULL;
+    }
     this->runtime.deinit();
     return DRAVA_SUCCESS;
 }
@@ -264,5 +285,11 @@ int drava_t::set_callback_flush_timeout_ms(int timeout_ms)
 int drava_t::set_callback_serialize(bool enabled)
 {
     this->callback_serialize = enabled;
+    return DRAVA_SUCCESS;
+}
+
+int drava_t::set_forward_eos(bool enabled)
+{
+    this->forward_eos = enabled;
     return DRAVA_SUCCESS;
 }

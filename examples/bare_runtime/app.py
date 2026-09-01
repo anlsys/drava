@@ -1,10 +1,7 @@
 import os
-import threading
 
 import drava
 
-
-EOS_PREFIX = b"DRAVA_EOS:"
 
 PAYLOAD_BYTES = int(os.getenv("DRAVA_BARE_PAYLOAD_BYTES", "1"))
 OUTPUT_PAYLOAD_BYTES = int(os.getenv("DRAVA_BARE_OUTPUT_PAYLOAD_BYTES", str(PAYLOAD_BYTES)))
@@ -90,35 +87,13 @@ class KernelRunner:
 kernel_runner = KernelRunner(GPU_BACKEND)
 output_payload = b"\1" * OUTPUT_PAYLOAD_BYTES
 
-_state_lock = threading.Lock()
-_processed_frames = 0
-_expected_frames = None
-_eos_seen = False
-_final_logged = False
 
-
-def _mark_eos(expected_frames):
-    global _expected_frames, _eos_seen
-    with _state_lock:
-        _eos_seen = True
-        if expected_frames is not None:
-            if _expected_frames is None or expected_frames > _expected_frames:
-                _expected_frames = expected_frames
-
-
-def _maybe_log_final():
-    global _final_logged
-    with _state_lock:
-        if _final_logged:
-            return
-        if not _eos_seen or _expected_frames is None or _processed_frames < _expected_frames:
-            return
-        _final_logged = True
-        processed = _processed_frames
-        expected = _expected_frames
+def _log_final(expected_frames) -> None:
+    """Runtime end-of-stream hook. Fired once after all callbacks drain, so no
+    lock or completion-gating is needed here."""
     drava.log(
         drava.DRAVA_VERBOSE_INFO,
-        f"[bare-final] frames={processed} expected_frames={expected} "
+        f"[bare-final] expected_frames={expected_frames} "
         f"backend={kernel_runner.backend} publish_mode={PUBLISH_MODE}",
     )
 
@@ -137,34 +112,16 @@ def _publish_outputs(n_frames: int) -> None:
             raise RuntimeError(f"drava.publish_py() failed with rc={rc}")
 
 
-def func(frames) -> None:
-    global _processed_frames
-    n_data = 0
-    eos_expected = None
-
+def func(frames, base_index) -> None:
+    """The runtime strips the EOS marker, so frames holds only data payloads."""
     for raw in frames:
-        if raw.startswith(EOS_PREFIX):
-            try:
-                eos_expected = int(raw[len(EOS_PREFIX):].decode("ascii"))
-            except ValueError as exc:
-                raise ValueError(f"malformed EOS marker: {raw!r}") from exc
-            continue
-        if len(raw) == 0:
-            continue
         if len(raw) != PAYLOAD_BYTES:
             raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {PAYLOAD_BYTES}")
-        n_data += 1
 
-    if eos_expected is not None:
-        _mark_eos(eos_expected)
-
+    n_data = len(frames)
     if n_data:
         kernel_runner.run()
         _publish_outputs(n_data)
-        with _state_lock:
-            _processed_frames += n_data
-
-    _maybe_log_final()
 
 
 for _ in range(max(1, int(os.getenv("DRAVA_BARE_WARMUP_RUNS", "3")))):
@@ -191,6 +148,7 @@ try:
     if CALLBACK_SERIALIZE:
         drava.set_callback_serialize(0 if CALLBACK_SERIALIZE in ("0", "false", "False") else 1)
     drava.register_routine_py(func)
+    drava.register_eos_routine_py(_log_final)
     rc = drava.listen_py()
     if rc != drava.DRAVA_SUCCESS:
         raise RuntimeError(f"drava.listen_py() failed with rc={rc}")

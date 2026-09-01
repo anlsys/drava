@@ -49,7 +49,43 @@ struct drava_stage_egress_config_t {
     std::string stream = "PREDICTIONS";
     std::string subject = "frames.stage1";
     std::string output_fifo_path = "/tmp/drava_stage2_in";
+    bool forward_eos = true;
 };
+
+struct drava_stage_metrics_config_t {
+    /* When non-empty, the runtime appends one JSON object per metrics snapshot
+     * to this file so benchmarks can read metrics without scraping the console.
+     * Overridden by the DRAVA_METRICS_FILE environment variable. */
+    std::string output_path = "";
+};
+
+/* Opaque energy sampler: reads exact energy counters (NVML for GPU when
+ * compiled with DRAVA_HAS_NVML, RAPL sysfs for CPU on Linux) rather than
+ * sampling power and integrating. Implemented in energy.cc. */
+struct drava_energy_sampler_t;
+
+struct drava_energy_reading_t {
+    bool gpu_valid = false;
+    double gpu_joules = 0.0;
+    bool cpu_valid = false;
+    double cpu_joules = 0.0;
+};
+
+/* Create a sampler. Never returns nullptr on OOM alone; a sampler with neither
+ * GPU nor CPU available is valid and simply yields no energy readings. Returns
+ * nullptr only if allocation fails. */
+drava_energy_sampler_t *drava_energy_create(void);
+
+/* Record the start-of-stream energy baseline. Idempotent: only the first call
+ * takes effect, so it is safe to call from the first_rx_ns CAS winner. */
+void drava_energy_capture_baseline(drava_energy_sampler_t *sampler);
+
+/* Read energy consumed since the baseline. Returns false if no baseline was
+ * captured or no source is available. */
+bool drava_energy_read(drava_energy_sampler_t *sampler,
+                       drava_energy_reading_t *out);
+
+void drava_energy_destroy(drava_energy_sampler_t *sampler);
 
 struct drava_t {
     /***********/
@@ -66,6 +102,22 @@ struct drava_t {
     drava_frame_routine_t frame_routine;
     void *frame_routine_user_data;
 
+    /* Optional end-of-stream routine, fired once when the stream drains */
+    drava_eos_routine_t eos_routine;
+    void *eos_routine_user_data;
+
+    /* Cached EOS marker so the runtime can forward/finalize on drain */
+    std::mutex eos_mutex;
+    std::string eos_payload;
+    uint64_t eos_expected_frames;
+    bool eos_seen;
+    bool eos_finalized;
+    bool forward_eos;
+
+    /* Global running count of *data* frames dispatched (EOS excluded).
+     * Used to assign each batch a stable base_index. */
+    std::atomic<uint64_t> next_data_index;
+
     /* which transport backend to use (socket or NATS) */
     drava_transport_t transport_type;
     std::string stage_name;
@@ -73,7 +125,15 @@ struct drava_t {
     drava_stage_runtime_config_t runtime_cfg;
     drava_stage_ingress_config_t ingress_cfg;
     drava_stage_egress_config_t egress_cfg;
+    drava_stage_metrics_config_t metrics_cfg;
     int nats_async_drain_timeout_ms;
+
+    /* Serializes appends to the metrics output file across stages/threads. */
+    std::mutex metrics_file_mutex;
+
+    /* Energy sampler (GPU via NVML, CPU via RAPL). Baseline captured when the
+     * first data frame arrives so energy aligns with the stage window. */
+    drava_energy_sampler_t *energy_sampler;
 
     /* Batching and id allocation for callback dispatch */
     size_t callback_batch_size;
@@ -111,6 +171,9 @@ struct drava_t {
     /* Register a batch-aware routine */
     int register_frame_routine(drava_frame_routine_t routine, void *user_data);
 
+    /* Register an end-of-stream routine */
+    int register_eos_routine(drava_eos_routine_t routine, void *user_data);
+
     /* Read until the socket is closed */
     int listen(void);
 
@@ -132,11 +195,19 @@ struct drava_t {
     int set_callback_flush_timeout_ms(int timeout_ms);
 
     int set_callback_serialize(bool enabled);
+
+    int set_forward_eos(bool enabled);
 };
 
 int drava_apply_stage_config(drava_t *drava);
 
 bool drava_payload_is_eos(const void *data, size_t data_len);
+
+/* Parse an EOS marker's trailing frame count. Returns false if not an EOS
+ * payload; *out_count is 0 when the count is absent or malformed. */
+bool drava_payload_parse_eos_count(const void *data,
+                                   size_t data_len,
+                                   uint64_t *out_count);
 
 uint64_t drava_monotonic_ns();
 

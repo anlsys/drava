@@ -70,13 +70,20 @@ pip install -r requirements.txt
 python publisher_jetstream.py
 ```
 
-- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=nats"`:
+- In terminal 3, run the app. To use the JetStream transport, this example needs
+  a stage config; create a minimal `pipeline.yaml` with a `stage1` entry (see
+  `examples/ptychonn/pipeline.yaml`), then point the runtime at it:
 
 ```shell
 cd examples/iris_knn
 source venv/bin/activate
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml   # must contain transport.type: nats and a stage1 entry
+export DRAVA_STAGE_NAME=stage1
 python app.py
 ```
+
+> Without `DRAVA_STAGE_CONFIG`, the runtime uses the **socket** transport with
+> default stream/subject names (see [docs/configuration.md](../../docs/configuration.md)).
 
 ## Socket Transport
 
@@ -109,7 +116,8 @@ pip install -r requirements.txt
 python publisher_socket.py
 ```
 
-- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=socket"`:
+- In terminal 3, run the app. With no `DRAVA_STAGE_CONFIG` set, the runtime uses
+  the **socket** transport by default, matching this data flow:
 
 ```shell
 cd examples/iris_knn
@@ -123,7 +131,7 @@ python app.py
 While running `python app.py` may raise the following error:
 ```shell
 Traceback (most recent call last):
-File "/home/ashovon/drava/examples/iris_knn/app.py", line 1, in <module>
+File "/path/to/drava/examples/iris_knn/app.py", line 1, in <module>
 import drava
 ModuleNotFoundError: No module named 'drava'
 ```

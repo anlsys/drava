@@ -150,73 +150,26 @@ drava.log(drava.DRAVA_VERBOSE_INFO, f"Built with CUDA: {tf.test.is_built_with_cu
 MODEL = load_model_or_raise()
 warmup_model(MODEL)
 
-EOS_PREFIX = b"DRAVA_EOS:"
-_state_lock = threading.Lock()
-_next_start = 0
-_processed_frames = 0
-_expected_frames = None
-_eos_seen = False
-_finalized = False
+# The runtime strips the EOS marker and drives end-of-stream via the
+# on_end_of_stream hook, so this app only tracks its own result chunks. The lock
+# guards the shared result list because callbacks run in parallel
+# (callback_serialize: false); base_index removes the need for a frame counter.
+_results_lock = threading.Lock()
 _chunks = []
+_processed_frames = 0
 
 
-def _mark_eos(expected_frames):
-    global _expected_frames, _eos_seen
-    with _state_lock:
-        _eos_seen = True
-        if expected_frames is not None:
-            if _expected_frames is None or expected_frames > _expected_frames:
-                _expected_frames = expected_frames
-
-
-def _maybe_finalize():
-    global _finalized
-    with _state_lock:
-        if _finalized:
-            return
-        if not _eos_seen or _expected_frames is None or _processed_frames < _expected_frames:
-            return
-        _finalized = True
-        chunks = list(_chunks)
-        processed_frames = int(_processed_frames)
-        n_expected = int(_expected_frames)
-    if SAVE_OUTPUT:
-        write_output(chunks, n_expected)
-    else:
-        finalize_without_output(n_expected, processed_frames)
-
-
-def func(frames) -> None:
-    global _next_start, _processed_frames
-    batch_raw = []
-    eos_expected = None
-
-    for raw in frames:
-        if raw.startswith(EOS_PREFIX):
-            try:
-                eos_expected = int(raw[len(EOS_PREFIX):].decode("ascii"))
-            except ValueError as exc:
-                raise ValueError(f"malformed EOS marker: {raw!r}") from exc
-            continue
-        if len(raw) == 0:
-            continue
-        if len(raw) != FRAME_BYTES:
-            raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
-        batch_raw.append(raw)
-
-    if eos_expected is not None:
-        _mark_eos(eos_expected)
-
-    if not batch_raw:
-        _maybe_finalize()
+def func(frames, base_index) -> None:
+    global _processed_frames
+    if not frames:
         return
 
-    batch_size = len(batch_raw)
-    with _state_lock:
-        start = _next_start
-        _next_start += batch_size
+    batch_size = len(frames)
+    for raw in frames:
+        if len(raw) != FRAME_BYTES:
+            raise ValueError(f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}")
 
-    tensor = np.frombuffer(b"".join(batch_raw), dtype=np.float32).reshape(
+    tensor = np.frombuffer(b"".join(frames), dtype=np.float32).reshape(
         (batch_size, FRAME_HEIGHT, FRAME_WIDTH, 1),
         order="C",
     )
@@ -224,32 +177,24 @@ def func(frames) -> None:
     if pred.ndim != 4 or pred.shape[-1] != 1:
         raise RuntimeError(f"unexpected model output shape: {pred.shape}")
 
-    with _state_lock:
+    with _results_lock:
         if SAVE_OUTPUT:
             noisy = tensor[..., 0].copy()
             denoised = pred[..., 0].copy()
-            _chunks.append((start, noisy, denoised))
+            _chunks.append((base_index, noisy, denoised))
         _processed_frames += batch_size
 
-    _maybe_finalize()
+
+def finalize(expected_frames) -> None:
+    """Runtime end-of-stream hook: write output once the stream drains."""
+    with _results_lock:
+        chunks = list(_chunks)
+        processed_frames = int(_processed_frames)
+    n_expected = int(expected_frames)
+    if SAVE_OUTPUT:
+        write_output(chunks, n_expected)
+    else:
+        finalize_without_output(n_expected, processed_frames)
 
 
-rc = drava.init()
-if rc != drava.DRAVA_SUCCESS:
-    raise RuntimeError(
-        f"drava.init() failed with rc={rc}. "
-        "If DRAVA_TRANSPORT=nats, rebuild Drava with NATS enabled."
-    )
-
-try:
-    drava.set_callback_batch(DRAVA_INFER_BATCH)
-    drava.set_callback_serialize(0)
-    drava.set_callback_flush_timeout_ms(0)
-    drava.register_routine_py(func)
-    rc = drava.listen_py()
-    if rc != drava.DRAVA_SUCCESS:
-        raise RuntimeError(f"drava.listen_py() failed with rc={rc}")
-finally:
-    rc = drava.deinit()
-    if rc != drava.DRAVA_SUCCESS:
-        raise RuntimeError(f"drava.deinit() failed with rc={rc}")
+drava.run(func, on_end_of_stream=finalize)

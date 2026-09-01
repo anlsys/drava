@@ -22,11 +22,13 @@ original files under `tf2/` and `dataset/` are unchanged; the new files (`app.py
 
 ### Model path
 
-This example now defaults to the trained checkpoint generated from the sample dataset:
+This example defaults to the trained checkpoint generated from the sample
+dataset. Place the dataset and checkpoint under `examples/tomogan/dataset/`:
 
 ```shell
-scp -r /Users/arshovon/Codes/drava_Code/drava/examples/tomogan/dataset jlse:/home/ashovon/drava/examples/tomogan/dataset
-examples/tomogan/dataset/testjob-it00500.h5
+# copy from wherever you keep them, e.g. a local checkout to a remote host:
+scp -r <local>/drava/examples/tomogan/dataset <host>:<path>/drava/examples/tomogan/dataset
+# expected: examples/tomogan/dataset/testjob-it00500.h5
 ```
 
 So if that file is present, you can run the example without setting any extra model-path variable.
@@ -127,7 +129,7 @@ python publisher_jetstream.py
 ```
 Output
 ```shell
-[30.400447] [TID=14257] [LOGGER] [INFO] Wrote /home/ashovon/drava/examples/tomogan/drava_tomogan_output.h5 with 16 frames; MSE noisy=692.265930, denoised=230.245041; saved_files=['/home/ashovon/drava/examples/tomogan/drava_tomogan_output.h5', '/home/ashovon/drava/examples/tomogan/ns.png', '/home/ashovon/drava/examples/tomogan/it00500.png', '/home/ashovon/drava/examples/tomogan/gt.png', '/home/ashovon/drava/examples/tomogan/abs_err_dn_vs_gt.png']
+[30.400447] [TID=14257] [LOGGER] [INFO] Wrote /path/to/drava/examples/tomogan/drava_tomogan_output.h5 with 16 frames; MSE noisy=692.265930, denoised=230.245041; saved_files=[... drava_tomogan_output.h5, ns.png, it00500.png, gt.png, abs_err_dn_vs_gt.png]
 [30.401332] [TID=14257] [LOGGER] [INFO] [drava-metrics] reason=rx_eos rx_msgs=2 rx_items=16 rx_bytes=67108876 tx_msgs=0 tx_bytes=0 cb_batches=2 cb_avg_ms=1716.707 stage_samples=0 stage_avg_ms=0.000 stage_max_ms=0.000 rx_item_fps=4.66 tx_msg_fps=0.00 cb_total_s=3.433415 publish_total_s=0.000000 compute_total_s=3.433415 stage_total_s=3.433339 stage_total_fps=4.66 stage=stage1
 ```
 
@@ -153,7 +155,9 @@ Terminal 3:
 ```shell
 cd examples/tomogan
 source venv/bin/activate
-export DRAVA_TRANSPORT=socket
+# Set transport.type: socket in pipeline.yaml, then point the runtime at it:
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
+export DRAVA_STAGE_NAME=stage1
 python app.py
 ```
 
@@ -166,7 +170,7 @@ CSV results.
 Paper experiment logs and figure-generation scripts are organized from the
 repository root:
 
-- Experiment index: [../../experiments.md](../../experiments.md)
+- Experiment index: [../../docs/paper.md](../../docs/paper.md)
 - Preserved TomoGAN logs: [../../experiments/logs/tomogan_energy.md](../../experiments/logs/tomogan_energy.md), [../../experiments/logs/tomogan_baseline.md](../../experiments/logs/tomogan_baseline.md)
 - TomoGAN energy figure package: [../../experiments/figures/tomogan_energy](../../experiments/figures/tomogan_energy)
 

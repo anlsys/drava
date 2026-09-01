@@ -13,9 +13,14 @@ stages:
     runtime:
       threads: 4
       callback_batch: 16
+      # Parallel callbacks; the app's result list uses its own small lock.
+      callback_serialize: false
     ingress:
       stream: FRAMES
       subject: frames.raw
       durable: drava_tomogan_stage1
       fetch_batch: 16
       fetch_timeout_ms: 200
+    egress:
+      # Terminal stage: the app's on_end_of_stream hook handles EOS.
+      forward_eos: false

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
@@ -199,11 +200,27 @@ async def main():
 
     t_end = time.perf_counter()
     total_dt = t_end - t0
+    avg_fps = sent_count / total_dt if total_dt > 0 else 0.0
     print(
         f"Done: published {sent_count} frames in {total_dt:.3f}s "
-        f"(avg_fps={sent_count / total_dt:.2f}) "
+        f"(avg_fps={avg_fps:.2f}) "
         f"seq={last_ack_seq if last_ack_seq is not None else 'n/a'} eos_seq={eos_ack.seq}"
     )
+    # Report publisher metrics to a file (mirrors the runtime's file-based
+    # metrics) so orchestrators read files instead of scraping stdout. No-op
+    # when DRAVA_PUBLISHER_METRICS_FILE is unset.
+    _metrics_path = os.getenv("DRAVA_PUBLISHER_METRICS_FILE")
+    if _metrics_path:
+        with open(_metrics_path, "w", encoding="utf-8") as _mf:
+            json.dump(
+                {
+                    "frames": int(sent_count),
+                    "duration_s": float(total_dt),
+                    "avg_fps": float(avg_fps),
+                    "eos_seq": int(eos_ack.seq),
+                },
+                _mf,
+            )
 
 
 if __name__ == "__main__":

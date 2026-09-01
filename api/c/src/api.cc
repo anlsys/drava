@@ -34,6 +34,13 @@ int drava_register_frame_routine(drava_frame_routine_t routine, void *user_data)
     return drava.register_frame_routine(routine, user_data);
 }
 
+int drava_register_eos_routine(drava_eos_routine_t routine, void *user_data)
+{
+    LOGGER_INFO("drava_register_eos_routine: routine=%p user_data=%p",
+                (void *)routine, user_data);
+    return drava.register_eos_routine(routine, user_data);
+}
+
 int drava_listen(void)
 {
     return drava.listen();
@@ -77,4 +84,16 @@ int drava_set_callback_flush_timeout_ms(int timeout_ms)
 int drava_set_callback_serialize(int enabled)
 {
     return drava.set_callback_serialize(enabled != 0);
+}
+
+int drava_set_forward_eos(int enabled)
+{
+    return drava.set_forward_eos(enabled != 0);
+}
+
+int drava_payload_parse_eos(const void *data,
+                            size_t data_len,
+                            uint64_t *out_count)
+{
+    return drava_payload_parse_eos_count(data, data_len, out_count) ? 1 : 0;
 }

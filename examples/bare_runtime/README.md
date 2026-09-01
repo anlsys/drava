@@ -11,7 +11,7 @@ cached output payloads.
 Run the SC driver from the repository root:
 
 ```bash
-python experiments/sc5_bare_runtime_ceiling.py \
+python experiments/bare_runtime_ceiling.py \
     --batches 1,8,32,128,256,512 \
     --thread-list 1,2,4,8 \
     --payload-bytes 1 \
@@ -23,7 +23,7 @@ python experiments/sc5_bare_runtime_ceiling.py \
 
 Paper artifacts:
 
-- Experiment index: [../../experiments.md](../../experiments.md)
+- Experiment index: [../../docs/paper.md](../../docs/paper.md)
 - Preserved run log: [../../experiments/logs/sc5_bare_runtime_ceiling.md](../../experiments/logs/sc5_bare_runtime_ceiling.md)
 - Figure package: [../../experiments/figures/sc5_bare_runtime_ceiling](../../experiments/figures/sc5_bare_runtime_ceiling)
 

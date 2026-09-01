@@ -1,0 +1,36 @@
+# Doxygen configuration for the Drava C API reference.
+# Produces XML consumed by Sphinx/breathe (see docs/conf.py). Run from docs/:
+#   doxygen Doxyfile
+
+PROJECT_NAME           = "Drava"
+PROJECT_BRIEF          = "Event-driven runtime for scientific streaming pipelines"
+OUTPUT_DIRECTORY       = _doxygen
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+# The public C API header only. The C++ runtime header (include/drava/drava.h)
+# includes this one and is an internal interface, so documenting both would
+# produce duplicate declarations.
+INPUT                  = ../api/c/include/drava/drava_c.h
+FILE_PATTERNS          = *.h
+RECURSIVE              = NO
+
+# Parse the doc-comments we maintain in the headers.
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+OPTIMIZE_OUTPUT_FOR_C  = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+
+# The C++ header pulls in <xkrt/runtime.h>, which is not present in the docs
+# build environment. Don't follow includes; just document the declarations.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+SEARCH_INCLUDES        = NO
+SKIP_FUNCTION_MACROS   = YES
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO

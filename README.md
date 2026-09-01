@@ -1,188 +1,84 @@
 # Drava
-Runtime and end-to-end simulation for BIA systems and simulations
 
-## Installation
+Drava is an event-driven runtime for edge scientific streaming pipelines. At
+facilities like the [Advanced Photon Source][aps], detectors produce data faster
+than it can be shipped to a central site, so reconstruction and inference run near
+the instrument under latency and throughput constraints. Drava runs these
+multi-stage pipelines and manages the system concerns that are usually left to
+manual tuning, such as batching, scheduling, and resource placement.
 
-### Requirements
-- C/C++ compiler with C++20 support (tested: LLVM ≥ 20.x)
-- xkrt - https://gitlab.inria.fr/xkaapi/dev-v2 (see [JLSE](#on-jlse))
-- swig if generating Python bindings
-- NATS server if run with Jetstream
+A developer writes each stage as a reusable callback. The runtime manages
+microbatching, dispatch, data movement, and observability, which separates the
+scientific logic from the system concerns. Drava is built on the [XKRT][xkrt]
+tasking runtime.
 
-### On JLSE
-Requirements are preinstalled:
+![Drava workflow](docs/figures/workflow.png)
 
-```shell
-# GPU 
+## Programming model
 
-# module path setup
-module use /soft/modulefiles
-module load spack/gcc-0.6.1
-module use /home/rpereira/shared/modules
+A Drava workflow is a directed acyclic graph. Nodes are stages and edges are
+transport routes. Each stage has an ingress route, a callback that performs the
+computation, an egress route for publishing results, and runtime parameters that
+control batching, scheduling, and threads.
 
-# C/C++ 20 compiler
-module load llvm/master-nightly
-module load cmake
-module load intel/oneapi/release/2024.1
-module load cuda/12.3.0
-module load hwloc
+The application defines the ingress, callback, and egress. The runtime parameters
+come from a YAML file, so the same callback runs under different execution
+policies without code changes. Stages are stateless functions triggered by data
+events.
 
-# XKRT
-module load xkaapi/502226c375a8/Debug-cuda  #  if using A40/A100/H100 nodes
+## Architecture
 
-# if using swig
-module load swig/4.4.1
+![Drava layered architecture](docs/figures/architecture.png)
 
-# if using python 3.14.3, compiled with `--disable-gil`
-module load python/3.14.3-no-gil
-```
+- **Application interface.** Callbacks are registered through a C or Python API.
+- **Pipeline configuration.** A YAML file binds each stage to its transport,
+  batching policy, and thread team.
+- **Execution engine.** Built on XKRT. One I/O thread pulls events, compute
+  threads run callback tasks with work-stealing, and a microbatching layer flushes
+  on a size threshold, an end-of-stream event, or a timeout. Lock-free atomic
+  counters record metrics.
+- **Transport.** Stages exchange events over a publish/subscribe model. A stage
+  subscribes to its ingress subject and publishes to its egress subject. Drava
+  uses two interchangeable backends, a Unix socket for intra-node communication
+  and [NATS JetStream][nats] for durable pub/sub across nodes.
 
-### YAML CPP requirements
-- Build YAML CPP 
-```shell
-git clone git@github.com:jbeder/yaml-cpp.git
-mkdir build && cd build
-CC=clang CXX=clang++ cmake .. -DYAML_BUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=$HOME/opt/yaml-cpp-install
-make -j
-make install
-```
+## Observability
 
-### (Optional) NATS requirements
-- Install NATS server
-```shell
-cd ~/nats_binary
-curl -fsSL https://binaries.nats.dev/nats-io/nats-server/v2@v2.11.6 | sh
-```
-- Build NATS C client
-```shell
-git clone git@github.com:nats-io/nats.c.git
-mkdir build && cd build
-cmake .. -DNATS_BUILD_STREAMING=OFF -DCMAKE_INSTALL_PREFIX=$HOME/opt/nats
-make -j
-make install
-```
+Each stage records throughput, end-to-end latency, and GPU and CPU energy, and
+exposes them as per-run CSV and JSON. This observability drives an agentic
+[ytopt][ytopt] search that tunes runtime parameters automatically. The metrics
+schema is documented on Read the Docs.
 
-### Build Drava
-```shell
-# Define NATS_ROOT if Jetstream is used
-export NATS_ROOT=$HOME/opt/nats
-mkdir build-debug-nats && cd build-debug-nats
-CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
-make -j
-export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
-```
-- Set the environment variables:
-```shell
-#app.py
-export DRAVA_TRANSPORT=nats
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_STREAM=FRAMES
-export DRAVA_SUBJECT=frames.raw
-export DRAVA_DURABLE=drava_stage1_run_003
-export DRAVA_OUTPUT_STREAM=PREDICTIONS
-export DRAVA_OUTPUT_SUBJECT=frames.stage1
-export DRAVA_INFER_BATCH=512
-export DRAVA_JS_FETCH_BATCH=512
-export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
-export DRAVA_THREADS=24
+## Documentation
 
-# app stage 2
-export DRAVA_TRANSPORT=nats
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_STREAM=PREDICTIONS
-export DRAVA_SUBJECT=frames.stage1
-export DRAVA_DURABLE=drava_stage2_run_003
-export DRAVA_LOG_EVERY=512
-export DRAVA_INFER_BATCH=512
-export DRAVA_JS_FETCH_BATCH=512
-export DRAVA_FETCH_TIMEOUT_MS=200
-export XKAAPI_VERBOSE=4
-export DRAVA_THREADS=24
-# export DRAVA_TRANSPORT=socket
-# publisher
-export NATS_URL=nats://0.0.0.0:4222
-export DRAVA_PUBLISH_RATE_HZ=0
-export DRAVA_PUBLISH_SYNTHETIC=1
-export DRAVA_PUBLISH_DURATION_S=10
-```
-- Set number of threads for XKRT with environment variable (default = 4):
-```shell
-export DRAVA_THREADS=20
-```
+Guides and the generated C and Python API reference are on Read the Docs:
+<https://drava.readthedocs.io>.
 
-## Applications
+## Example applications
 
-Example applications are located in [examples](examples) directory.
-Each application contains its own README with instructions for running it.
-Available applications:
-- [PtychoNN](examples/ptychonn)
-- [TomoGAN](examples/tomogan)
-- [Bare runtime ceiling](examples/bare_runtime)
-- [Iris Inference](examples/iris_knn)
-- [Dataflow](examples/dataflow)
+| Example | Description |
+| --- | --- |
+| [PtychoNN](examples/ptychonn) | Two-stage ptychographic inference and stitching |
+| [TomoGAN](examples/tomogan) | Single-stage tomographic denoising with energy reporting |
+| [Iris KNN](examples/iris_knn) | Minimal single-stage inference |
+| [Bare runtime](examples/bare_runtime) | Runtime message-rate ceiling, no model |
+| [Dataflow](examples/dataflow) | Minimal transport demonstration |
 
-## Paper Experiments
+## References
 
-The submitted-paper experiment index is in [experiments.md](experiments.md).
-Experiment drivers, preserved logs, result CSVs, and figure-generation packages
-are organized under [experiments](experiments). Final submitted figure copies
-are in [figs/paper_figs](figs/paper_figs).
+- [XKRT][xkrt], the tasking runtime Drava is built on
+- [NATS JetStream][nats], the publish/subscribe transport
+- [ytopt][ytopt], the Bayesian optimization framework used for tuning
+- [Advanced Photon Source (APS)][aps], Argonne National Laboratory
+- [JLSE][jlse], the evaluation cluster at Argonne National Laboratory
 
-## Tests
-### Dependency
-- [Check unit testing framework](https://libcheck.github.io/check/index.html)
-- [Bats-core: Bash automated testing system](https://bats-core.readthedocs.io/en/stable/)
+## License and authors
 
-### Setup tests in JLSE
-- Install `Check`:
-```shell
-wget https://github.com/libcheck/check/archive/refs/tags/0.15.2.zip
-unzip 0.15.2.zip
-cd check-0.15.2
-module load cmake
-mkdir build-gcc && cd build-gcc
-CC=gcc CXX=g++ cmake .. -DCMAKE_INSTALL_PREFIX=$HOME/opt/check-0.15.2
-make -j
-make install
-```
-- Install `Bats`:
-```shell
-git clone https://github.com/bats-core/bats-core.git
-cd bats-core
-git checkout v1.13.0
-./install.sh "$HOME/opt/bats-1.13.0"
-```
-- Set the environment variables:
-```shell
-# Add to .zshrc/.bashrc
-export CHECK_ROOT="$HOME/opt/check-0.15.2"
-export NATS_ROOT="$HOME/opt/nats"
-# Add binaries to PATH
-export PATH="$HOME/nats_binary:$PATH"
-export PATH="$HOME/opt/bats-1.13.0/bin:$PATH"
-```
-- Run all tests
-```shell
-ctest --test-dir $HOME/drava/build/tests --output-on-failure
-```
-- Transport specific tests for Drava C API:
-```shell
-# Enable JetStream tests (requires a running NATS server)
-USE_NATS=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
-USE_NATS=1 ctest --test-dir $HOME/drava/build/tests -R transport_nats -V
-# Enable socket tests (requires socket endpoint to exist)
-USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
-USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests -R transport_socket -V
-# Enable both (requires both NATS server and socket running)
-USE_NATS=1 USE_SOCKET=1 ctest --test-dir $HOME/drava/build/tests --output-on-failure
-```
-- Integration test with verbose:
-```
-ctest --test-dir $HOME/drava/build/tests -R integration_transport_jetstream_python -V
-ctest --test-dir $HOME/drava/build/tests -R integration_transport_socket_python -V
-```
-### References
-- [NATS C client](https://github.com/nats-io/nats.c/)
-- [Check unit testing framework](https://libcheck.github.io/check/index.html)
-- [Bats-core: Bash Automated Testing System](https://bats-core.readthedocs.io/en/stable/)
+Distributed under the terms in [LICENSE](LICENSE). Contributors are listed in
+[AUTHORS](AUTHORS).
+
+[xkrt]: https://gitlab.inria.fr/xkaapi/dev-v2
+[nats]: https://docs.nats.io/nats-concepts/jetstream
+[ytopt]: https://github.com/ytopt-team/ytopt
+[aps]: https://www.aps.anl.gov/
+[jlse]: https://www.jlse.anl.gov/

@@ -98,11 +98,13 @@ pip install -r requirements.txt
 python publisher_jetstream.py
 ```
 
-- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=nats"`:
+- In terminal 3, point the runtime at the stage config (transport type comes from `transport.type` in `pipeline.yaml`, set to `nats`) and run the app:
 
 ```shell
 cd examples/ptychonn
 source venv/bin/activate
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
+export DRAVA_STAGE_NAME=stage1
 python app.py
 ```
 ## Socket Transport
@@ -141,11 +143,13 @@ pip install -r requirements.txt
 python publisher_socket.py
 ```
 
-- In terminal 3, run the app ensuring it is using `"export DRAVA_TRANSPORT=socket"`:
+- In terminal 3, set `transport.type: socket` in `pipeline.yaml`, then point the runtime at it and run the app:
 
 ```shell
 cd examples/ptychonn
 source venv/bin/activate
+export DRAVA_STAGE_CONFIG=$PWD/pipeline.yaml
+export DRAVA_STAGE_NAME=stage1
 python app.py
 ```
 
@@ -154,7 +158,7 @@ python app.py
 Paper experiment logs and figure-generation scripts are organized from the
 repository root:
 
-- Experiment index: [../../experiments.md](../../experiments.md)
+- Experiment index: [../../docs/paper.md](../../docs/paper.md)
 - Preserved logs: [../../experiments/logs](../../experiments/logs)
 - Figure packages: [../../experiments/figures](../../experiments/figures)
 
@@ -165,32 +169,19 @@ source ~/venvs/no-gil-3.13/bin/activate
 cd ~/drava/build
 export XKAAPI_VERBOSE=4
 export PYTHONPATH="$(pwd):$PYTHONPATH" # so that the build dir is in the Python path
-export DRAVA_TRANSPORT=nats
+# Transport, threads, streams, etc. come from pipeline.yaml; the benchmark
+# driver sets DRAVA_STAGE_CONFIG/DRAVA_STAGE_NAME on the app subprocess for you.
 cd ../examples/ptychonn
 
-python benchmark.py \           
-  --batches 512 \
-  --timeout-ms 200 \
-  --threads 4 \
-  --xkaapi-verbose 4 \
-  --rate-hz 0 \
-  --duration-s 30 \
-  --runs 1
-
-python3 benchmark.py \
-  --batches 256 \
-  --runs 1 \
-  --duration-s 10 \
-  --threads 4 \
-  --timeout-ms 200 \
-  --rate-hz 1000 \
-  --nats-url nats://127.0.0.1:4222
-
+# The maintained driver is benchmark_two_stages.py (it regenerates a per-run
+# pipeline.yaml so --threads/--batches actually reach the runtime). The old
+# single-stage benchmark.py is archived under archive/rough/ for paper
+# reproducibility only.
 
 python3 benchmark_two_stages.py \
   --batches 256 \
   --runs 1 \
-  --duration-s 8 \
+  --num-frames 10000 \
   --threads 4 \
   --timeout-ms 200 \
   --nats-url nats://127.0.0.1:4222 \

@@ -28,3 +28,6 @@ stages:
     egress:
       stream: OUTPUT
       subject: frames.out
+      # Single stage: EOS is consumed by the app's on_end_of_stream hook,
+      # not forwarded downstream.
+      forward_eos: false

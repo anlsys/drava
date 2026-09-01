@@ -13,6 +13,7 @@
 
 /* Python routines */
 static PyObject *g_routine = NULL;
+static PyObject *g_eos_routine = NULL;
 
 static void *drava_frame_routine_trampoline(const drava_frame_batch_t *batch,
                                             void *user_data)
@@ -26,6 +27,8 @@ static void *drava_frame_routine_trampoline(const drava_frame_batch_t *batch,
 #endif /* PY_NO_GIL */
 
     const uint32_t count = batch ? batch->count : 0;
+    const unsigned long long base_index =
+            batch ? (unsigned long long)batch->base_index : 0ULL;
     PyObject *py_frames = PyList_New((Py_ssize_t)count);
     if (!py_frames) {
 #ifndef PY_NO_GIL
@@ -46,8 +49,11 @@ static void *drava_frame_routine_trampoline(const drava_frame_batch_t *batch,
         PyList_SetItem(py_frames, (Py_ssize_t)i, payload); /* steals payload */
     }
 
-    PyObject *args = PyTuple_New(1);
+    /* Call func(frames, base_index). The Python-side run()/register wrapper
+     * adapts single-argument callbacks, so the trampoline always passes both. */
+    PyObject *args = PyTuple_New(2);
     PyTuple_SetItem(args, 0, py_frames); /* steals py_frames */
+    PyTuple_SetItem(args, 1, PyLong_FromUnsignedLongLong(base_index));
     PyObject *ret = PyObject_CallObject(g_routine, args);
     Py_DECREF(args);
     if (ret == NULL) {
@@ -63,6 +69,34 @@ static void *drava_frame_routine_trampoline(const drava_frame_batch_t *batch,
     return NULL;
 }
 
+static void drava_eos_routine_trampoline(uint64_t expected_frames,
+                                         void *user_data)
+{
+    (void)user_data;
+    if (!g_eos_routine)
+        return;
+
+#ifndef PY_NO_GIL
+    PyGILState_STATE gstate = PyGILState_Ensure();
+#endif /* PY_NO_GIL */
+
+    PyObject *args = PyTuple_New(1);
+    PyTuple_SetItem(args, 0,
+                    PyLong_FromUnsignedLongLong(
+                            (unsigned long long)expected_frames));
+    PyObject *ret = PyObject_CallObject(g_eos_routine, args);
+    Py_DECREF(args);
+    if (ret == NULL) {
+        PyErr_Print();
+    } else {
+        Py_DECREF(ret);
+    }
+
+#ifndef PY_NO_GIL
+    PyGILState_Release(gstate);
+#endif /* PY_NO_GIL */
+}
+
 /* Called from Python to register the routine */
 void drava_register_routine_py(PyObject *cb)
 {
@@ -70,6 +104,15 @@ void drava_register_routine_py(PyObject *cb)
     Py_XDECREF(g_routine);
     g_routine = cb;
     drava_register_frame_routine(drava_frame_routine_trampoline, NULL);
+}
+
+/* Called from Python to register the end-of-stream routine */
+void drava_register_eos_routine_py(PyObject *cb)
+{
+    Py_XINCREF(cb);
+    Py_XDECREF(g_eos_routine);
+    g_eos_routine = cb;
+    drava_register_eos_routine(drava_eos_routine_trampoline, NULL);
 }
 
 /* Listen from python */
