@@ -130,6 +130,16 @@ python examples/common/tests/run_tests.py
 The C runtime tests (Check + Bats) run against a build directory; see
 [docs/jlse.md](docs/jlse.md).
 
+## Documentation
+
+The guides above, plus an auto-generated C and Python API reference, are built as
+a documentation site with Sphinx (published on Read the Docs). Build it locally:
+
+```shell
+pip install -r docs/requirements.txt
+sphinx-build docs docs/_build/html      # requires `doxygen` for the C API pages
+```
+
 ## Project status
 
 Drava is research software. The C++ runtime is developed and tested on the

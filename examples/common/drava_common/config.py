@@ -246,6 +246,7 @@ def validate_pipeline(cfg: PipelineConfig) -> list[str]:
     """Check that a pipeline is internally consistent and return warnings.
 
     Errors (raise :exc:`PipelineConfigError`):
+
     - no stages;
     - duplicate stage names;
     - for NATS transport, a non-terminal stage whose egress stream/subject does
@@ -253,6 +254,7 @@ def validate_pipeline(cfg: PipelineConfig) -> list[str]:
       flowing" typo).
 
     Warnings (returned, not raised):
+
     - a non-terminal stage with ``egress.forward_eos: false`` (downstream will
       never see end-of-stream);
     - a stage missing ingress stream/subject on NATS transport.
