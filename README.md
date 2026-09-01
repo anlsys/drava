@@ -1,47 +1,67 @@
 # Drava
 
-Drava is an event-driven runtime for scientific streaming pipelines. It runs
-detector and inference workflows that move data frames from a source, through one
-or more processing stages, to an output. An application registers each stage as a
-callback. The runtime owns microbatching, dispatch, transport, thread placement,
-and per-stage observability, so application code stays small.
+Drava is an event-driven runtime for edge scientific streaming pipelines. At
+facilities like the Advanced Photon Source, detectors produce data faster than it
+can be shipped to a central site, so reconstruction and inference must run near
+the instrument under latency and throughput constraints. Drava runs these
+multi-stage pipelines and manages the system concerns that are usually left to
+manual tuning, such as batching, data transport, and resource placement.
 
-Drava is developed at Argonne National Laboratory and built on the
-[xkrt](https://gitlab.inria.fr/xkaapi/dev-v2) tasking runtime. It was evaluated on
-PtychoNN ptychography and TomoGAN tomography on a JLSE GPU node (dual-socket AMD
-EPYC 7532 with one NVIDIA A100).
+A developer writes each stage as a reusable callback. The runtime manages
+scheduling, microbatching, data movement, and transport-aware execution across
+heterogeneous resources, which separates the scientific logic from the system
+concerns. Drava is built on the [xkrt](https://gitlab.inria.fr/xkaapi/dev-v2)
+tasking runtime.
 
 ![Drava workflow](docs/figures/workflow.png)
 
+## Programming model
+
+A Drava workflow is a directed acyclic graph. Nodes are stages and edges are
+transport routes. Each stage is defined by four elements:
+
+1. an ingress route for incoming events,
+2. a callback that performs the domain computation,
+3. an egress route for publishing derived events,
+4. runtime parameters that control batching, scheduling, and threads.
+
+The application supplies the first three. The runtime parameters come from a YAML
+configuration, so the same callback can run under different execution policies
+without code changes. Stages are stateless functions triggered by data events,
+which decouples application logic from runtime policy.
+
 ## Architecture
 
-Drava is a layered runtime. An application registers per-stage callbacks through a
-C or Python API. A YAML configuration binds each stage to its transport, batching
-policy, and thread team without changing application code. An execution engine
-performs I/O, microbatching, work-stealing task dispatch, and metrics collection.
+Drava is a layered runtime.
 
-Stages exchange events, each carrying an identifier, a timestamp, and a payload,
-over two interchangeable transports. Unix sockets are used for intra-node
-communication. NATS JetStream (publish/subscribe) is used for streaming across
-nodes. Each stage runs as a process with its own thread team, and stages chain
-into multi-stage pipelines. For example, PtychoNN stage 1 runs GPU inference and
-feeds stage 2, which runs CPU stitching.
-
-## Concepts
-
-| Term | Meaning |
-| --- | --- |
-| Stage | One processing step, an application callback run as a process |
-| Callback | `func(frames, base_index)`, invoked per incoming batch of frames |
-| Transport | How frames move between stages, over a Unix socket or NATS JetStream |
-| Publisher | The data source that feeds stage 1 |
-| Pipeline | A chain of stages wired egress to ingress in `pipeline.yaml` |
+- **Application interface.** Callbacks are registered through a C or Python API.
+- **Pipeline configuration.** A YAML file binds each stage to its transport,
+  batching policy, and thread team.
+- **Execution engine.** Built on xkrt. One I/O thread pulls messages from the
+  transport. Compute threads run callback tasks with work-stealing. A
+  microbatching layer accumulates messages and flushes them on a size threshold,
+  an end-of-stream event, or a timeout. Lock-free atomic counters record metrics.
+- **Transport.** Two interchangeable backends. Unix sockets for intra-node
+  communication and NATS JetStream (publish/subscribe) for streaming across
+  nodes.
 
 ## Measurement
 
 Each stage records throughput, end-to-end latency, and GPU and CPU energy, and
-writes them as per-run CSV and JSON for benchmarking and tuning. The metrics
-schema is documented on Read the Docs.
+exposes them programmatically and as per-run CSV and JSON. This observability
+also drives an agentic (ytopt) search that tunes runtime knobs automatically. The
+metrics schema is documented on Read the Docs.
+
+## Results
+
+On ptychography (PtychoNN) and tomography (TomoGAN) pipelines, evaluated on a
+single JLSE GPU node (dual-socket AMD EPYC 7532 with one NVIDIA A100):
+
+- about 31 kHz on the runtime message path,
+- up to 2.36x higher throughput than a PvaPy baseline that drops frames beyond
+  2 kHz, and about 2.6x higher than PvaPy's hand-tuned multi-consumer distributor,
+- an agentic search that finds a configuration 2.24x faster than the best manual
+  one while sampling 0.52 percent of the space.
 
 ## Documentation
 
@@ -52,8 +72,8 @@ Guides and the generated C and Python API reference are on Read the Docs:
 
 | Example | Description |
 | --- | --- |
-| [PtychoNN](examples/ptychonn) | Two-stage ptychographic inference |
-| [TomoGAN](examples/tomogan) | Tomographic denoising with energy reporting |
+| [PtychoNN](examples/ptychonn) | Two-stage ptychographic inference and stitching |
+| [TomoGAN](examples/tomogan) | Single-stage tomographic denoising with energy reporting |
 | [Iris KNN](examples/iris_knn) | Minimal single-stage inference |
 | [Bare runtime](examples/bare_runtime) | Runtime message-rate ceiling, no model |
 | [Dataflow](examples/dataflow) | Minimal transport demonstration |
