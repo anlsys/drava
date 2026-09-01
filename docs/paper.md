@@ -17,35 +17,6 @@ The paper results were measured on a **single GPU node** (dual-socket AMD EPYC
 edge inference node. Absolute numbers depend on the node; small run-to-run and
 node-to-node variation is expected.
 
-## Verifying a run against the paper
-
-The paper's per-run measurements are committed under
-`experiments/figures/<experiment>/`. To compare a fresh benchmark's `summary.csv`
-against that reference and print the percent difference per configuration:
-
-```shell
-python experiments/compare_to_paper.py tomogan-energy \
-    examples/tomogan/bench_logs/<timestamp>/summary.csv
-```
-
-This is a reproducibility check, not a pass/fail gate: differences within roughly
-10–15% are normal across nodes and runs.
-
-## Known issue: intermittent crash during long sweeps
-
-During long multi-configuration sweeps (many stage processes launched back to
-back), a stage occasionally crashes during XKRT team startup — observed as
-`pure virtual method called` / `terminate called without an active exception`, or
-a SIGSEGV — before any frames are processed. It is **intermittent**: rerunning
-the same configuration on its own succeeds and matches the reference data
-(including the 8-thread points, which reproduce the paper). The likely cause is a
-transient during rapid process churn / accumulated transport state across runs,
-under investigation.
-
-Workarounds: run configurations in smaller groups (e.g. one thread count at a
-time), or rerun a failed cell individually. This does not affect the correctness
-of the numbers that do complete, and is not a benchmark or configuration error.
-
 ---
 
 ## 1. Runtime message-rate ceiling
