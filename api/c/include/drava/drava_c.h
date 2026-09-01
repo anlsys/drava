@@ -19,98 +19,91 @@ extern "C" {
 #endif
 
 /**
- * Drava return code
+ * Return codes for Drava C API functions. DRAVA_SUCCESS is zero; all others
+ * are positive error codes.
  */
 typedef enum drava_rcode_t {
-    DRAVA_SUCCESS = 0,
-    DRAVA_ERROR = 1,
-    DRAVA_EINVAL = 2,
-    DRAVA_ENOTSUP = 3
+    DRAVA_SUCCESS = 0,  /**< Operation succeeded. */
+    DRAVA_ERROR = 1,    /**< Unspecified error. */
+    DRAVA_EINVAL = 2,   /**< Invalid argument. */
+    DRAVA_ENOTSUP = 3   /**< Operation not supported (e.g. transport not built in). */
 } drava_rcode_t;
 
 /**
- * Drava operations
- */
-typedef enum drava_op_t {
-    DRAVA_OP_WRITE32,
-    DRAVA_OP_READ32,
-    DRAVA_OP_DONE
-} drava_op_t;
-
-/**
- * Drava transport type
+ * Transport backend used to move frames between stages. Selected via
+ * transport.type in pipeline.yaml.
  */
 typedef enum drava_transport_t {
-    DRAVA_TRANSPORT_SOCKET = 0,
-    DRAVA_TRANSPORT_NATS = 1
+    DRAVA_TRANSPORT_SOCKET = 0,  /**< Unix-domain socket transport. */
+    DRAVA_TRANSPORT_NATS = 1     /**< NATS JetStream transport. */
 } drava_transport_t;
 
 /**
- * Global transport configuration shared by the runtime.
- * Stage-local routing/endpoints live under ingress/egress.
- * For now the only global backend-specific field is the NATS server URL.
- */
-typedef struct drava_transport_config_t {
-    drava_transport_t type;
-    const char *nats_url;
-} drava_transport_config_t;
-
-/**
- * Drava logger levels
+ * Log verbosity levels, ordered from most to least severe. A message is emitted
+ * when its level is at or below the runtime's configured verbosity.
  */
 typedef enum drava_verbose_t {
-    DRAVA_VERBOSE_FATAL = 0, // LOGGER_PRINT_FATAL_ID,
-    DRAVA_VERBOSE_ERROR = 1, // LOGGER_PRINT_ERROR_ID,
-    DRAVA_VERBOSE_WARN = 2, // LOGGER_PRINT_WARN_ID,
-    DRAVA_VERBOSE_INFO = 3, // LOGGER_PRINT_INFO_ID,
-    DRAVA_VERBOSE_IMPL = 4, // LOGGER_PRINT_IMPL_ID,
-    DRAVA_VERBOSE_DEBUG = 5 // LOGGER_PRINT_DEBUG_ID
+    DRAVA_VERBOSE_FATAL = 0,  /**< Fatal error. */
+    DRAVA_VERBOSE_ERROR = 1,  /**< Error. */
+    DRAVA_VERBOSE_WARN = 2,   /**< Warning. */
+    DRAVA_VERBOSE_INFO = 3,   /**< Informational. */
+    DRAVA_VERBOSE_IMPL = 4,   /**< Implementation detail. */
+    DRAVA_VERBOSE_DEBUG = 5   /**< Debug. */
 } drava_verbose_t;
 
 /**
- * Data model for single frame
+ * A single frame delivered to a stage callback.
  */
 typedef struct drava_frame_t {
-    uint64_t frame_id;
-    /* Receive timestamp at Drava ingress */
-    uint64_t recv_ts_ns;
-    const void *data;
-    size_t data_len;
+    uint64_t frame_id;      /**< Runtime-assigned monotonic frame id. */
+    uint64_t recv_ts_ns;    /**< Receive timestamp at Drava ingress (ns). */
+    const void *data;       /**< Frame payload bytes (not owned by the callback). */
+    size_t data_len;        /**< Length of @ref data in bytes. */
 } drava_frame_t;
 
 /**
- * Data model for batch of frames
+ * A batch of frames passed to the stage callback.
  *
- * base_index is the global 0-based index of the first *data* frame in this
- * batch across the whole stream (EOS markers excluded). It lets a callback
- * compute per-frame stream positions without keeping its own counter.
+ * @ref base_index is the global 0-based index of the first frame in this batch
+ * across the whole stream (EOS markers excluded). It lets a callback compute
+ * per-frame stream positions without keeping its own counter, which is what
+ * makes callbacks safe to run concurrently and out of order.
  */
 typedef struct drava_frame_batch_t {
-    uint64_t batch_id;
-    uint32_t count;
-    uint64_t base_index;
-    const drava_frame_t *frames;
+    uint64_t batch_id;             /**< Runtime-assigned monotonic batch id. */
+    uint32_t count;                /**< Number of frames in @ref frames. */
+    uint64_t base_index;           /**< Global index of the first frame in the batch. */
+    const drava_frame_t *frames;   /**< Array of @ref count frames. */
 } drava_frame_batch_t;
 
+/**
+ * Cumulative per-stage counters, as returned by drava_stats_snapshot(). Derived
+ * quantities (throughput, average latency, energy) are computed from these; see
+ * the metrics documentation.
+ */
 typedef struct drava_stats_t {
-    uint64_t rx_msgs;
-    uint64_t rx_items;
-    uint64_t rx_bytes;
-    uint64_t tx_msgs;
-    uint64_t tx_bytes;
-    uint64_t callback_batches;
-    uint64_t callback_ns_sum;
-    uint64_t callback_ns_max;
-    uint64_t publish_ns_sum;
-    uint64_t publish_ns_max;
-    uint64_t stage_latency_samples;
-    uint64_t stage_latency_ns_sum;
-    uint64_t stage_latency_ns_max;
-    uint64_t first_rx_ns;
-    uint64_t last_stage_ns;
+    uint64_t rx_msgs;               /**< Transport messages received. */
+    uint64_t rx_items;              /**< Frames received (excludes EOS markers). */
+    uint64_t rx_bytes;              /**< Bytes received. */
+    uint64_t tx_msgs;               /**< Messages published downstream. */
+    uint64_t tx_bytes;              /**< Bytes published downstream. */
+    uint64_t callback_batches;      /**< Number of callback batches dispatched. */
+    uint64_t callback_ns_sum;       /**< Total time spent in the callback (ns). */
+    uint64_t callback_ns_max;       /**< Longest single callback (ns). */
+    uint64_t publish_ns_sum;        /**< Total time spent publishing (ns). */
+    uint64_t publish_ns_max;        /**< Longest single publish (ns). */
+    uint64_t stage_latency_samples; /**< Number of per-frame latency samples. */
+    uint64_t stage_latency_ns_sum;  /**< Sum of per-frame stage latencies (ns). */
+    uint64_t stage_latency_ns_max;  /**< Maximum per-frame stage latency (ns). */
+    uint64_t first_rx_ns;           /**< Timestamp of the first received frame (ns). */
+    uint64_t last_stage_ns;         /**< Timestamp of the last stage completion (ns). */
 } drava_stats_t;
 
-/** Batch routine type */
+/**
+ * Application callback invoked once per batch of received frames. @p user_data
+ * is the pointer passed to drava_register_frame_routine(). The return value is
+ * currently unused.
+ */
 typedef void *(*drava_frame_routine_t)(const drava_frame_batch_t *batch,
                                        void *user_data);
 
@@ -118,34 +111,49 @@ typedef void *(*drava_frame_routine_t)(const drava_frame_batch_t *batch,
  * End-of-stream routine type.
  *
  * Invoked once by the runtime after the EOS marker has been observed and all
- * in-flight data callbacks have drained. expected_frames is the frame count
+ * in-flight data callbacks have drained. @p expected_frames is the frame count
  * carried by the EOS marker (0 if the marker had no/invalid count).
  */
 typedef void (*drava_eos_routine_t)(uint64_t expected_frames, void *user_data);
 
+/** Register the per-batch frame callback. Returns DRAVA_SUCCESS on success. */
 int drava_register_frame_routine(drava_frame_routine_t routine,
                                  void *user_data);
 
+/** Register the optional end-of-stream callback (see drava_eos_routine_t). */
 int drava_register_eos_routine(drava_eos_routine_t routine, void *user_data);
 
+/**
+ * Initialize the runtime: apply the stage configuration and start the task
+ * runtime. Returns DRAVA_ENOTSUP if the configured transport is unavailable.
+ */
 int drava_init(void);
 
+/** Run the stage: receive frames and dispatch batches until end-of-stream. */
 int drava_listen(void);
 
+/** Publish one payload downstream through the configured transport. */
 int drava_publish(const void *data, size_t data_len);
 
+/** Shut down the runtime and release resources. */
 int drava_deinit(void);
 
+/** Emit a log message at the given verbosity level. */
 int drava_log(const drava_verbose_t verbose_level, const char *msg);
 
+/** Copy the current cumulative counters into @p out_stats. */
 int drava_stats_snapshot(drava_stats_t *out_stats);
 
+/** Reset all cumulative counters to zero. */
 int drava_stats_reset(void);
 
+/** Override the number of frames grouped into each callback batch. */
 int drava_set_callback_batch(size_t batch_size);
 
+/** Override the idle-flush timeout (ms) for partial callback batches. */
 int drava_set_callback_flush_timeout_ms(int timeout_ms);
 
+/** Enable (1) or disable (0) serialized, single-threaded callback dispatch. */
 int drava_set_callback_serialize(int enabled);
 
 /**
