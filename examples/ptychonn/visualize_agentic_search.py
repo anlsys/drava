@@ -6,6 +6,7 @@ Consumes the aggregate.csv produced by tune_two_stages_ytopt.py and emits
 figures for the paper:
 
   1. convergence.{pdf,png}        - Best-so-far E2E latency vs. evaluation index
+  1b. convergence_connected.{pdf,png} - Same as (1) with per-evaluation dots joined by a blue line
   2. knob_importance.{pdf,png}    - Per-knob conditional minimum E2E (importance proxy)
   3. top_configs.{pdf,png}        - Parallel-coordinates of top-N configurations
   4. e2e_distribution.{pdf,png}   - Histogram of all successful evaluations vs. best
@@ -128,6 +129,49 @@ def plot_convergence(rows: Sequence[Dict[str, str]], out_dir: Path) -> None:
         fig.savefig(out_dir / f"convergence.{ext}", dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  [convergence] {out_dir / 'convergence.pdf'}")
+
+
+def plot_convergence_connected(rows: Sequence[Dict[str, str]], out_dir: Path) -> None:
+    """Same as plot_convergence, but the per-evaluation blue dots are also
+    connected by a blue line to show the trajectory of raw evaluations."""
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+
+    evals = np.asarray([int(r["eval"]) for r in rows])
+    obj = numeric_col(rows, OBJ)
+    best = np.minimum.accumulate(obj)
+
+    # Connect the per-evaluation blue dots with a blue line.
+    ax.plot(evals, obj, color=C_EVAL, linewidth=1.5, alpha=0.6, zorder=2)
+    ax.scatter(evals, obj, s=48, color=C_EVAL, alpha=0.6,
+               edgecolors="white", linewidth=0.5, label="Per-evaluation $J$",
+               zorder=3)
+    ax.plot(evals, best, color=C_BEST, linewidth=3.0,
+            label=r"Best-so-far $J^{\star}_k$", zorder=4)
+
+    # Mark final best.
+    k_star = int(np.argmin(obj))
+    ax.scatter([evals[k_star]], [obj[k_star]], s=150, color=C_BEST,
+               edgecolors="white", linewidth=1.2, zorder=5)
+    ax.annotate(f"$J^{{\\star}} = {obj[k_star]:.2f}$ s\n@ eval {evals[k_star]}",
+                (evals[k_star], obj[k_star]),
+                xytext=(10, 18), textcoords="offset points",
+                fontsize=13, color=C_BEST, fontweight="bold",
+                arrowprops=dict(arrowstyle="-", color=C_BEST, lw=0.8))
+
+    ax.set_xlabel("Evaluation index $k$")
+    ax.set_ylabel("End-to-end latency $J$ (s)")
+    ax.set_title("Agentic configuration search convergence",
+                 fontweight="bold")
+    ax.grid(alpha=0.3)
+    ax.set_axisbelow(True)
+    ax.legend(loc="upper right", frameon=True)
+
+    fig.tight_layout(pad=0.7)
+    for ext in ("pdf", "png"):
+        fig.savefig(out_dir / f"convergence_connected.{ext}", dpi=300,
+                    bbox_inches="tight")
+    plt.close(fig)
+    print(f"  [convergence_connected] {out_dir / 'convergence_connected.pdf'}")
 
 
 # ── 2. Knob importance (conditional minimum) ─────────────────────────────────
@@ -332,6 +376,7 @@ def main() -> None:
     print(f"Loaded {len(rows)} successful evaluations from {args.aggregate}")
     print(f"Generating figures in: {args.out_dir}/")
     plot_convergence(rows, args.out_dir)
+    plot_convergence_connected(rows, args.out_dir)
     plot_knob_importance(rows, args.out_dir)
     plot_top_configs(rows, args.out_dir, args.top_n)
     plot_distribution(rows, args.out_dir)
