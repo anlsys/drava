@@ -1,0 +1,66 @@
+pipeline:
+  name: ptychopinn_two_stage
+
+transport:
+  type: nats
+  nats_url: nats://127.0.0.1:4222
+
+publisher:
+  synthetic: false
+  # num_frames is deliberately omitted: the publisher defaults to the prepared
+  # group count in prep/<dataset>_<model>/meta.json, so a plain run streams the
+  # whole scan exactly once. Set it (or DRAVA_PUBLISH_NUM_FRAMES) to cap a run.
+  rate_hz: 0
+
+benchmark:
+  app_timeout_s: 600
+
+stages:
+  - name: stage1
+    runtime:
+      # NATS reserves thread 0 for I/O, so this must be >= 2.
+      threads: 4
+      # One frame is a C x N x N group (64 KB at C=4, N=64), so keep the
+      # callback batch well below PtychoNN's 256 to bound host and GPU memory.
+      callback_batch: 128
+      # The callback is stateless: the model is read-only and base_index comes
+      # from the runtime, so parallel callbacks are safe here.
+      callback_serialize: false
+    ingress:
+      stream: FRAMES
+      subject: frames.raw
+      durable: drava_ptychopinn_stage1
+      fetch_batch: 128
+      fetch_timeout_ms: 200
+    egress:
+      stream: PATCHES
+      subject: frames.stage1
+      # forward_eos defaults to true: the runtime re-publishes the EOS marker
+      # downstream once this stage drains, so the app never handles EOS.
+      # For socket transport, use:
+      # output_fifo_path: /tmp/drava_stage1_out
+
+  - name: stage2
+    runtime:
+      threads: 4
+      callback_batch: 64
+      # REQUIRED. Unlike PtychoNN's stage2, which writes disjoint [start:end]
+      # slices, this stage scatter-adds overlapping patches into one shared
+      # canvas. Parallel callbacks would race on that in-place accumulation.
+      # Do not set this to false without reworking app_stage2.py to use a
+      # per-thread canvas merged at end-of-stream.
+      callback_serialize: true
+    ingress:
+      stream: PATCHES
+      subject: frames.stage1
+      durable: drava_ptychopinn_stage2
+      fetch_batch: 64
+      fetch_timeout_ms: 500
+      # For socket transport, use:
+      # socket_path: /tmp/drava_stage2_in
+    egress:
+      # Terminal stage: nothing downstream, so do not forward the EOS marker.
+      # The app's on_end_of_stream hook fires instead.
+      forward_eos: false
+    # metrics:
+    #   output_path: /tmp/drava_ptychopinn_stage2_metrics.jsonl

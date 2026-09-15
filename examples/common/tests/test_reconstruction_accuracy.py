@@ -14,6 +14,10 @@ GPU, NATS, or runtime build required):
 - PtychoNN: the stage-1 <-> stage-2 wire encode/decode round-trip, and the
   stage-2 position-indexed accumulation + overlap-add stitching, comparing
   in-order vs shuffled vs multi-threaded assembly.
+- PtychoPINN: the stage-1 <-> stage-2 wire round-trip, which splits complex64
+  object patches into two float32 blobs. Its canvas assembly is order
+  independent by construction (scatter-add at absolute positions) but needs
+  torch, so it is exercised on hardware rather than here.
 - TomoGAN: position-indexed frame assembly (the property that makes denoising
   output order-independent), in-order vs shuffled vs multi-threaded.
 
@@ -42,6 +46,7 @@ except ImportError:
 
 _REPO = Path(__file__).resolve().parents[3]
 _PTYCHONN = _REPO / "examples" / "ptychonn"
+_PTYCHOPINN = _REPO / "examples" / "ptychopinn"
 
 
 def _load(module_path: Path, name: str):
@@ -222,6 +227,51 @@ def test_tomogan_output_multithreaded_matches_serial():
         t.join()
     assert np.array_equal(serial, out), \
         "TomoGAN output differs under multi-threaded assembly"
+
+
+def test_ptychopinn_wire_roundtrip_is_lossless():
+    """Stage1 -> stage2 carries complex64 patches as two float32 blobs.
+
+    Canvas assembly itself is order-independent by construction (scatter-add of
+    absolute positions), but it needs torch, so it is not covered here. What is
+    covered is that the complex values survive the real/imag split exactly.
+    """
+    schema = _load(_PTYCHOPINN / "pipeline_schema.py", "ptychopinn_pipeline_schema")
+
+    rng = np.random.default_rng(11)
+    b, c, m = 5, 4, 8
+    patches = (
+        rng.standard_normal((b, c, m, m), dtype=np.float32)
+        + 1j * rng.standard_normal((b, c, m, m), dtype=np.float32)
+    ).astype(np.complex64)
+
+    start, end = 40, 40 + b
+    payload = schema.encode_stage1_patches(
+        job_id=3, start=start, end=end, n_total=1000, patches=patches
+    )
+    out = schema.decode_stage1_patches(payload)
+
+    assert out["start"] == start and out["end"] == end
+    assert out["n_total"] == 1000 and out["job_id"] == 3
+    assert out["patches"].dtype == np.complex64
+    assert out["patches"].shape == patches.shape
+    assert np.array_equal(out["patches"], patches), \
+        "PtychoPINN wire round-trip altered the complex patches"
+
+
+def test_ptychopinn_wire_rejects_corrupt_payload():
+    schema = _load(_PTYCHOPINN / "pipeline_schema.py", "ptychopinn_pipeline_schema")
+
+    patches = np.zeros((2, 4, 8, 8), dtype=np.complex64)
+    payload = schema.encode_stage1_patches(
+        job_id=1, start=0, end=2, n_total=2, patches=patches
+    )
+    for bad in (payload[:-4], payload + b"\x00\x00\x00\x00"):
+        try:
+            schema.decode_stage1_patches(bad)
+        except ValueError:
+            continue
+        raise AssertionError("decoder accepted a truncated/extended payload")
 
 
 if __name__ == "__main__":

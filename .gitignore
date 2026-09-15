@@ -227,6 +227,12 @@ commit_config.txt
 # Ptychonn data
 examples/ptychonn/PtychoNN_data_partial/
 
+# Ptychopinn data (Zenodo bundle), derived groupings, and run logs
+examples/ptychopinn/PtychoPINN_data/
+examples/ptychopinn/prep/
+examples/ptychopinn/run_logs/
+examples/ptychopinn/venv/
+
 # Tomogan data
 examples/tomogan/dataset/
 
