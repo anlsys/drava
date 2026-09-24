@@ -58,18 +58,50 @@ the paper's Figure 2 transfer experiment. Other Figure 2 models are listed in
 [config.py](config.py); the multi-probe and synthetic-object models are in
 upstream's `recreate_results.ipynb`.
 
+### Disk footprint (read before installing)
+
+This example is far heavier than the TensorFlow ones. On a quota-limited home
+directory it **will** fail partway through the torch install.
+
+| Item | Approx. size |
+|---|---|
+| `torch` + bundled CUDA/cuDNN/NCCL/Triton wheels, installed | ~6 GB |
+| pip's wheel cache for the same | ~3 GB |
+| Zenodo `data.tar.gz` + `mlruns.tar.gz` | several GB (check with `--list`) |
+| `prep/` artifacts + reconstruction | modest, ~100 MB |
+
+Put everything on a scratch or project filesystem:
+
+```shell
+export BIG=/scratch/$USER              # whatever your site provides
+mkdir -p $BIG/{pipcache,tmp,ptychopinn_data}
+export PIP_CACHE_DIR=$BIG/pipcache
+export TMPDIR=$BIG/tmp
+export PTYCHOPINN_DATA_ROOT=$BIG/ptychopinn_data
+export PTYCHOPINN_PREP_DIR=$BIG/ptychopinn_data/prep_W_PS_W
+```
+
+`config.py` honours the last two, so every later step follows automatically.
+
 ### Setup
 
 ```shell
 cd examples/ptychopinn
-python -m venv venv
+python -m venv venv                    # or put the venv on $BIG too
 source venv/bin/activate
 
-# torch first, matched to the node's CUDA
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# torch first. The default PyPI wheel bundles its own CUDA runtime, so the
+# host's nvcc version is irrelevant -- only the driver matters. Do not pass
+# --index-url unless the default fails.
+pip install --no-cache-dir torch
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+
 pip install -r requirements.txt
 
-# the published package, from a checkout (not on PyPI)
+# The published package, from a checkout (not on PyPI). The -e is MANDATORY:
+# upstream's setup.py uses find_packages(), and eval/, notebooks/ and datagen/
+# have no __init__.py, so a non-editable install silently drops them and
+# stage 2 fails at `import ptychopinn_torch.eval.frc`.
 pip install -e /path/to/PtychoPINN-torch-pub
 ```
 
@@ -153,8 +185,47 @@ half-Nyquist, the paper's headline resolution metric. The reconstruction and
 ground truth are also written to `prep/<dataset>_<model>/reconstruction.npz`
 (disable with `PTYCHOPINN_SAVE_RECON=0`).
 
-To compare against the paper, run the same dataset/model pair here and read the
-corresponding FRC value from the manuscript's Figure 2 panel.
+### Verifying the result
+
+Comparing straight to the paper conflates two questions: *does the Drava
+pipeline reproduce PtychoPINN?* and *does PtychoPINN on this machine reproduce
+the paper?* Answer them in that order.
+
+**Step 1 — against upstream's own code path (the decisive check):**
+
+```shell
+python verify_against_upstream.py --dataset W --model PS_W
+```
+
+This runs `generate_gt_and_recon` from `recreate_results.ipynb` and scores it
+with the *same* explicit FRC used by stage 2, then diffs the two. Expect
+agreement to 2-3 decimal places; it is not bit-identical because FP16 autocast
+makes reductions batch-composition dependent. The script exits non-zero if
+`|dAUC| >= 0.01` or if the canvas shapes disagree.
+
+**Step 2 — prep numbers against the published notebook.** For the `W` dataset,
+upstream's captured notebook output gives exact anchors:
+
+| `prepare_dataset.py` prints | Expected for `W` |
+|---|---|
+| `n_scans` | `25921` |
+| `bounded centres` | `20449 of 25921` |
+| `grouped rows` | `20449` |
+| `max_offset` / `canvas` | `80` / `192x192` |
+| `batch rms scaling constant` | `~0.0002` |
+
+Note that grouped rows equals bounded centres here, so **no centres are
+discarded on `W`** and caveat 3 below is a no-op for this dataset. That is what
+makes `W` a good first target.
+
+**Step 3 — frame accounting.** All four must be equal to `n_groups`:
+publisher `frames` in `run_logs/*/pub_metrics.json`, `rx_items` in
+`metrics_stage1.jsonl`, `groups=` in the `[stage2-final]` line, and
+`n_groups` in `meta.json`. Any shortfall means dropped messages, not a
+scientific result.
+
+**Step 4 — against the paper.** Only once steps 1-3 are clean, read the FRC
+value for this dataset/model off the manuscript's Figure 2 panel.
 
 ### Socket transport
 
@@ -190,11 +261,37 @@ read by [config.py](config.py):
 
 Read these before trusting a number out of this example.
 
-1. **Free-threaded Python is the main integration risk.** Drava's other
-   examples run under the no-GIL Python 3.13/3.14 build on JLSE. PyTorch,
-   Lightning, tensordict, and MLflow have limited or no free-threaded wheel
-   coverage. If the stack will not install, build the Drava SWIG module against
-   a standard GIL Python 3.12 and use that interpreter for this example.
+1. **Check whether your interpreter is actually free-threaded.** PyTorch,
+   Lightning, tensordict, and MLflow have limited free-threaded wheel coverage,
+   so this is the first thing to establish. Do not trust the venv's name -- a
+   venv called `no-gil-3.13` may well have been created from a stock conda
+   Python:
+
+   ```shell
+   python -c "import sysconfig; print(bool(sysconfig.get_config_var('Py_GIL_DISABLED')))"
+   python -VV
+   ```
+
+   `False` means a normal GIL build and the whole stack installs from PyPI as
+   usual. That is fully supported: `PY_NO_GIL` is never defined in
+   `CMakeLists.txt`, so `api/python/drava_routine_wrap.c` always compiles the
+   `PyGILState_Ensure`/`Release` path. Free-threading buys parallel callbacks,
+   not correctness.
+
+   `True` and the stack refuses to install: build the SWIG module against a
+   standard GIL interpreter and use that one here:
+
+   ```shell
+   cmake -DPython3_EXECUTABLE=$(which python) ..
+   ```
+
+   Either way, confirm the build matches the interpreter before running --
+   a module built against a different Python fails with `undefined symbol`:
+
+   ```shell
+   python -c "import drava; print('drava OK')"
+   ldd <build>/_drava_python*.so | grep -i python
+   ```
 2. **Stage 2 must stay serialized.** `callback_serialize: true` is load-bearing;
    see the comment in `pipeline.yaml`.
 3. **Upstream's memmap row-count bug is sidestepped, not inherited.**
