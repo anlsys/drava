@@ -19,7 +19,10 @@ stages:
       threads: 4
       callback_batch: 256
       # Parallel callbacks: the stateless callback + runtime-owned EOS/index
-      # make this safe without any app-side lock.
+      # make this safe without any app-side lock. base_index is reserved by
+      # the transport's single-threaded fetch loop, so it stays in arrival
+      # order even though these callbacks run concurrently -- app_stage2.py
+      # relies on that to place each prediction at the right scan position.
       callback_serialize: false
     ingress:
       stream: FRAMES

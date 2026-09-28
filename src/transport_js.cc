@@ -285,20 +285,31 @@ int drava_transport_nats_main(drava_t *drava,
                    batch_payloads.size(), eos_in_batch ? 1 : 0,
                    first_stream_seq, last_stream_seq, first_consumer_seq,
                    last_consumer_seq, drava->stage_name.c_str());
+           /* Reserve the batch's global frame indices HERE, on the fetch
+            * loop's single thread, so batches are numbered in arrival order.
+            * Reserving inside the spawned task below would number them in
+            * task-execution order instead, silently breaking
+            * drava_frame_batch_t::base_index for every concurrent callback. */
+           size_t reserved_data_count = 0;
+           const uint64_t base_index = drava_reserve_base_index(
+                   drava, batch_payloads, &reserved_data_count);
+
            if (drava->callback_serialize) {
                drava_callback_task_begin(drava);
                drava_dispatch_payload_batch(drava, device_global_id,
-                                            batch_payloads);
+                                            batch_payloads, base_index,
+                                            reserved_data_count);
                return;
            }
            drava_callback_task_begin(drava);
            drava->runtime.team_task_spawn(
                    team,
-                   [drava, device_global_id,
+                   [drava, device_global_id, base_index, reserved_data_count,
                     batch_payloads = std::move(batch_payloads)](task_t *task) {
                        (void)task;
                        drava_dispatch_payload_batch(drava, device_global_id,
-                                                    batch_payloads);
+                                                    batch_payloads, base_index,
+                                                    reserved_data_count);
                    });
        };
 

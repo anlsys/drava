@@ -234,9 +234,29 @@ void drava_callback_task_begin(drava_t *drava);
 
 void drava_callback_task_end(drava_t *drava, bool saw_eos);
 
+/* Reserve the global frame-index range for a batch.
+ *
+ * Counts the data frames in @p payloads (EOS markers excluded) and atomically
+ * claims that many indices from the stream counter, returning the index of the
+ * first one. Writes the data-frame count to @p out_data_count when non-null.
+ *
+ * MUST be called from the transport's fetch loop, which is single-threaded,
+ * and BEFORE the batch is handed to a worker task. Reserving inside the task
+ * numbers batches in task-execution order instead of arrival order, which
+ * silently violates the documented meaning of
+ * drava_frame_batch_t::base_index whenever callback_serialize is false. */
+uint64_t drava_reserve_base_index(drava_t *drava,
+                                  const std::vector<std::string> &payloads,
+                                  size_t *out_data_count);
+
+/* Dispatch a batch to the app callback. @p base_index and
+ * @p reserved_data_count must come from drava_reserve_base_index() on the very
+ * same @p payloads. */
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,
-                                  const std::vector<std::string> &payloads);
+                                  const std::vector<std::string> &payloads,
+                                  uint64_t base_index,
+                                  size_t reserved_data_count);
 
 /* Transport-specific entry points (implemented in transport_*.cc) */
 int drava_transport_socket_main(drava_t *drava,
