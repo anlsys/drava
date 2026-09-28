@@ -27,16 +27,18 @@ setup() {
   command -v python3 >/dev/null 2>&1 || skip "python3 not found"
   command -v socat   >/dev/null 2>&1 || skip "socat not found"
 
+  command -v timeout >/dev/null 2>&1 || skip "timeout(1) not found"
+
   export PYTHONUNBUFFERED=1
-  export DRAVA_STAGE_CONFIG="${ABS_TOP_SRCDIR}/tests/base_index_ordering.yaml"
   export DRAVA_STAGE_NAME="test_stage"
   export PYTHONPATH="${ABS_TOP_BUILDDIR}:${PYTHONPATH:-}"
 
   APP="${ABS_TOP_SRCDIR}/tests/integration/base_index_ordering_app.py"
   PUB="${ABS_TOP_SRCDIR}/tests/integration/base_index_ordering_publisher.py"
+  TEMPLATE="${ABS_TOP_SRCDIR}/tests/base_index_ordering.yaml"
   [[ -f "$APP" ]] || skip "missing $APP"
   [[ -f "$PUB" ]] || skip "missing $PUB"
-  [[ -f "$DRAVA_STAGE_CONFIG" ]] || skip "missing $DRAVA_STAGE_CONFIG"
+  [[ -f "$TEMPLATE" ]] || skip "missing $TEMPLATE"
 
   export DRAVA_FIFO_PATH="${BATS_TEST_TMPDIR}/drava_baseidx_in"
   export DRAVA_SOCKET_PATH="${BATS_TEST_TMPDIR}/drava_baseidx.sock"
@@ -45,7 +47,14 @@ setup() {
   TDIR="${BATS_TEST_TMPDIR}/work"
   mkdir -p "$TDIR"
   export APP_LOG="$TDIR/app.log"
-  export PUB_LOG="$TDIR/pub.log"
+
+  # The runtime reads the socket path from the stage config ONLY; it does not
+  # consult DRAVA_SOCKET_PATH. Point the config at this run's socket.
+  export DRAVA_STAGE_CONFIG="$TDIR/stage.yaml"
+  sed "s|socket_path: .*|socket_path: \"${DRAVA_SOCKET_PATH}\"|" \
+      "$TEMPLATE" >"$DRAVA_STAGE_CONFIG"
+  grep -q "socket_path: \"${DRAVA_SOCKET_PATH}\"" "$DRAVA_STAGE_CONFIG" \
+    || skip "could not rewrite socket_path into the stage config"
 
   mkfifo "$DRAVA_FIFO_PATH"
   socat "$DRAVA_FIFO_PATH" UNIX-LISTEN:"$DRAVA_SOCKET_PATH",fork \
@@ -69,20 +78,45 @@ teardown() {
   python3 "$APP" >"$APP_LOG" 2>&1 &
   APP_PID=$!
 
-  # Wait for the stage to be listening before feeding the FIFO.
-  for _ in {1..100}; do
-    grep -q "Connected to socket" "$APP_LOG" 2>/dev/null && break
+  # Wait for the stage to connect. Bail out immediately if it died instead --
+  # a wrong socket path makes the publisher block forever on the FIFO, which
+  # would otherwise hang the whole suite rather than fail.
+  connected=0
+  for _ in {1..150}; do
+    if grep -q "Connected to socket" "$APP_LOG" 2>/dev/null; then
+      connected=1; break
+    fi
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+      echo "FAIL: stage exited during startup"; cat "$APP_LOG"; false
+    fi
     sleep 0.1
   done
+  [ "$connected" -eq 1 ] || {
+    echo "FAIL: stage never connected to ${DRAVA_SOCKET_PATH} within 15s"
+    echo "--- app log ---"; cat "$APP_LOG"
+    false
+  }
 
-  run python3 "$PUB"
-  [ "$status" -eq 0 ] || { cat "$PUB_LOG" 2>/dev/null; echo "$output"; false; }
+  run timeout 120 python3 "$PUB"
+  [ "$status" -eq 0 ] || {
+    echo "FAIL: publisher exited status=$status (124 = timed out)"
+    echo "$output"; echo "--- app log ---"; cat "$APP_LOG"
+    false
+  }
 
   # Wait for the end-of-stream summary.
-  for _ in {1..200}; do
-    grep -q "\[base-index-test\]" "$APP_LOG" 2>/dev/null && break
+  finalized=0
+  for _ in {1..600}; do
+    if grep -q "\[base-index-test\]" "$APP_LOG" 2>/dev/null; then
+      finalized=1; break
+    fi
     sleep 0.1
   done
+  [ "$finalized" -eq 1 ] || {
+    echo "FAIL: no [base-index-test] summary within 60s of EOS"
+    echo "--- app log ---"; tail -n 40 "$APP_LOG"
+    false
+  }
 
   run grep -h "\[base-index-test\]" "$APP_LOG"
   if [ "$status" -ne 0 ]; then

@@ -19,3 +19,10 @@ stages:
       callback_batch: 32
       callback_flush_timeout_ms: 100
       callback_serialize: false
+    ingress:
+      # The runtime takes the socket path ONLY from here -- it does not read
+      # DRAVA_SOCKET_PATH (see transport_socket.cc, ingress_cfg.socket_path,
+      # default /tmp/accel_2048.sock). The bats setup() rewrites this line to
+      # a per-run path under BATS_TEST_TMPDIR so concurrent runs cannot
+      # collide and a stale socket cannot be picked up.
+      socket_path: "/tmp/drava_base_index_ordering.sock"
