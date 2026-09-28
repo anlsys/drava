@@ -18,6 +18,8 @@ remove that without replacing the accumulator with a per-thread canvas merged
 at end-of-stream.
 """
 import json
+import os
+import time
 import traceback
 
 import drava
@@ -47,7 +49,21 @@ CANVAS_SIDE = int(META["canvas_side"])
 N_GROUPS = int(META["n_groups"])
 WINDOW = int(META["window"])
 
-STAGE2_DEVICE = torch.device("cpu")
+# Canvas accumulation is ~8 scatter_add_ calls over ~262k indices per incoming
+# message. On CPU, serialized by callback_serialize, that is minutes of work for
+# a full scan. The canvas is tiny (192x192) and the patches arrive a couple of
+# MB at a time, so the GPU does this far faster at negligible memory cost and
+# barely contends with stage 1. Override with PTYCHOPINN_STAGE2_DEVICE=cpu.
+_STAGE2_DEVICE_ENV = os.getenv("PTYCHOPINN_STAGE2_DEVICE", "").strip()
+if _STAGE2_DEVICE_ENV:
+    STAGE2_DEVICE = torch.device(_STAGE2_DEVICE_ENV)
+elif torch.cuda.is_available():
+    STAGE2_DEVICE = torch.device("cuda")
+else:
+    STAGE2_DEVICE = torch.device("cpu")
+
+# Log progress every N messages so a slow run is distinguishable from a hang.
+STAGE2_LOG_EVERY = int(os.getenv("PTYCHOPINN_STAGE2_LOG_EVERY", "25") or 25)
 
 with np.load(GROUPS_FILE, allow_pickle=False) as _groups:
     # (M, C, 2) absolute scan positions of every group member.
@@ -60,10 +76,15 @@ with np.load(GROUPS_FILE, allow_pickle=False) as _groups:
     COM = torch.from_numpy(np.ascontiguousarray(_groups["com"], dtype=np.float32))
     OBJECT_GUESS = np.array(_groups["object_guess"])
 
+COORDS_GLOBAL = COORDS_GLOBAL.to(STAGE2_DEVICE)
+COM = COM.to(STAGE2_DEVICE)
+
 CANVAS_SHAPE = (CANVAS_SIDE, CANVAS_SIDE)
 # Matches reconstruct_image_barycentric: (width // 2, height // 2), x then y.
 CANVAS_CENTER = torch.tensor(
-    [CANVAS_SHAPE[1] // 2, CANVAS_SHAPE[0] // 2], dtype=torch.float32
+    [CANVAS_SHAPE[1] // 2, CANVAS_SHAPE[0] // 2],
+    dtype=torch.float32,
+    device=STAGE2_DEVICE,
 )
 
 
@@ -81,6 +102,17 @@ class Stage2Accumulator:
         self.accumulator = _make_accumulator()
         self.groups_seen = 0
         self.max_index = 0
+        self.messages = 0
+        self.duplicates = 0
+        self.t0 = time.perf_counter()
+        # The runtime acks "after enqueue to achieve at-least-once semantics"
+        # (src/transport_js.cc), so a message CAN be delivered more than once --
+        # JetStream redelivers anything not acked within ack_wait. PtychoNN's
+        # stage 2 is naturally idempotent because it assigns into [start:end];
+        # scatter-add is not, and a redelivered patch would be splatted twice,
+        # skewing the canvas/counts weighted average. Track which groups have
+        # been accumulated and drop repeats.
+        self.seen = np.zeros(N_GROUPS, dtype=bool)
 
     def consume(self, frames, base_index) -> None:
         """Splat incoming object patches onto the shared canvas."""
@@ -100,7 +132,26 @@ class Stage2Accumulator:
                     f"{N_GROUPS}; prep artifact and publisher are out of sync"
                 )
 
-            patches = torch.from_numpy(item["patches"])          # (B, C, M, M)
+            # Idempotency guard -- see self.seen in __init__.
+            window = self.seen[start:end]
+            if window.all():
+                self.duplicates += 1
+                continue
+            if window.any():
+                # Stage 1 always republishes a byte-identical chunk, so a
+                # redelivery reuses the exact same range. A partial overlap
+                # means the ranges themselves changed, which would corrupt the
+                # canvas. Refuse it and let the completeness check catch it.
+                drava.log(
+                    drava.DRAVA_VERBOSE_ERROR,
+                    f"[stage2] partial overlap on [{start},{end}); refusing to "
+                    "double-accumulate. Reconstruction will be incomplete.",
+                )
+                continue
+
+            patches = torch.from_numpy(item["patches"]).to(   # (B, C, M, M)
+                STAGE2_DEVICE, non_blocking=True
+            )
             b = patches.shape[0]
             patches = patches.reshape(b * GROUP_SIZE, MIDDLE_TRIM, MIDDLE_TRIM)
 
@@ -110,8 +161,21 @@ class Stage2Accumulator:
             self.accumulator.accumulate_batch(
                 self.canvas, self.counts, patches, positions, MIDDLE_TRIM
             )
+            self.seen[start:end] = True
             self.groups_seen += b
             self.max_index = max(self.max_index, end)
+            self.messages += 1
+
+            if STAGE2_LOG_EVERY and self.messages % STAGE2_LOG_EVERY == 0:
+                dt = time.perf_counter() - self.t0
+                rate = self.groups_seen / dt if dt > 0 else float("inf")
+                pct = 100.0 * self.groups_seen / N_GROUPS if N_GROUPS else 0.0
+                drava.log(
+                    drava.DRAVA_VERBOSE_INFO,
+                    f"[stage2] msgs={self.messages} groups={self.groups_seen}"
+                    f"/{N_GROUPS} ({pct:.1f}%) {rate:.0f} groups/s "
+                    f"dup={self.duplicates} elapsed={dt:.1f}s",
+                )
 
     def finalize(self, expected_frames: int) -> None:
         """Runtime end-of-stream hook: normalise, crop, and score."""
@@ -120,7 +184,24 @@ class Stage2Accumulator:
             drava.log(drava.DRAVA_VERBOSE_ERROR, "[stage2-final] no groups received")
             return
 
-        recon_full = (self.canvas / self.counts).numpy()
+        if STAGE2_DEVICE.type == "cuda":
+            torch.cuda.synchronize()
+        unique = int(self.seen.sum())
+        drava.log(
+            drava.DRAVA_VERBOSE_INFO,
+            f"[stage2] accumulation done: {unique}/{N_GROUPS} unique groups in "
+            f"{time.perf_counter() - self.t0:.1f}s on {STAGE2_DEVICE} "
+            f"(duplicates dropped: {self.duplicates}); "
+            "normalising canvas and scoring FRC",
+        )
+        if unique != N_GROUPS:
+            drava.log(
+                drava.DRAVA_VERBOSE_WARN,
+                f"[stage2] INCOMPLETE: {N_GROUPS - unique} group(s) never "
+                "arrived. The FRC below is not comparable to the paper.",
+            )
+
+        recon_full = (self.canvas / self.counts).cpu().numpy()
         n_nan = int(np.isnan(recon_full).sum())
 
         w = WINDOW
@@ -158,7 +239,8 @@ class Stage2Accumulator:
         # Single machine-parseable line, mirroring PtychoNN's [stage2-final].
         drava.log(
             drava.DRAVA_VERBOSE_INFO,
-            f"[stage2-final] frames={n} groups={self.groups_seen} "
+            f"[stage2-final] frames={n} groups={unique} "
+            f"expected_groups={N_GROUPS} duplicates={self.duplicates} "
             f"canvas_side={CANVAS_SIDE} window={w} "
             f"recon_shape={recon.shape[0]}x{recon.shape[1]} "
             f"gt_shape={gt.shape[0]}x{gt.shape[1]} "
@@ -202,8 +284,9 @@ class Stage2Accumulator:
 _acc = Stage2Accumulator()
 drava.log(
     drava.DRAVA_VERBOSE_INFO,
-    f"[stage2] canvas={CANVAS_SIDE}x{CANVAS_SIDE} groups={N_GROUPS} "
-    f"C={GROUP_SIZE} middle_trim={MIDDLE_TRIM} window={WINDOW}",
+    f"[stage2] device={STAGE2_DEVICE} canvas={CANVAS_SIDE}x{CANVAS_SIDE} "
+    f"groups={N_GROUPS} C={GROUP_SIZE} middle_trim={MIDDLE_TRIM} "
+    f"window={WINDOW} log_every={STAGE2_LOG_EVERY}",
 )
 
 

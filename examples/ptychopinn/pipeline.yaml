@@ -43,7 +43,12 @@ stages:
   - name: stage2
     runtime:
       threads: 4
-      callback_batch: 64
+      # Keep this small. The runtime acks only after dispatch_batch() returns
+      # (src/transport_js.cc), so a long serialized callback stalls the fetch
+      # loop, acks stop flowing, JetStream's 30s ack_wait expires, and messages
+      # are redelivered -- which makes the stage slower still. 8 messages is
+      # ~512 groups per callback, which stays well inside ack_wait.
+      callback_batch: 8
       # REQUIRED. Unlike PtychoNN's stage2, which writes disjoint [start:end]
       # slices, this stage scatter-adds overlapping patches into one shared
       # canvas. Parallel callbacks would race on that in-place accumulation.

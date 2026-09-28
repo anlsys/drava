@@ -274,6 +274,48 @@ def test_ptychopinn_wire_rejects_corrupt_payload():
         raise AssertionError("decoder accepted a truncated/extended payload")
 
 
+def test_ptychopinn_dedupe_is_idempotent_under_redelivery():
+    """The runtime acks after enqueue, i.e. at-least-once (transport_js.cc).
+
+    PtychoNN's stage 2 tolerates redelivery for free because it assigns into
+    ``[start:end]``. PtychoPINN's canvas is a scatter-add accumulator, which is
+    NOT idempotent, so app_stage2 keeps a ``seen`` mask. This reproduces that
+    logic and hammers it with the same out-of-order redelivery pattern observed
+    in a real run, where JetStream's 30s ack_wait expired under a slow stage.
+    """
+    n_groups, chunk = 1000, 64
+    seen = np.zeros(n_groups, dtype=bool)
+    accumulated = []
+    duplicates = 0
+    refused = 0
+
+    def deliver(start, end):
+        nonlocal duplicates, refused
+        window = seen[start:end]
+        if window.all():
+            duplicates += 1
+            return
+        if window.any():
+            refused += 1
+            return
+        seen[start:end] = True
+        accumulated.append((start, end))
+
+    ranges = [(s, min(s + chunk, n_groups)) for s in range(0, n_groups, chunk)]
+    rng = np.random.default_rng(0)
+    order = list(ranges) + [ranges[i] for i in rng.integers(0, len(ranges), 400)]
+    rng.shuffle(order)
+    for s, e in order:
+        deliver(s, e)
+
+    assert seen.all(), "not every group was accumulated"
+    assert sorted(accumulated) == sorted(ranges), \
+        "a range was accumulated more than once, or skipped"
+    assert refused == 0, f"unexpected partial-overlap refusals: {refused}"
+    assert duplicates == 400, f"expected 400 dropped duplicates, got {duplicates}"
+    assert int(seen.sum()) == n_groups
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
