@@ -16,6 +16,17 @@ from pathlib import Path
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
+# The Zenodo bundle ships a filesystem-backed MLflow store (mlruns/), and recent
+# MLflow puts that backend in "maintenance mode", raising unless this is set:
+#
+#   MlflowException: The filesystem tracking backend (e.g., './mlruns') is in
+#   maintenance mode ... set `MLFLOW_ALLOW_FILE_STORE=true` to opt out.
+#
+# Migrating to sqlite would fork the published artifact, so opt out instead.
+# setdefault, not a hard assignment, so an explicit override still wins.
+# (Upstream's own Aurora job script does the same thing.)
+os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+
 
 def _get_int(name: str, default: int) -> int:
     raw = os.getenv(name)
