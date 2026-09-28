@@ -38,6 +38,36 @@ import numpy as np
 import config as cfg
 
 
+def patch_numpy_private_header_reader() -> bool:
+    """Restore ``np.lib.format._read_array_header`` for NumPy 2.x.
+
+    Upstream's ``dataloader.npz_headers`` sniffs each .npy member's shape via
+    the *private* ``np.lib.format._read_array_header``, which NumPy 2.x
+    removed. Without it every file is skipped and ``calculate_length`` dies
+    with "Could not determine image shape from any NPZ file."
+
+    The example's own ``prepare_dataset.py`` never hits this because it reads
+    the npz directly, but this script deliberately goes through
+    ``PtychoDataset`` to reproduce the published path, so the shim is needed
+    here. Patching at runtime keeps the installed package unforked. The
+    intern's PtychoPINN fork fixes this the same way, in-tree.
+    """
+    import numpy.lib.format as nf
+
+    if hasattr(nf, "_read_array_header"):
+        return False
+
+    def _read_array_header(fp, version, max_header_size=None):
+        if version == (1, 0):
+            return nf.read_array_header_1_0(fp)
+        if version == (2, 0):
+            return nf.read_array_header_2_0(fp)
+        raise ValueError(f"unsupported .npy header version {version}")
+
+    nf._read_array_header = _read_array_header
+    return True
+
+
 @contextlib.contextmanager
 def chdir(path: Path):
     prev = Path.cwd()
@@ -82,6 +112,11 @@ def main() -> int:
         raise SystemExit(
             f"Unknown model key {args.model!r}. Known: {', '.join(sorted(cfg.MODEL_IDS))}"
         )
+
+    if patch_numpy_private_header_reader():
+        print(f"[verify] patched np.lib.format._read_array_header "
+              f"(numpy {np.__version__} removed it; upstream's npz_headers "
+              f"needs it)")
 
     print(f"[verify] data_root = {data_root}")
     print(f"[verify] dataset={args.dataset} model={args.model} "

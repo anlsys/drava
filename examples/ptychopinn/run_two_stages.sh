@@ -34,6 +34,16 @@ JSDATA_DIR="${JSDATA_DIR:-$RUN_DIR/jsdata}"
 
 export DRAVA_STAGE_CONFIG="$STAGE_CONFIG"
 
+# bash >= 5 has EPOCHREALTIME (sub-second); fall back to date(1).
+now() {
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    echo "${EPOCHREALTIME/,/.}"
+  else
+    date +%s.%N
+  fi
+}
+T_SCRIPT_START="$(now)"
+
 mkdir -p "$RUN_DIR"
 echo "[run] example dir : $EXAMPLE_DIR"
 echo "[run] stage config: $STAGE_CONFIG"
@@ -108,8 +118,10 @@ PIDS+=("$STAGE1_PID")
 wait_for "$RUN_DIR/app_stage1.log" "JetStream ready:" 900 "stage1"
 
 echo "[run] starting publisher"
+T_PUB_START="$(now)"
 DRAVA_PUBLISHER_METRICS_FILE="$RUN_DIR/pub_metrics.json" \
   "$PYTHON" publisher_jetstream.py >"$RUN_DIR/pub.log" 2>&1
+T_PUB_END="$(now)"
 echo "[run] publisher finished"
 
 # A Drava stage does NOT self-terminate on the NATS transport: the fetch loop
@@ -124,6 +136,7 @@ waited=0
 while (( waited < APP_TIMEOUT_S )); do
   if grep -q "\[stage2-final\]" "$RUN_DIR/app_stage2.log" 2>/dev/null; then
     finalized=1
+    T_FINAL="$(now)"
     echo "[run] stage2 finalized after ${waited}s"
     break
   fi
@@ -161,12 +174,25 @@ stop_proc() {
 stop_proc "$STAGE1_PID" stage1
 stop_proc "$STAGE2_PID" stage2
 
-echo
-echo "[run] ---------------- result ----------------"
-grep -h "\[stage2-final\]" "$RUN_DIR/app_stage2.log" || {
-  echo "[run] ERROR: no [stage2-final] line; see $RUN_DIR/app_stage2.log" >&2
-  exit 1
+T_FINAL="${T_FINAL:-$(now)}"
+cat >"$RUN_DIR/timing.json" <<JSON
+{"t_script_start": $T_SCRIPT_START,
+ "t_pub_start": $T_PUB_START,
+ "t_pub_end": $T_PUB_END,
+ "t_final": $T_FINAL}
+JSON
+
+# Console summary + summary.csv, from the file-based metrics.
+"$PYTHON" summarize_run.py "$RUN_DIR" || {
+  echo "[run] summary failed; raw result line follows" >&2
+  grep -h "\[stage2-final\]" "$RUN_DIR/app_stage2.log" >&2 || true
 }
+
+if (( finalized == 0 )); then
+  echo "[run] run did NOT complete successfully" >&2
+  exit 1
+fi
+
 echo "[run] logs in $RUN_DIR"
 
 # JetStream keeps every message it accepted. Report the cost so it does not
