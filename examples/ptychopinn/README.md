@@ -257,6 +257,47 @@ read by [config.py](config.py):
 | `PTYCHOPINN_SAVE_RECON` | `1` | write `reconstruction.npz` |
 | `DRAVA_INFER_BATCH` | `128` | warmup batch size |
 
+### Troubleshooting
+
+**`MlflowException: The filesystem tracking backend ... is in maintenance mode`**
+Recent MLflow refuses a file-backed `mlruns/` unless you opt in. `config.py`
+sets `MLFLOW_ALLOW_FILE_STORE=true` via `os.environ.setdefault`, so this should
+not appear. If you hit it from a script that does not import `config`:
+
+```shell
+export MLFLOW_ALLOW_FILE_STORE=true
+```
+
+Migrating to sqlite would fork the published artifact, so opting out is correct.
+
+**`WeightsUnpickler error` / `Unsupported global` when loading the model**
+PyTorch 2.6 flipped `torch.load` to `weights_only=True` by default. The Zenodo
+artifacts are fully pickled `PtychoPINN_Lightning` objects, not state dicts, so
+they need `weights_only=False`. Recent MLflow passes that itself; if yours does
+not, the model is trusted (you downloaded it from the paper's own Zenodo
+record) and you can allow it explicitly.
+
+**Isolate model loading before running the pipeline.** This takes seconds and
+separates an artifact/torch problem from a transport problem:
+
+```shell
+python -c "
+import config, mlflow, torch
+mlflow.set_tracking_uri(f'file:{config.MLRUNS_DIR.resolve()}')
+m = mlflow.pytorch.load_model(f'runs:/{config.RUN_ID}/model', map_location='cpu')
+print('loaded', type(m).__name__)
+print('has forward_predict:', hasattr(m, 'forward_predict'))
+"
+```
+
+Expect `loaded PtychoPINN_Lightning` and `has forward_predict: True`.
+
+**`ModuleNotFoundError: ptychopinn_torch.eval`** — the package was installed
+non-editable. Reinstall with `pip install -e`; see the Setup note.
+
+**`undefined symbol` on `import drava`** — the SWIG module was built against a
+different interpreter. See caveat 1.
+
 ### Known caveats
 
 Read these before trusting a number out of this example.
