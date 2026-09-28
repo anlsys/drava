@@ -116,3 +116,22 @@ adapt it.
 - Metrics go to files, not stdout (see the
   [Metrics section of the README](../README.md#metrics)).
 - `pipeline.yaml` is authoritative for runtime knobs.
+- **Delivery is at-least-once, so callbacks must be idempotent.** On the
+  JetStream transport the runtime acks a message *after* enqueuing it
+  (`src/transport_js.cc`, "Ack after enqueue to achieve at-least-once
+  semantics"), and JetStream redelivers anything not acked within the
+  consumer's `ack_wait` (30 s by default; Drava does not override it).
+  Processing the same frame twice must therefore be harmless.
+  - Safe: *assigning* into a position-indexed buffer, as
+    `examples/ptychonn/app_stage2.py` does with `pred[start:end] = ...`.
+    A replay overwrites with identical values.
+  - Unsafe: *accumulating* (`+=`, `scatter_add_`, counters, appends). A replay
+    double-counts. `examples/ptychopinn/app_stage2.py` accumulates into a
+    shared canvas and so keeps an explicit `seen` mask keyed on the absolute
+    `[start, end)` range carried in its wire header.
+  - Redelivery is most easily triggered by a *slow* callback: the ack in the
+    fetch loop happens after `dispatch_batch()` returns, so a long callback
+    (especially with `callback_serialize: true`) stalls acking, which triggers
+    redelivery, which slows the stage further. If you see `consumer_seq`
+    climbing well past `stream_seq` in a stage log, that is this loop. Reduce
+    `callback_batch` and make the callback faster.
