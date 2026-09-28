@@ -112,18 +112,54 @@ DRAVA_PUBLISHER_METRICS_FILE="$RUN_DIR/pub_metrics.json" \
   "$PYTHON" publisher_jetstream.py >"$RUN_DIR/pub.log" 2>&1
 echo "[run] publisher finished"
 
-echo "[run] waiting for stages to drain (timeout ${APP_TIMEOUT_S}s)"
+# A Drava stage does NOT self-terminate on the NATS transport: the fetch loop
+# in src/transport_js.cc is `while (true)` with no exit condition, so after the
+# end-of-stream hook runs the stage keeps polling and eventually dies with
+# "Fetch error: Limit reached". Wait for the terminal marker in the log, then
+# stop the stages ourselves -- the same thing ptychonn's benchmark driver does
+# via terminate_proc().
+echo "[run] waiting for stage2 to finalize (timeout ${APP_TIMEOUT_S}s)"
+finalized=0
 waited=0
 while (( waited < APP_TIMEOUT_S )); do
+  if grep -q "\[stage2-final\]" "$RUN_DIR/app_stage2.log" 2>/dev/null; then
+    finalized=1
+    echo "[run] stage2 finalized after ${waited}s"
+    break
+  fi
   if ! kill -0 "$STAGE2_PID" 2>/dev/null; then
+    echo "[run] ERROR: stage2 exited before emitting [stage2-final]" >&2
     break
   fi
   sleep 2
   (( waited += 2 ))
 done
 
-wait "$STAGE1_PID" 2>/dev/null || true
-wait "$STAGE2_PID" 2>/dev/null || true
+if (( finalized == 0 )); then
+  echo "[run] ERROR: no [stage2-final] within ${APP_TIMEOUT_S}s" >&2
+  echo "[run] --- stage2 tail ---" >&2
+  tail -n 25 "$RUN_DIR/app_stage2.log" >&2 2>/dev/null || true
+fi
+
+stop_proc() {
+  # SIGINT, then SIGTERM, then SIGKILL. Metrics are already flushed at EOS.
+  local pid="$1" label="$2" grace=5 n=0
+  kill -0 "$pid" 2>/dev/null || { echo "[run] $label already exited"; return 0; }
+  kill -INT "$pid" 2>/dev/null || true
+  while (( n < grace )) && kill -0 "$pid" 2>/dev/null; do sleep 1; (( n += 1 )); done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 2
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[run] $label ignored SIGINT/SIGTERM, sending SIGKILL"
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  echo "[run] $label stopped"
+}
+
+stop_proc "$STAGE1_PID" stage1
+stop_proc "$STAGE2_PID" stage2
 
 echo
 echo "[run] ---------------- result ----------------"

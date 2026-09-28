@@ -116,6 +116,16 @@ adapt it.
 - Metrics go to files, not stdout (see the
   [Metrics section of the README](../README.md#metrics)).
 - `pipeline.yaml` is authoritative for runtime knobs.
+- **Stages do not self-terminate on the NATS transport.** The fetch loop in
+  `src/transport_js.cc` is `while (true)` with no exit condition, so
+  `drava.run()` does not return after the end-of-stream hook fires; the stage
+  keeps polling and eventually aborts with
+  `FATAL Fetch error: Limit reached`. An orchestrator must therefore wait for
+  the *terminal stage's own marker* in its log (e.g. `[stage2-final]`) or for
+  its metrics file, then stop the stage processes itself. See
+  `terminate_proc()` in `examples/ptychonn/benchmark_two_stages.py` and
+  `stop_proc()` in `examples/ptychopinn/run_two_stages.sh`. Waiting on process
+  exit will hang until your timeout.
 - **Delivery is at-least-once, so callbacks must be idempotent.** On the
   JetStream transport the runtime acks a message *after* enqueuing it
   (`src/transport_js.cc`, "Ack after enqueue to achieve at-least-once
