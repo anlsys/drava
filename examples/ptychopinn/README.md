@@ -227,6 +227,25 @@ scientific result.
 **Step 4 — against the paper.** Only once steps 1-3 are clean, read the FRC
 value for this dataset/model off the manuscript's Figure 2 panel.
 
+#### Reference result (JLSE, 1x A100-PCIE-40GB)
+
+`W` / `PS_W`, `--seed 0`, full 20449-group scan:
+
+| Quantity | Value |
+|---|---|
+| Drava pipeline FRC AUC (0..0.5) | 0.587875 |
+| Upstream `generate_gt_and_recon` FRC AUC | 0.584559 - 0.590006 over 3 runs |
+| \|dAUC\| | 0.0010 - 0.0033 → `PASS` |
+| complex NRMSE vs upstream | 0.0144 |
+| offline bisection (`debug_offline_reconstruct.py`) | 0.587874 |
+| canvas / crop | 194x194 / 154x154, `nan_px_crop=0` |
+| publisher / stage1 | ~9500 groups/s / ~6700 groups/s |
+| pipeline end-to-end | ~4.9 s |
+
+Upstream regroups randomly on every run (see caveat 8), so it has an inherent
+spread of about +/-0.005; the pipeline sits inside it. Do not expect bit
+equality between the two paths -- `|dAUC| < 0.01` is the bar.
+
 ### Socket transport
 
 Set `transport.type: socket` in [pipeline.yaml](pipeline.yaml), uncomment the
