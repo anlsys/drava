@@ -1,5 +1,7 @@
 ## PtychoNN Example
 
+> Running on JLSE? See **[JLSE.md](JLSE.md)** for the copy-paste command list.
+
 This example demonstrates an end-to-end inference workflow for PtychoNN (TF v2) using Drava as the runtime.
 Diffraction patches are sent from a publisher in batches, transported through Drava using either
 JetStream or a Unix domain socket, and consumed by the application.
