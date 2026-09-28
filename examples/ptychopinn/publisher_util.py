@@ -11,9 +11,20 @@ cost several GB because every frame belongs to many groups.
 """
 import json
 import os
+import struct
 import sys
 
 import numpy as np
+
+# Each frame is prefixed with its absolute group index. The runtime's
+# base_index is NOT usable for this: with callback_serialize=false it is
+# assigned by an atomic fetch_add *inside* the spawned task
+# (src/drava_internal.cc:601, src/transport_js.cc:295), so parallel callbacks
+# receive base_index values in task-execution order rather than arrival order.
+# Carrying the index makes the mapping immune to that, and to JetStream
+# reordering and redelivery.
+FRAME_INDEX_FMT = "!Q"
+FRAME_INDEX_SIZE = struct.calcsize(FRAME_INDEX_FMT)
 
 # Make the shared examples/common package importable without installation.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "common"))
@@ -73,10 +84,10 @@ def make_payload_generator(synthetic_mode):
         pool = rng.random(
             (SYNTHETIC_POOL_SIZE, group_size, patch_side, patch_side), dtype=np.float32
         )
-        payloads = [group.tobytes(order="C") for group in pool]
+        bodies = [group.tobytes(order="C") for group in pool]
 
         def next_payload(i):
-            return payloads[i % SYNTHETIC_POOL_SIZE]
+            return struct.pack(FRAME_INDEX_FMT, i) + bodies[i % SYNTHETIC_POOL_SIZE]
 
         return next_payload
 
@@ -91,7 +102,9 @@ def make_payload_generator(synthetic_mode):
     n_groups = int(nn_indices.shape[0])
 
     def next_payload(i):
-        idx = nn_indices[i % n_groups]
-        return np.ascontiguousarray(diff_stack[idx]).tobytes(order="C")
+        group = i % n_groups
+        idx = nn_indices[group]
+        body = np.ascontiguousarray(diff_stack[idx]).tobytes(order="C")
+        return struct.pack(FRAME_INDEX_FMT, group) + body
 
     return next_payload

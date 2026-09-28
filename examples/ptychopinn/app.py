@@ -14,6 +14,8 @@ where the physics forward model consumes them. Passing ``None`` here avoids
 allocating a multi-megabyte dummy probe per batch.
 """
 import json
+import struct
+import threading
 
 import drava
 import numpy as np
@@ -48,11 +50,21 @@ RMS_SCALE = float(META["rms_scaling_constant"])
 N_GROUPS = int(META["n_groups"])
 
 FRAME_DTYPE = np.float32
-FRAME_BYTES = GROUP_SIZE * PATCH_SIDE * PATCH_SIDE * np.dtype(FRAME_DTYPE).itemsize
-if FRAME_BYTES != int(META["frame_bytes"]):
+# Every frame is [8-byte big-endian group index][C*N*N float32].
+FRAME_INDEX_FMT = "!Q"
+FRAME_INDEX_SIZE = struct.calcsize(FRAME_INDEX_FMT)
+GROUP_BYTES = GROUP_SIZE * PATCH_SIDE * PATCH_SIDE * np.dtype(FRAME_DTYPE).itemsize
+FRAME_BYTES = FRAME_INDEX_SIZE + GROUP_BYTES
+if GROUP_BYTES != int(META["frame_bytes"]):
     raise RuntimeError(
-        f"frame size disagreement: computed {FRAME_BYTES}, meta says {META['frame_bytes']}"
+        f"frame size disagreement: computed {GROUP_BYTES}, "
+        f"meta says {META['frame_bytes']}"
     )
+
+# Diagnostic: count batches whose carried indices disagree with base_index.
+# Any nonzero value means base_index could not have been trusted.
+_order_lock = threading.Lock()
+_order_mismatches = 0
 
 # Keep each downstream message well under the NATS max_payload (8MB in nats.conf).
 PUBLISH_CHUNK = 64
@@ -178,18 +190,51 @@ def func(frames, base_index) -> None:
     """Infer on a batch of scan-position groups and publish object patches.
 
     The runtime strips the EOS marker and forwards it downstream automatically
-    (egress.forward_eos in pipeline.yaml), and supplies base_index -- the global
-    index of the first group in this batch -- so the callback stays stateless
-    and stage 2 can reassemble in any order.
+    (egress.forward_eos in pipeline.yaml).
+
+    Position comes from the group index carried in each frame, NOT from
+    base_index. With ``callback_serialize: false`` the runtime assigns
+    base_index by an atomic fetch_add inside the spawned task
+    (src/drava_internal.cc:601, spawned at src/transport_js.cc:295), so
+    concurrent callbacks are numbered in task-execution order rather than
+    arrival order. Trusting it paints patches at other batches' scan
+    positions. base_index is still cross-checked below so the discrepancy is
+    reported rather than silently tolerated.
     """
-    for raw in frames:
+    global _order_mismatches
+
+    n = len(frames)
+    indices = np.empty(n, dtype=np.int64)
+    bodies = []
+    for k, raw in enumerate(frames):
         if len(raw) != FRAME_BYTES:
             raise ValueError(
                 f"payload mismatch: got {len(raw)} bytes, expected {FRAME_BYTES}"
             )
+        indices[k] = struct.unpack_from(FRAME_INDEX_FMT, raw, 0)[0]
+        bodies.append(raw[FRAME_INDEX_SIZE:])
 
-    n = len(frames)
-    stacked = b"".join(frames)
+    if np.any(indices < 0) or np.any(indices >= N_GROUPS):
+        raise ValueError(
+            f"group index out of range [0,{N_GROUPS}): "
+            f"min={indices.min()} max={indices.max()}"
+        )
+
+    if not np.array_equal(indices, np.arange(base_index, base_index + n)):
+        with _order_lock:
+            _order_mismatches += 1
+            count = _order_mismatches
+        if count <= 5 or count % 100 == 0:
+            drava.log(
+                drava.DRAVA_VERBOSE_WARN,
+                f"[stage1] base_index disagrees with carried indices "
+                f"(batch {count}): base_index={base_index} n={n} "
+                f"carried=[{indices[0]}..{indices[-1]}]. Using carried "
+                "indices. Set callback_serialize=true to make base_index "
+                "trustworthy.",
+            )
+
+    stacked = b"".join(bodies)
     array = np.frombuffer(stacked, dtype=FRAME_DTYPE).reshape(
         (n, GROUP_SIZE, PATCH_SIDE, PATCH_SIDE), order="C"
     )
@@ -201,8 +246,7 @@ def func(frames, base_index) -> None:
         end = min(off + PUBLISH_CHUNK, n)
         payload = encode_stage1_patches(
             job_id=STAGE1_JOB_ID,
-            start=base_index + off,
-            end=base_index + end,
+            indices=indices[off:end],
             n_total=N_GROUPS,
             patches=patches[off:end],
         )

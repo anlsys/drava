@@ -8,6 +8,14 @@ imaginary parts so the dtype on the wire stays plain float32.
 Patches are ``(B, C, M, M)`` where ``B`` is the number of scan-position groups
 in this chunk, ``C`` is the group size (4 in the published config), and ``M`` is
 ``middle_trim`` -- the center crop that stage2 splats onto the canvas.
+
+Each chunk carries an explicit ``indices`` array giving the absolute group
+index of every patch, rather than a ``[start, end)`` range derived from the
+runtime's ``base_index``. That range is unsound under parallel callbacks: with
+``callback_serialize: false`` the runtime assigns ``base_index`` via an atomic
+fetch_add *inside* the spawned task (src/drava_internal.cc:601), so batches can
+be numbered in task-execution order rather than arrival order. Explicit indices
+also survive JetStream reordering and redelivery.
 """
 import json
 import struct
@@ -15,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _HEADER_LEN_FMT = "!I"
 _HEADER_LEN_SIZE = struct.calcsize(_HEADER_LEN_FMT)
 _KIND = "stage1_patch_batch"
@@ -24,23 +32,27 @@ _KIND = "stage1_patch_batch"
 def encode_stage1_patches(
         *,
         job_id: int,
-        start: int,
-        end: int,
+        indices: np.ndarray,
         n_total: int,
         patches: np.ndarray,
 ) -> bytes:
-    """Encode a chunk of complex object patches for groups ``[start, end)``."""
+    """Encode complex object patches together with their group indices."""
     patches = np.asarray(patches)
     if patches.ndim != 4:
         raise ValueError(f"expected (B,C,M,M), got shape={patches.shape}")
-    if (end - start) != patches.shape[0]:
+
+    idx = np.ascontiguousarray(indices, dtype=np.int64)
+    if idx.ndim != 1:
+        raise ValueError(f"expected 1-D indices, got shape={idx.shape}")
+    if idx.shape[0] != patches.shape[0]:
         raise ValueError(
-            f"group range mismatch: range={end - start}, batch={patches.shape[0]}"
+            f"index/patch count mismatch: {idx.shape[0]} vs {patches.shape[0]}"
         )
 
     real = np.ascontiguousarray(patches.real, dtype=np.float32)
     imag = np.ascontiguousarray(patches.imag, dtype=np.float32)
 
+    idx_bytes = idx.tobytes(order="C")
     real_bytes = real.tobytes(order="C")
     imag_bytes = imag.tobytes(order="C")
 
@@ -48,11 +60,12 @@ def encode_stage1_patches(
         "schema_version": SCHEMA_VERSION,
         "kind": _KIND,
         "job_id": int(job_id),
-        "start": int(start),
-        "end": int(end),
+        "count": int(idx.shape[0]),
         "n_total": int(n_total),
         "dtype": "float32",
+        "index_dtype": "int64",
         "shape": list(real.shape),
+        "indices_nbytes": len(idx_bytes),
         "real_nbytes": len(real_bytes),
         "imag_nbytes": len(imag_bytes),
     }
@@ -63,6 +76,7 @@ def encode_stage1_patches(
     return (
         struct.pack(_HEADER_LEN_FMT, len(header_bytes))
         + header_bytes
+        + idx_bytes
         + real_bytes
         + imag_bytes
     )
@@ -87,13 +101,20 @@ def decode_stage1_patches(payload: bytes) -> dict[str, Any]:
     if header.get("dtype") != "float32":
         raise ValueError(f"unsupported dtype: {header.get('dtype')}")
 
+    if header.get("index_dtype") != "int64":
+        raise ValueError(f"unsupported index dtype: {header.get('index_dtype')}")
+
     shape = tuple(int(x) for x in header["shape"])
     if len(shape) != 4:
         raise ValueError(f"expected 4D shape, got {shape}")
 
+    idx_nbytes = int(header["indices_nbytes"])
     real_nbytes = int(header["real_nbytes"])
     imag_nbytes = int(header["imag_nbytes"])
-    real_start = end_header
+
+    idx_start = end_header
+    idx_end = idx_start + idx_nbytes
+    real_start = idx_end
     real_end = real_start + real_nbytes
     imag_start = real_end
     imag_end = imag_start + imag_nbytes
@@ -101,6 +122,12 @@ def decode_stage1_patches(payload: bytes) -> dict[str, Any]:
     if imag_end != len(payload):
         raise ValueError(
             f"payload size mismatch: expected={imag_end} actual={len(payload)}"
+        )
+
+    indices = np.frombuffer(payload[idx_start:idx_end], dtype=np.int64)
+    if indices.shape[0] != shape[0]:
+        raise ValueError(
+            f"index/patch count mismatch: {indices.shape[0]} vs {shape[0]}"
         )
 
     real = np.frombuffer(payload[real_start:real_end], dtype=np.float32).reshape(
@@ -112,8 +139,7 @@ def decode_stage1_patches(payload: bytes) -> dict[str, Any]:
 
     return {
         "job_id": int(header["job_id"]),
-        "start": int(header["start"]),
-        "end": int(header["end"]),
+        "indices": indices.copy(),
         "n_total": int(header["n_total"]),
         "patches": (real + 1j * imag).astype(np.complex64),
     }

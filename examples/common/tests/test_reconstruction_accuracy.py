@@ -245,13 +245,16 @@ def test_ptychopinn_wire_roundtrip_is_lossless():
         + 1j * rng.standard_normal((b, c, m, m), dtype=np.float32)
     ).astype(np.complex64)
 
-    start, end = 40, 40 + b
+    # Non-contiguous, out-of-order indices: exactly what parallel callbacks
+    # and JetStream reordering can produce.
+    indices = np.array([40, 7, 900, 41, 3], dtype=np.int64)
     payload = schema.encode_stage1_patches(
-        job_id=3, start=start, end=end, n_total=1000, patches=patches
+        job_id=3, indices=indices, n_total=1000, patches=patches
     )
     out = schema.decode_stage1_patches(payload)
 
-    assert out["start"] == start and out["end"] == end
+    assert np.array_equal(out["indices"], indices), "indices corrupted on the wire"
+    assert out["indices"].dtype == np.int64
     assert out["n_total"] == 1000 and out["job_id"] == 3
     assert out["patches"].dtype == np.complex64
     assert out["patches"].shape == patches.shape
@@ -264,7 +267,8 @@ def test_ptychopinn_wire_rejects_corrupt_payload():
 
     patches = np.zeros((2, 4, 8, 8), dtype=np.complex64)
     payload = schema.encode_stage1_patches(
-        job_id=1, start=0, end=2, n_total=2, patches=patches
+        job_id=1, indices=np.array([0, 1], dtype=np.int64), n_total=2,
+        patches=patches
     )
     for bad in (payload[:-4], payload + b"\x00\x00\x00\x00"):
         try:
@@ -282,37 +286,45 @@ def test_ptychopinn_dedupe_is_idempotent_under_redelivery():
     NOT idempotent, so app_stage2 keeps a ``seen`` mask. This reproduces that
     logic and hammers it with the same out-of-order redelivery pattern observed
     in a real run, where JetStream's 30s ack_wait expired under a slow stage.
+
+    Indices are explicit and deliberately shuffled here: stage 1 no longer
+    derives position from the runtime's base_index, which is unordered
+    under parallel callbacks.
     """
     n_groups, chunk = 1000, 64
     seen = np.zeros(n_groups, dtype=bool)
-    accumulated = []
+    painted = np.zeros(n_groups, dtype=np.int64)   # times each group splatted
     duplicates = 0
-    refused = 0
+    partial = 0
 
-    def deliver(start, end):
-        nonlocal duplicates, refused
-        window = seen[start:end]
-        if window.all():
+    def deliver(indices):
+        nonlocal duplicates, partial
+        fresh = ~seen[indices]
+        if not fresh.any():
             duplicates += 1
             return
-        if window.any():
-            refused += 1
-            return
-        seen[start:end] = True
-        accumulated.append((start, end))
+        if not fresh.all():
+            partial += 1
+            indices = indices[fresh]
+        painted[indices] += 1
+        seen[indices] = True
 
-    ranges = [(s, min(s + chunk, n_groups)) for s in range(0, n_groups, chunk)]
     rng = np.random.default_rng(0)
-    order = list(ranges) + [ranges[i] for i in rng.integers(0, len(ranges), 400)]
+    # Chunks carry explicit, deliberately shuffled indices -- the pipeline no
+    # longer assumes arrival order matches group order.
+    perm = rng.permutation(n_groups)
+    chunks = [perm[i:i + chunk] for i in range(0, n_groups, chunk)]
+    order = list(chunks) + [chunks[i] for i in rng.integers(0, len(chunks), 400)]
     rng.shuffle(order)
-    for s, e in order:
-        deliver(s, e)
+    for c in order:
+        deliver(np.asarray(c, dtype=np.int64))
 
     assert seen.all(), "not every group was accumulated"
-    assert sorted(accumulated) == sorted(ranges), \
-        "a range was accumulated more than once, or skipped"
-    assert refused == 0, f"unexpected partial-overlap refusals: {refused}"
+    assert painted.max() == 1, \
+        f"a group was splatted {painted.max()} times; accumulation is not idempotent"
+    assert painted.min() == 1, "a group was never splatted"
     assert duplicates == 400, f"expected 400 dropped duplicates, got {duplicates}"
+    assert partial == 0, f"unexpected partial repeats: {partial}"
     assert int(seen.sum()) == n_groups
 
 

@@ -363,8 +363,9 @@ def main() -> int:
 
     print(f"[prep] wrote {groups_path}")
     print(f"[prep] wrote {meta_path}")
-    print(f"[prep] publisher frame size = {meta['frame_bytes']} bytes "
-          f"({data_config.C}x{data_config.N}x{data_config.N} float32)")
+    print(f"[prep] publisher frame size = {meta['frame_bytes'] + 8} bytes "
+          f"(8-byte group index + {data_config.C}x{data_config.N}x{data_config.N} "
+          f"float32)")
     return 0
 
 

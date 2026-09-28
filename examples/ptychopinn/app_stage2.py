@@ -104,6 +104,7 @@ class Stage2Accumulator:
         self.max_index = 0
         self.messages = 0
         self.duplicates = 0
+        self.partial_duplicates = 0
         self.t0 = time.perf_counter()
         # The runtime acks "after enqueue to achieve at-least-once semantics"
         # (src/transport_js.cc), so a message CAN be delivered more than once --
@@ -119,51 +120,48 @@ class Stage2Accumulator:
         for payload in frames:
             item = decode_stage1_patches(payload)
             job_id = item["job_id"]
-            start = item["start"]
-            end = item["end"]
+            indices = item["indices"]          # absolute group indices
+            patches_np = item["patches"]       # (B, C, M, M)
 
             if self.current_job_id != job_id:
                 self.current_job_id = job_id
                 drava.log(drava.DRAVA_VERBOSE_INFO, f"[stage2] job_id={job_id}")
 
-            if end > N_GROUPS:
+            if indices.size and (indices.min() < 0 or indices.max() >= N_GROUPS):
                 raise ValueError(
-                    f"group range [{start},{end}) exceeds prepared group count "
-                    f"{N_GROUPS}; prep artifact and publisher are out of sync"
+                    f"group index out of range [0,{N_GROUPS}): "
+                    f"min={indices.min()} max={indices.max()}; prep artifact "
+                    "and publisher are out of sync"
                 )
 
-            # Idempotency guard -- see self.seen in __init__.
-            window = self.seen[start:end]
-            if window.all():
+            # Idempotency guard: delivery is at-least-once and scatter-add is
+            # not idempotent. Indices are explicit, so a partial repeat can be
+            # filtered per patch rather than refused wholesale.
+            fresh = ~self.seen[indices]
+            if not fresh.any():
                 self.duplicates += 1
                 continue
-            if window.any():
-                # Stage 1 always republishes a byte-identical chunk, so a
-                # redelivery reuses the exact same range. A partial overlap
-                # means the ranges themselves changed, which would corrupt the
-                # canvas. Refuse it and let the completeness check catch it.
-                drava.log(
-                    drava.DRAVA_VERBOSE_ERROR,
-                    f"[stage2] partial overlap on [{start},{end}); refusing to "
-                    "double-accumulate. Reconstruction will be incomplete.",
-                )
-                continue
+            if not fresh.all():
+                self.partial_duplicates += 1
+                indices = indices[fresh]
+                patches_np = patches_np[fresh]
 
-            patches = torch.from_numpy(item["patches"]).to(   # (B, C, M, M)
+            patches = torch.from_numpy(np.ascontiguousarray(patches_np)).to(
                 STAGE2_DEVICE, non_blocking=True
             )
             b = patches.shape[0]
             patches = patches.reshape(b * GROUP_SIZE, MIDDLE_TRIM, MIDDLE_TRIM)
 
-            coords = COORDS_GLOBAL[start:end].reshape(b * GROUP_SIZE, 2)
+            idx_t = torch.from_numpy(indices).to(STAGE2_DEVICE)
+            coords = COORDS_GLOBAL[idx_t].reshape(b * GROUP_SIZE, 2)
             positions = coords - COM.unsqueeze(0) + CANVAS_CENTER.unsqueeze(0)
 
             self.accumulator.accumulate_batch(
                 self.canvas, self.counts, patches, positions, MIDDLE_TRIM
             )
-            self.seen[start:end] = True
+            self.seen[indices] = True
             self.groups_seen += b
-            self.max_index = max(self.max_index, end)
+            self.max_index = max(self.max_index, int(indices.max()) + 1)
             self.messages += 1
 
             if STAGE2_LOG_EVERY and self.messages % STAGE2_LOG_EVERY == 0:
@@ -191,7 +189,8 @@ class Stage2Accumulator:
             drava.DRAVA_VERBOSE_INFO,
             f"[stage2] accumulation done: {unique}/{N_GROUPS} unique groups in "
             f"{time.perf_counter() - self.t0:.1f}s on {STAGE2_DEVICE} "
-            f"(duplicates dropped: {self.duplicates})",
+            f"(duplicates dropped: {self.duplicates}, "
+            f"partial: {self.partial_duplicates})",
         )
 
         # Separate "the publisher was deliberately capped" from "we lost data".
