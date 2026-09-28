@@ -191,32 +191,60 @@ class Stage2Accumulator:
             drava.DRAVA_VERBOSE_INFO,
             f"[stage2] accumulation done: {unique}/{N_GROUPS} unique groups in "
             f"{time.perf_counter() - self.t0:.1f}s on {STAGE2_DEVICE} "
-            f"(duplicates dropped: {self.duplicates}); "
-            "normalising canvas and scoring FRC",
+            f"(duplicates dropped: {self.duplicates})",
         )
-        if unique != N_GROUPS:
+
+        # Separate "the publisher was deliberately capped" from "we lost data".
+        # `n` is what the publisher actually sent, carried on the EOS marker.
+        if unique < n:
+            partial = "lost"
+            drava.log(
+                drava.DRAVA_VERBOSE_ERROR,
+                f"[stage2] DATA LOSS: publisher sent {n} groups but only "
+                f"{unique} were accumulated ({n - unique} missing). This is a "
+                "transport or application fault, not a short run.",
+            )
+        elif unique < N_GROUPS:
+            partial = "capped"
             drava.log(
                 drava.DRAVA_VERBOSE_WARN,
-                f"[stage2] INCOMPLETE: {N_GROUPS - unique} group(s) never "
-                "arrived. The FRC below is not comparable to the paper.",
+                f"[stage2] PARTIAL RUN: {unique} of {N_GROUPS} groups streamed "
+                "(publisher was capped, e.g. DRAVA_PUBLISH_NUM_FRAMES). The "
+                "canvas is only partly illuminated, so the FRC below is NOT "
+                "comparable to the paper. Run the full scan to compare.",
             )
+        else:
+            partial = "complete"
 
         recon_full = (self.canvas / self.counts).cpu().numpy()
-        n_nan = int(np.isnan(recon_full).sum())
+        n_nan_full = int(np.isnan(recon_full).sum())
 
         w = WINDOW
         recon = recon_full[w:-w, w:-w]
         gt = self._ground_truth(recon.shape[0], w)
 
+        # Pixels the scan never illuminated divide 0/0. Only NaNs inside the
+        # evaluated crop matter -- they make the FFT, and hence the FRC, NaN.
+        n_nan = int(np.isnan(recon).sum())
+
         frc_auc = float("nan")
-        try:
-            frc_auc = self._frc_auc(gt, recon)
-        except Exception as exc:
+        if n_nan:
             drava.log(
-                drava.DRAVA_VERBOSE_ERROR,
-                f"[stage2-final] FRC failed: {exc}",
+                drava.DRAVA_VERBOSE_WARN,
+                f"[stage2] skipping FRC: {n_nan} of {recon.size} pixels in the "
+                f"evaluated crop are NaN (never illuminated). FRC would be NaN. "
+                + ("Expected for a capped run." if partial == "capped" else
+                   "Unexpected for a full run -- check the canvas geometry."),
             )
-            drava.log(drava.DRAVA_VERBOSE_ERROR, traceback.format_exc())
+        else:
+            try:
+                frc_auc = self._frc_auc(gt, recon)
+            except Exception as exc:
+                drava.log(
+                    drava.DRAVA_VERBOSE_ERROR,
+                    f"[stage2-final] FRC failed: {exc}",
+                )
+                drava.log(drava.DRAVA_VERBOSE_ERROR, traceback.format_exc())
 
         if SAVE_RECON:
             try:
@@ -244,7 +272,8 @@ class Stage2Accumulator:
             f"canvas_side={CANVAS_SIDE} window={w} "
             f"recon_shape={recon.shape[0]}x{recon.shape[1]} "
             f"gt_shape={gt.shape[0]}x{gt.shape[1]} "
-            f"nan_px={n_nan} frc_auc={frc_auc:.6f} "
+            f"status={partial} nan_px_crop={n_nan} nan_px_canvas={n_nan_full} "
+            f"frc_auc={frc_auc:.6f} "
             f"dataset={META['dataset']} model={META['model_key']}",
         )
 

@@ -126,6 +126,14 @@ def main() -> int:
                         help="output directory (default: prep/<dataset>_<model>)")
     parser.add_argument("--experiment-number", type=int, default=0,
                         help="index into the sorted npz list (default: %(default)s)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="seed for numpy's global RNG before grouping "
+                             "(default: %(default)s). get_fixed_quadrant_neighbors_c4 "
+                             "picks one random candidate per quadrant via "
+                             "np.random.choice and upstream never seeds it, so "
+                             "without this the groups -- and therefore the canvas "
+                             "size and the reconstruction -- change every run. "
+                             "Pass -1 to leave the RNG untouched (upstream behaviour).")
     args = parser.parse_args()
 
     (
@@ -226,6 +234,16 @@ def main() -> int:
           f"y_range={extents[2]:.4f}..{extents[3]:.4f}")
     print(f"[prep] bounded centres: {len(valid_indices)} of {n_scans}")
 
+    # Upstream's quadrant grouper calls np.random.choice four times per group
+    # against the unseeded global RNG, so grouping is not reproducible by
+    # default. Seed it here rather than patching upstream.
+    if args.seed >= 0:
+        np.random.seed(args.seed)
+        print(f"[prep] seeded numpy global RNG with {args.seed} for grouping")
+    else:
+        print("[prep] WARNING: --seed -1, grouping is nondeterministic; "
+              "canvas size and reconstruction will vary between runs")
+
     if data_config.neighbor_function == "Nearest":
         neighbor_function = get_neighbor_indices
     elif data_config.neighbor_function == "Min_dist":
@@ -322,6 +340,7 @@ def main() -> int:
         "run_id": run_id,
         "npz_path": str(npz_path),
         "mlruns_dir": str(mlruns_dir),
+        "grouping_seed": int(args.seed),
         "n_scans": int(n_scans),
         "n_groups": n_groups,
         "n_bounded_centres": int(len(valid_indices)),
