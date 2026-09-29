@@ -69,12 +69,9 @@ typedef struct drava_frame_t {
  * per-frame stream positions without keeping its own counter, which is what
  * makes callbacks safe to run concurrently and out of order.
  *
- * The index range is reserved by the transport's fetch loop, which is
- * single-threaded, so batches are numbered in arrival order regardless of the
- * order in which worker tasks subsequently run them. Reserving it inside the
- * callback task instead would number batches in task-execution order and make
- * this field meaningless whenever callback_serialize is false; see
- * drava_reserve_base_index().
+ * The range is reserved by the transport's single-threaded fetch loop, so
+ * batches are numbered in arrival order regardless of when worker tasks run
+ * them. See drava_reserve_base_index().
  */
 typedef struct drava_frame_batch_t {
     uint64_t batch_id;             /**< Runtime-assigned monotonic batch id. */

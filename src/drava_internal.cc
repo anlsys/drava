@@ -532,31 +532,24 @@ void drava_callback_task_end(drava_t *drava, bool saw_eos)
         drava_stats_log_snapshot(drava, "tx_eos");
 }
 
-/* Number of data frames in a batch, i.e. payloads that are not EOS markers.
- * Single definition so the reservation in the fetch loop and the dispatch in
- * the worker task can never disagree about what they are counting. */
-static size_t drava_count_data_frames(const std::vector<std::string> &payloads)
-{
-    size_t n = 0;
-    for (const std::string &payload : payloads) {
-        uint64_t ignored = 0;
-        if (!drava_payload_parse_eos_count(payload.data(), payload.size(),
-                                           &ignored))
-            ++n;
-    }
-    return n;
-}
-
 uint64_t drava_reserve_base_index(drava_t *drava,
                                   const std::vector<std::string> &payloads,
                                   size_t *out_data_count)
 {
-    const size_t data_count = drava ? drava_count_data_frames(payloads) : 0;
+    size_t n = 0;
+    if (drava) {
+        for (const std::string &payload : payloads) {
+            uint64_t ignored = 0;
+            if (!drava_payload_parse_eos_count(payload.data(), payload.size(),
+                                               &ignored))
+                ++n;
+        }
+    }
     if (out_data_count)
-        *out_data_count = data_count;
-    if (!drava || data_count == 0)
-        return drava ? drava->next_data_index.load() : 0;
-    return drava->next_data_index.fetch_add(data_count);
+        *out_data_count = n;
+    /* An EOS-only batch consumes no indices, and dispatch ignores base_index
+     * when there are no data frames. */
+    return n ? drava->next_data_index.fetch_add(n) : 0;
 }
 
 static void drava_dispatch_execute(drava_t *drava,
@@ -625,11 +618,8 @@ static void drava_dispatch_execute(drava_t *drava,
             drava->eos_expected_frames = eos_count;
     }
 
-    /* base_index was reserved by the transport's fetch loop (see
-     * drava_reserve_base_index) so that batches are numbered in arrival order
-     * even when this function runs concurrently in worker tasks. If the
-     * reservation disagrees with what we actually parsed, every later index is
-     * wrong, so say so loudly rather than corrupting results silently. */
+    /* The reservation counts EOS markers independently of the loop above; a
+     * disagreement means base_index is wrong here and in every later batch. */
     if (reserved_data_count != data_frame_count)
         LOGGER_FATAL("base_index reservation mismatch: reserved=%zu parsed=%zu "
                      "stage=%s",

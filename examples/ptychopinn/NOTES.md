@@ -94,19 +94,21 @@ Read by [config.py](config.py), so shared by every entry point:
 | `PTYCHOPINN_DATA_ROOT` | `./PtychoPINN_data` | unpacked Zenodo bundle |
 | `PTYCHOPINN_MLRUNS_DIR` | `<root>/mlruns` | MLflow file store |
 | `PTYCHOPINN_DATASET` | `W` | dataset key |
-| `PTYCHOPINN_DATASET_DIR` | `<root>/data/<ds>` | override the npz directory |
 | `PTYCHOPINN_MODEL` | `PS_W` | model key from `MODEL_IDS` |
 | `PTYCHOPINN_RUN_ID` | — | explicit run hash, overrides the model key |
 | `PTYCHOPINN_PREP_DIR` | `./prep/<ds>_<model>` | prep artifacts |
 | `PTYCHOPINN_DEVICE` | `cuda` | stage 1 torch device |
 | `PTYCHOPINN_MIXED_PRECISION` | `1` | FP16 autocast, as published |
-| `PTYCHOPINN_FRC_WINDOW` | per-dataset | crop before the FRC |
 | `PTYCHOPINN_FRC_AUC_CUTOFF` | `0.5` | AUC integration limit |
 | `PTYCHOPINN_SAVE_RECON` | `1` | write `reconstruction.npz` |
 | `PTYCHOPINN_RECON_PATH` | `<prep>/reconstruction.npz` | where to write it |
 | `DRAVA_INFER_BATCH` | `128` | warmup batch size |
-| `DRAVA_PATCH_SIDE`, `DRAVA_GROUP_SIZE`, `DRAVA_MIDDLE_TRIM` | from `meta.json` | geometry fallbacks |
 | `DRAVA_STAGE1_JOB_ID` | `1` | tag on stage1 messages |
+
+Geometry (`N`, `C`, `middle_trim`, `window`, canvas size, rms constant) is not
+configurable by environment: `prepare_dataset.py` takes it from the model's own
+MLflow config and writes `meta.json`, which both stages treat as authoritative.
+Change it with `prepare_dataset.py` flags, not env vars.
 
 Read by [app_stage2.py](app_stage2.py) only:
 

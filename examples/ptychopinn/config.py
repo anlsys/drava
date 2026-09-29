@@ -94,7 +94,6 @@ DATA_ROOT = _get_path("PTYCHOPINN_DATA_ROOT", EXAMPLE_DIR / "PtychoPINN_data")
 MLRUNS_DIR = _get_path("PTYCHOPINN_MLRUNS_DIR", DATA_ROOT / "mlruns")
 
 DATASET = os.getenv("PTYCHOPINN_DATASET", "W")
-DATASET_DIR = _get_path("PTYCHOPINN_DATASET_DIR", DATA_ROOT / "data" / DATASET)
 
 MODEL_KEY = os.getenv("PTYCHOPINN_MODEL", "PS_W")
 RUN_ID = os.getenv("PTYCHOPINN_RUN_ID", "") or MODEL_IDS.get(MODEL_KEY, "")
@@ -104,17 +103,11 @@ PREP_DIR = _get_path("PTYCHOPINN_PREP_DIR", EXAMPLE_DIR / "prep" / f"{DATASET}_{
 GROUPS_FILE = PREP_DIR / "groups.npz"
 META_FILE = PREP_DIR / "meta.json"
 
-# --------------------------------------------------------------------------- #
-# Tensor geometry. Defaults match the published 64x64 / C=4 configuration; the
-# authoritative values are written to meta.json by prepare_dataset.py, which
-# reads them from the model's own MLflow config.
-# --------------------------------------------------------------------------- #
-PATCH_SIDE = _get_int("DRAVA_PATCH_SIDE", 64)
-GROUP_SIZE = _get_int("DRAVA_GROUP_SIZE", 4)
-MIDDLE_TRIM = _get_int("DRAVA_MIDDLE_TRIM", PATCH_SIDE // 2)
+# Tensor geometry is NOT configured here: prepare_dataset.py reads N, C and
+# middle_trim from the model's own MLflow config and writes them to meta.json,
+# which app.py and app_stage2.py treat as authoritative.
 
 DRAVA_INFER_BATCH = _get_int("DRAVA_INFER_BATCH", 128)
-LOG_EVERY = _get_int("DRAVA_LOG_EVERY", DRAVA_INFER_BATCH)
 STAGE1_JOB_ID = _get_int("DRAVA_STAGE1_JOB_ID", 1)
 
 # Torch device for stage1 inference. The published reconstruction path runs
@@ -122,8 +115,8 @@ STAGE1_JOB_ID = _get_int("DRAVA_STAGE1_JOB_ID", 1)
 TORCH_DEVICE = os.getenv("PTYCHOPINN_DEVICE", "cuda")
 USE_MIXED_PRECISION = os.getenv("PTYCHOPINN_MIXED_PRECISION", "1") == "1"
 
-# Stage-2 evaluation.
-FRC_WINDOW = _get_int("PTYCHOPINN_FRC_WINDOW", WINDOW_SIZES.get(DATASET, 20))
+# Stage-2 evaluation. The FRC crop comes from meta.json (window), which
+# prepare_dataset.py fills from WINDOW_SIZES.
 FRC_AUC_CUTOFF = _get_float("PTYCHOPINN_FRC_AUC_CUTOFF", 0.5)
 SAVE_RECON = os.getenv("PTYCHOPINN_SAVE_RECON", "1") == "1"
 RECON_PATH = _get_path("PTYCHOPINN_RECON_PATH", PREP_DIR / "reconstruction.npz")

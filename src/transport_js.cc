@@ -285,11 +285,8 @@ int drava_transport_nats_main(drava_t *drava,
                    batch_payloads.size(), eos_in_batch ? 1 : 0,
                    first_stream_seq, last_stream_seq, first_consumer_seq,
                    last_consumer_seq, drava->stage_name.c_str());
-           /* Reserve the batch's global frame indices HERE, on the fetch
-            * loop's single thread, so batches are numbered in arrival order.
-            * Reserving inside the spawned task below would number them in
-            * task-execution order instead, silently breaking
-            * drava_frame_batch_t::base_index for every concurrent callback. */
+           /* Reserve on this thread (the fetch loop) so batches are
+            * numbered in arrival order, not task-execution order. */
            size_t reserved_data_count = 0;
            const uint64_t base_index = drava_reserve_base_index(
                    drava, batch_payloads, &reserved_data_count);
