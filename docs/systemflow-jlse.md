@@ -133,8 +133,31 @@ DRAVA_STAGE_CONFIG=$HOME/drava/.scratch/sf_pipeline.yaml ./run_two_stages.sh
 python summarize_run.py
 ```
 
-Compare the two `run_logs/<stamp>/summary.csv` files. FRC AUC and
-`nan_px_crop` must match exactly; throughput/E2E will vary run to run.
+Compare the two `run_logs/<stamp>/summary.csv` files.
+
+`nan_px_crop` must be `0` in both, and frame accounting must be OK in both.
+**FRC AUC will not match to the last digit, and should not be expected to.**
+Stage 1 runs parallel callbacks (`callback_serialize: false`) and stage 2
+scatter-adds overlapping patches, so float accumulation order varies between
+runs; the same config re-run gives answers differing by ~1e-6. Measured on an
+A100 (2026-09-29):
+
+| Run | Config | FRC AUC | e2e s |
+|---|---|---|---|
+| `202326` | derived | 0.587875 | 4.885 |
+| `202445` | checked-in | 0.587873 | 4.969 |
+| `202529` | derived | 0.587874 | 4.916 |
+
+The derived config alone produced both `0.587875` and `0.587874`, so the spread
+is **run-to-run non-determinism, not a config difference**. Judge with a
+tolerance, not equality — `verify_against_upstream.py` uses `|dAUC| < 0.01`,
+four orders of magnitude looser than the observed 2e-6 spread:
+
+```shell
+python verify_against_upstream.py --dataset W --model PS_W   # expect PASS
+```
+
+Throughput and E2E also vary run to run; compare medians, not single runs.
 
 A config-level diff should show only the `systemflow:` provenance block and the
 loss of comments — no runtime key differences:
@@ -209,6 +232,63 @@ print(f'predicted latency {e.latency_s:.3f} s, energy {e.energy_j:.1f} J, '
 
 Comparing that prediction against the measured `summary.csv` is the manual
 precursor to the (not yet implemented) calibration feedback loop.
+
+## Validating the energy half — enable NVML first
+
+SystemFlow predicts **energy and power**, not just latency. Those predictions
+are unverifiable unless the runtime was built with NVML: without it drava
+reports CPU/RAPL energy only and omits every GPU energy field, so there is
+nothing to compare against.
+
+Check your build log. If it says:
+
+```
+-- NVML not found: building without GPU-energy reporting
+```
+
+then rebuild with NVML enabled — see
+[examples/ptychopinn/JLSE.md](../examples/ptychopinn/JLSE.md#gpu-energy-nvml).
+Short version (`NVML_ROOT` is a cmake cache variable, so `-D` is required on an
+existing build tree):
+
+```shell
+export CUDA_HOME=$(dirname "$(dirname "$(command -v nvcc)")")
+cd ~/drava/build
+CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug -DNVML_ROOT=$CUDA_HOME ..
+make -j
+```
+
+Expect `-- NVML GPU-energy backend enabled`.
+
+### Reference numbers (A100, dataset W, 20449 groups, 64x64)
+
+SystemFlow's shipped A100 coefficients predict, for that workload:
+
+| Quantity | Predicted |
+|---|---|
+| compute latency | 1.591 s |
+| io latency | 3.424 s |
+| **total latency** | **5.015 s** |
+| energy | 252.5 J |
+| avg power | 50.3 W |
+
+Measured drava `pipeline e2e` on 2026-09-29 was 4.885 / 4.969 / 4.916 s —
+within **2 %** of the latency prediction. The energy figure is the one still
+unvalidated; that is what an NVML build unlocks.
+
+Note SystemFlow's split says this workload is **IO-dominated** (3.42 s io vs
+1.59 s compute, 68 % io). That is a testable hypothesis, not a measurement: if
+true, adding GPU threads will not help and transport/batching changes will.
+
+> **Caveat when reproducing these numbers.** `PtychoPINNResourceModel.predict()`
+> reads `s_per_gflop` and `io_slope_s_per_grouped` from the shipped CSVs, and
+> both are rounded to the point of damage — `s_per_gflop` is `0.0` for A100,
+> which zeroes the entire workload-dependent compute term and yields a constant
+> 0.366 s regardless of sample count (total 4.43 s, −10 % error). The
+> full-precision equivalents `ms_per_tflop_work` (35.8472) and
+> `io_slope_us_per_grouped` (168.814) sit unused in the same files; the table
+> above uses those. This is an upstream SystemFlow data issue — do not patch the
+> SystemFlow checkout, report it.
 
 ## Troubleshooting
 

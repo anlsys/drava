@@ -35,6 +35,37 @@ CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j
 ```
 
+### GPU energy (NVML)
+
+If cmake printed `NVML not found`, the runtime reports **CPU/RAPL energy only**
+and silently omits every GPU energy field. Enable it:
+
+```shell
+export CUDA_HOME=$(dirname "$(dirname "$(command -v nvcc)")")
+export NVML_ROOT=$CUDA_HOME
+ls $NVML_ROOT/include/nvml.h                    # header
+ls $NVML_ROOT/lib64/stubs/libnvidia-ml.so       # link stub (driver lib loads at run time)
+```
+
+`NVML_ROOT` is a cmake **cache** variable, so exporting it is not enough on a
+build tree that already configured without it — pass `-D` explicitly:
+
+```shell
+cd ~/drava/build
+CC=clang CXX=clang++ cmake -DCMAKE_BUILD_TYPE=Debug -DNVML_ROOT=$CUDA_HOME ..
+make -j
+```
+
+Confirm the line changed to:
+
+```
+-- NVML GPU-energy backend enabled (include=..., lib=.../libnvidia-ml.so)
+```
+
+GPU energy then appears in the metrics JSONL and in `summary.csv`. This is what
+makes SystemFlow's energy predictions checkable — see
+[docs/systemflow-jlse.md](../../docs/systemflow-jlse.md).
+
 Runtime tests:
 
 ```shell
