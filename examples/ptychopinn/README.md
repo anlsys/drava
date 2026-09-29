@@ -9,65 +9,67 @@ publisher -> FRAMES/frames.raw -> [stage1: forward_predict] -> PATCHES/frames.st
 ```
 
 - **[JLSE.md](JLSE.md)** — copy-paste commands for an A100 node
-- **[NOTES.md](NOTES.md)** — design, caveats, socket transport, troubleshooting
+- **[NOTES.md](NOTES.md)** — design, caveats, socket transport, env vars
 
 ### Dependencies
 
 | Need | How |
 |---|---|
 | Drava built, on `PYTHONPATH` | [../../docs/jlse.md](../../docs/jlse.md) |
-| `torch` (matched to the node's CUDA) | `pip install --no-cache-dir torch` |
+| `torch` | `pip install torch` |
 | Example deps | `pip install -r requirements.txt` |
-| `ptychopinn_torch` | `pip install -e /path/to/PtychoPINN-torch-pub` — **`-e` is required**, see NOTES |
-| Data + weights (several GB) | `python download_zenodo.py` |
-
-Put the venv, pip cache and data on scratch; torch alone is ~6 GB installed
-plus ~3 GB cached.
-
-```shell
-export BIG=/scratch/$USER
-export PIP_CACHE_DIR=$BIG/pipcache TMPDIR=$BIG/tmp
-export PTYCHOPINN_DATA_ROOT=$BIG/ptychopinn_data
-export PTYCHOPINN_PREP_DIR=$BIG/ptychopinn_data/prep_W_PS_W
-```
+| `ptychopinn_torch` | `pip install -e /path/to/PtychoPINN-torch-pub` — **`-e` is required** |
+| Data + weights | `python download_zenodo.py` |
 
 ### Setup
 
 ```shell
-cd examples/ptychopinn
-pip install --no-cache-dir torch
+cd ~/drava/examples/ptychopinn
+pip install torch
 pip install -r requirements.txt
-pip install -e /path/to/PtychoPINN-torch-pub
 
-python download_zenodo.py                     # -> PtychoPINN_data/{data,mlruns}
+cd ~
+git clone https://github.com/AdvancedPhotonSource/PtychoPINN-torch-pub.git
+cd PtychoPINN-torch-pub
+pip install -e .
 
-cd /path/to/PtychoPINN-torch-pub              # rewrite MLflow artifact URIs
-python initialize_data.py --repo-root <PTYCHOPINN_DATA_ROOT> --no-dry-run
+cd ~/drava/examples/ptychopinn
+python download_zenodo.py
+
+cd ~/PtychoPINN-torch-pub
+python initialize_data.py --repo-root ~/drava/examples/ptychopinn/PtychoPINN_data --no-dry-run
 ```
 
 ### Run
 
 ```shell
-cd examples/ptychopinn
+cd ~/drava/examples/ptychopinn
 python prepare_dataset.py --dataset W --model PS_W --seed 0
 ./run_two_stages.sh
 ```
 
-`prepare_dataset.py` groups the scan positions offline and must be re-run
-whenever the dataset, model or seed changes.
+`prepare_dataset.py` groups the scan positions offline. Re-run it whenever the
+dataset, model or seed changes.
 
 ### Result
 
 `run_two_stages.sh` prints a summary and writes `run_logs/<stamp>/summary.csv`:
 
 ```
-status              complete   groups=20449/20449   duplicates=0
-FRC AUC (0..0.5)    0.587875
-canvas 194x194   crop 154x154   window 20   nan_px_crop=0
-frame accounting OK (20449 through every stage)
+ dataset / model     W / PS_W   run_id=74ba23396c40...
+ status              complete   groups=20449/20449   duplicates=0
+ stage        rx_items    time_s     items/s  unit
+ publisher       20449     2.134      9581.0  groups
+ stage1          20449     3.044      6717.0  groups
+ stage2            320     2.938       108.9  messages (20449 groups)
+ pipeline e2e        4.898 s   (publisher start -> stage2 finalize)
+ FRC AUC (0..0.5)    0.587875
+ canvas 194x194   crop 154x154   window 20   nan_px_crop=0
+ frame accounting OK (20449 through every stage)
 ```
 
 Gates: `status=complete`, `nan_px_crop=0`, frame accounting OK.
+Re-print any run with `python summarize_run.py [run_logs/<stamp>]`.
 
 ### Verify
 
@@ -75,30 +77,16 @@ Gates: `status=complete`, `nan_px_crop=0`, frame accounting OK.
 python verify_against_upstream.py --dataset W --model PS_W
 ```
 
-Runs upstream's own `generate_gt_and_recon` and diffs. Expect `PASS`
-(`|dAUC| < 0.01`). Reference on 1x A100-PCIE-40GB:
-
-| | |
-|---|---|
-| Drava FRC AUC | 0.587875 |
-| Upstream | 0.584559 - 0.590006 (3 runs) |
-| complex NRMSE | 0.0144 |
-
-Upstream regroups randomly each run, so expect ±0.005 spread and no bit
-equality. Full methodology in [NOTES.md](NOTES.md).
+Runs upstream's own `generate_gt_and_recon` and diffs. Expect
+`PASS: |dAUC| < 0.01`. Reference on 1x A100-PCIE-40GB: Drava 0.587875,
+upstream 0.584559 - 0.590006 over 3 runs, complex NRMSE 0.0144. Upstream
+regroups randomly each run, so expect a ±0.005 spread and no bit equality.
 
 ### Dataset and model
 
-Zenodo [10.5281/zenodo.16968020](https://doi.org/10.5281/zenodo.16968020):
-`data.tar.gz` (Ptychodus `.npz` per experiment) and `mlruns.tar.gz` (trained
-models). Default is dataset **W** with model **PS_W**
-(`74ba23396c4042afb1751afe9fa87520`), the Figure 2 dead-leaves pretrain.
-Other Figure 2 models are in [config.py](config.py).
-
-### References
-
-- [PtychoPINN-torch published artifact](https://github.com/AdvancedPhotonSource/PtychoPINN-torch-pub)
-- [PtychoPINN upstream (maintained)](https://github.com/hoidn/PtychoPINN)
-- Paper: *Robust, multi-probe ptychographic neural networks via
-  experimentally-grounded synthetic data*, npj Computational Materials (2026),
-  `s41524-026-02198-4`.
+Zenodo [10.5281/zenodo.16968020](https://doi.org/10.5281/zenodo.16968020).
+Default is **W** / **PS_W** (`74ba23396c4042afb1751afe9fa87520`), the Figure 2
+dead-leaves pretrain; other Figure 2 models are in [config.py](config.py).
+Paper: npj Computational Materials (2026), `s41524-026-02198-4`.
+[Artifact](https://github.com/AdvancedPhotonSource/PtychoPINN-torch-pub) ·
+[upstream](https://github.com/hoidn/PtychoPINN)
