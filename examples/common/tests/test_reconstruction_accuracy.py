@@ -14,6 +14,10 @@ GPU, NATS, or runtime build required):
 - PtychoNN: the stage-1 <-> stage-2 wire encode/decode round-trip, and the
   stage-2 position-indexed accumulation + overlap-add stitching, comparing
   in-order vs shuffled vs multi-threaded assembly.
+- PtychoPINN: the stage-1 <-> stage-2 wire round-trip, which splits complex64
+  object patches into two float32 blobs. Its canvas assembly is order
+  independent by construction (scatter-add at absolute positions) but needs
+  torch, so it is exercised on hardware rather than here.
 - TomoGAN: position-indexed frame assembly (the property that makes denoising
   output order-independent), in-order vs shuffled vs multi-threaded.
 
@@ -42,6 +46,7 @@ except ImportError:
 
 _REPO = Path(__file__).resolve().parents[3]
 _PTYCHONN = _REPO / "examples" / "ptychonn"
+_PTYCHOPINN = _REPO / "examples" / "ptychopinn"
 
 
 def _load(module_path: Path, name: str):
@@ -222,6 +227,105 @@ def test_tomogan_output_multithreaded_matches_serial():
         t.join()
     assert np.array_equal(serial, out), \
         "TomoGAN output differs under multi-threaded assembly"
+
+
+def test_ptychopinn_wire_roundtrip_is_lossless():
+    """Stage1 -> stage2 carries complex64 patches as two float32 blobs.
+
+    Canvas assembly itself is order-independent by construction (scatter-add of
+    absolute positions), but it needs torch, so it is not covered here. What is
+    covered is that the complex values survive the real/imag split exactly.
+    """
+    schema = _load(_PTYCHOPINN / "pipeline_schema.py", "ptychopinn_pipeline_schema")
+
+    rng = np.random.default_rng(11)
+    b, c, m = 5, 4, 8
+    patches = (
+        rng.standard_normal((b, c, m, m), dtype=np.float32)
+        + 1j * rng.standard_normal((b, c, m, m), dtype=np.float32)
+    ).astype(np.complex64)
+
+    # Non-contiguous, out-of-order indices: exactly what parallel callbacks
+    # and JetStream reordering can produce.
+    indices = np.array([40, 7, 900, 41, 3], dtype=np.int64)
+    payload = schema.encode_stage1_patches(
+        job_id=3, indices=indices, n_total=1000, patches=patches
+    )
+    out = schema.decode_stage1_patches(payload)
+
+    assert np.array_equal(out["indices"], indices), "indices corrupted on the wire"
+    assert out["indices"].dtype == np.int64
+    assert out["n_total"] == 1000 and out["job_id"] == 3
+    assert out["patches"].dtype == np.complex64
+    assert out["patches"].shape == patches.shape
+    assert np.array_equal(out["patches"], patches), \
+        "PtychoPINN wire round-trip altered the complex patches"
+
+
+def test_ptychopinn_wire_rejects_corrupt_payload():
+    schema = _load(_PTYCHOPINN / "pipeline_schema.py", "ptychopinn_pipeline_schema")
+
+    patches = np.zeros((2, 4, 8, 8), dtype=np.complex64)
+    payload = schema.encode_stage1_patches(
+        job_id=1, indices=np.array([0, 1], dtype=np.int64), n_total=2,
+        patches=patches
+    )
+    for bad in (payload[:-4], payload + b"\x00\x00\x00\x00"):
+        try:
+            schema.decode_stage1_patches(bad)
+        except ValueError:
+            continue
+        raise AssertionError("decoder accepted a truncated/extended payload")
+
+
+def test_ptychopinn_dedupe_is_idempotent_under_redelivery():
+    """The runtime acks after enqueue, i.e. at-least-once (transport_js.cc).
+
+    PtychoNN's stage 2 tolerates redelivery for free because it assigns into
+    ``[start:end]``. PtychoPINN's canvas is a scatter-add accumulator, which is
+    NOT idempotent, so app_stage2 keeps a ``seen`` mask. This reproduces that
+    logic and hammers it with the same out-of-order redelivery pattern observed
+    in a real run, where JetStream's 30s ack_wait expired under a slow stage.
+
+    Indices are explicit and deliberately shuffled here: stage 1 no longer
+    derives position from the runtime's base_index, which is unordered
+    under parallel callbacks.
+    """
+    n_groups, chunk = 1000, 64
+    seen = np.zeros(n_groups, dtype=bool)
+    painted = np.zeros(n_groups, dtype=np.int64)   # times each group splatted
+    duplicates = 0
+    partial = 0
+
+    def deliver(indices):
+        nonlocal duplicates, partial
+        fresh = ~seen[indices]
+        if not fresh.any():
+            duplicates += 1
+            return
+        if not fresh.all():
+            partial += 1
+            indices = indices[fresh]
+        painted[indices] += 1
+        seen[indices] = True
+
+    rng = np.random.default_rng(0)
+    # Chunks carry explicit, deliberately shuffled indices -- the pipeline no
+    # longer assumes arrival order matches group order.
+    perm = rng.permutation(n_groups)
+    chunks = [perm[i:i + chunk] for i in range(0, n_groups, chunk)]
+    order = list(chunks) + [chunks[i] for i in rng.integers(0, len(chunks), 400)]
+    rng.shuffle(order)
+    for c in order:
+        deliver(np.asarray(c, dtype=np.int64))
+
+    assert seen.all(), "not every group was accumulated"
+    assert painted.max() == 1, \
+        f"a group was splatted {painted.max()} times; accumulation is not idempotent"
+    assert painted.min() == 1, "a group was never splatted"
+    assert duplicates == 400, f"expected 400 dropped duplicates, got {duplicates}"
+    assert partial == 0, f"unexpected partial repeats: {partial}"
+    assert int(seen.sum()) == n_groups
 
 
 if __name__ == "__main__":

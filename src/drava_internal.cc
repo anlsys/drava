@@ -532,9 +532,31 @@ void drava_callback_task_end(drava_t *drava, bool saw_eos)
         drava_stats_log_snapshot(drava, "tx_eos");
 }
 
+uint64_t drava_reserve_base_index(drava_t *drava,
+                                  const std::vector<std::string> &payloads,
+                                  size_t *out_data_count)
+{
+    size_t n = 0;
+    if (drava) {
+        for (const std::string &payload : payloads) {
+            uint64_t ignored = 0;
+            if (!drava_payload_parse_eos_count(payload.data(), payload.size(),
+                                               &ignored))
+                ++n;
+        }
+    }
+    if (out_data_count)
+        *out_data_count = n;
+    /* An EOS-only batch consumes no indices, and dispatch ignores base_index
+     * when there are no data frames. */
+    return n ? drava->next_data_index.fetch_add(n) : 0;
+}
+
 static void drava_dispatch_execute(drava_t *drava,
                                    device_global_id_t device_global_id,
-                                   const std::vector<std::string> &payloads)
+                                   const std::vector<std::string> &payloads,
+                                   uint64_t base_index,
+                                   size_t reserved_data_count)
 {
     (void)device_global_id;
     if (!drava || payloads.empty())
@@ -596,11 +618,16 @@ static void drava_dispatch_execute(drava_t *drava,
             drava->eos_expected_frames = eos_count;
     }
 
+    /* The reservation counts EOS markers independently of the loop above; a
+     * disagreement means base_index is wrong here and in every later batch. */
+    if (reserved_data_count != data_frame_count)
+        LOGGER_FATAL("base_index reservation mismatch: reserved=%zu parsed=%zu "
+                     "stage=%s",
+                     reserved_data_count, data_frame_count,
+                     drava->stage_name.c_str());
+
     /* Invoke the app callback only when there are data frames to process. */
     if (data_frame_count > 0) {
-        const uint64_t base_index =
-                drava->next_data_index.fetch_add(data_frame_count);
-
         drava_frame_batch_t batch;
         batch.batch_id = batch_id;
         batch.count = (uint32_t)frames.size();
@@ -627,7 +654,10 @@ static void drava_dispatch_execute(drava_t *drava,
 
 void drava_dispatch_payload_batch(drava_t *drava,
                                   device_global_id_t device_global_id,
-                                  const std::vector<std::string> &payloads)
+                                  const std::vector<std::string> &payloads,
+                                  uint64_t base_index,
+                                  size_t reserved_data_count)
 {
-    drava_dispatch_execute(drava, device_global_id, payloads);
+    drava_dispatch_execute(drava, device_global_id, payloads, base_index,
+                           reserved_data_count);
 }

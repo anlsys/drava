@@ -8,6 +8,7 @@ This page covers how to run them; for the full JLSE walkthrough with datasets se
 | Example | Stages | Notes |
 |---|---|---|
 | [PtychoNN](../examples/ptychonn) | 2 | Ptychographic inference; dataset + weights from Hugging Face |
+| [PtychoPINN](../examples/ptychopinn) | 2 | Physics-informed ptychography (PyTorch); reproduces a published FRC score |
 | [TomoGAN](../examples/tomogan) | 1 | Tomographic denoising; multi-MB frames + energy reporting |
 | [Bare runtime](../examples/bare_runtime) | 1 | Message-rate ceiling; no model |
 | [Iris KNN](../examples/iris_knn) | 1 | Minimal single-row inference |
@@ -87,6 +88,12 @@ socat /tmp/drava_in UNIX-LISTEN:/tmp/accel_2048.sock,fork
   frames and one weight file from the
   [PtychoNN_data](https://huggingface.co/datasets/mcherukara/PtychoNN_data)
   Hugging Face dataset into `examples/ptychonn/PtychoNN_data_partial/`.
+- **PtychoPINN** — `python examples/ptychopinn/download_zenodo.py` fetches
+  `data.tar.gz` and `mlruns.tar.gz` from
+  [Zenodo record 16968020](https://doi.org/10.5281/zenodo.16968020) into
+  `examples/ptychopinn/PtychoPINN_data/`. A one-off
+  `python prepare_dataset.py` then groups the scan positions; the pipeline
+  cannot run without it. See that example's README.
 - **TomoGAN** — expects `examples/tomogan/dataset/demo-dataset-real.h5` (input)
   and `examples/tomogan/dataset/testjob-it00500.h5` (generator checkpoint).
   Override with `TOMOGAN_DATASET_PATH` / `DRAVA_TOMOGAN_MODEL_PATH`. See

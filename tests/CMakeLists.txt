@@ -121,6 +121,23 @@ if (BATS_EXECUTABLE)
         message(STATUS "Bats found, but ${DRAVA_BATS_SOCKET_TEST} not found — skipping socket Bats test")
     endif ()
 
+    # -------------------------------------------
+    # base_index ordering regression (concurrency)
+    # -------------------------------------------
+    set(DRAVA_BATS_BASE_INDEX_TEST "${DRAVA_REPO_ROOT}/tests/integration/base_index_ordering.bats")
+    if (EXISTS "${DRAVA_BATS_BASE_INDEX_TEST}")
+        add_test(
+                NAME integration_base_index_ordering
+                COMMAND "${BATS_EXECUTABLE}" "${DRAVA_BATS_BASE_INDEX_TEST}"
+        )
+        set_tests_properties(integration_base_index_ordering PROPERTIES
+                ENVIRONMENT
+                "ABS_TOP_SRCDIR=${DRAVA_REPO_ROOT};ABS_TOP_BUILDDIR=${CMAKE_BINARY_DIR}"
+        )
+    else ()
+        message(STATUS "Bats found, but ${DRAVA_BATS_BASE_INDEX_TEST} not found — skipping base_index test")
+    endif ()
+
 else ()
     message(STATUS "Bats not found in PATH — skipping Bats integration tests")
 endif ()

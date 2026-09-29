@@ -1,0 +1,35 @@
+# Config for the base_index ordering regression test.
+#
+# The point of this test is CONCURRENCY: callback_serialize must be false and
+# threads > 1, so batches are handed to several worker tasks at once. Under
+# those conditions base_index must still be assigned in arrival order, which
+# only holds if the transport reserves the index range in its fetch loop
+# rather than inside the spawned task.
+#
+# Do not "fix" a failure here by setting callback_serialize: true. That hides
+# the defect this test exists to detect.
+
+transport:
+  type: socket
+
+stages:
+  - name: test_stage
+    runtime:
+      threads: 4
+      callback_batch: 32
+      callback_flush_timeout_ms: 100
+      callback_serialize: false
+    ingress:
+      # The runtime takes the socket path ONLY from here -- it does not read
+      # DRAVA_SOCKET_PATH (see transport_socket.cc, ingress_cfg.socket_path,
+      # default /tmp/accel_2048.sock). The bats setup() rewrites this line to
+      # a per-run path under BATS_TEST_TMPDIR so concurrent runs cannot
+      # collide and a stale socket cannot be picked up.
+      socket_path: "/tmp/drava_base_index_ordering.sock"
+    egress:
+      # Terminal stage: nothing downstream. Without this the runtime tries to
+      # forward the EOS marker to the default output FIFO and logs
+      #   ERROR Output FIFO does not exist: /tmp/drava_stage2_in
+      #   ERROR EOS forward failed: rc=1
+      # which is harmless here but pure noise in the test output.
+      forward_eos: false

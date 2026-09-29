@@ -116,3 +116,53 @@ adapt it.
 - Metrics go to files, not stdout (see the
   [Metrics section of the README](../README.md#metrics)).
 - `pipeline.yaml` is authoritative for runtime knobs.
+- **`base_index` is only ordered when `callback_serialize: true`.** The
+  runtime assigns it with an atomic `fetch_add`
+  (`src/drava_internal.cc`, `next_data_index.fetch_add(data_frame_count)`)
+  *inside* `drava_dispatch_payload_batch`. With `callback_serialize: false`
+  that function runs inside a task spawned onto the worker team
+  (`src/transport_js.cc`, `team_task_spawn`), so concurrent callbacks reach
+  the `fetch_add` in **task-execution order, not message-arrival order**. A
+  batch can therefore receive a *lower* `base_index` than a batch that arrived
+  before it.
+  - Harmless if you only use `base_index` as an opaque tag, or to size a
+    buffer.
+  - **Wrong** if you use it as an absolute position — the classic case being a
+    stage that reconstructs an image by placing each frame's output at
+    `base_index + offset`. Frames get written to other batches' positions. The
+    frame *count* still comes out right, so this does not show up in any
+    accounting check; it shows up as a subtly corrupted result.
+  - If you need absolute position, **carry it in the payload** and ignore
+    `base_index`. `examples/ptychopinn` prefixes every frame with an 8-byte
+    group index for exactly this reason, and cross-checks it against
+    `base_index` so a disagreement is logged rather than silently tolerated.
+    The alternative is `callback_serialize: true`, at the cost of parallelism.
+- **Stages do not self-terminate on the NATS transport.** The fetch loop in
+  `src/transport_js.cc` is `while (true)` with no exit condition, so
+  `drava.run()` does not return after the end-of-stream hook fires; the stage
+  keeps polling and eventually aborts with
+  `FATAL Fetch error: Limit reached`. An orchestrator must therefore wait for
+  the *terminal stage's own marker* in its log (e.g. `[stage2-final]`) or for
+  its metrics file, then stop the stage processes itself. See
+  `terminate_proc()` in `examples/ptychonn/benchmark_two_stages.py` and
+  `stop_proc()` in `examples/ptychopinn/run_two_stages.sh`. Waiting on process
+  exit will hang until your timeout.
+- **Delivery is at-least-once, so callbacks must be idempotent.** On the
+  JetStream transport the runtime acks a message *after* enqueuing it
+  (`src/transport_js.cc`, "Ack after enqueue to achieve at-least-once
+  semantics"), and JetStream redelivers anything not acked within the
+  consumer's `ack_wait` (30 s by default; Drava does not override it).
+  Processing the same frame twice must therefore be harmless.
+  - Safe: *assigning* into a position-indexed buffer, as
+    `examples/ptychonn/app_stage2.py` does with `pred[start:end] = ...`.
+    A replay overwrites with identical values.
+  - Unsafe: *accumulating* (`+=`, `scatter_add_`, counters, appends). A replay
+    double-counts. `examples/ptychopinn/app_stage2.py` accumulates into a
+    shared canvas and so keeps an explicit `seen` mask keyed on the absolute
+    `[start, end)` range carried in its wire header.
+  - Redelivery is most easily triggered by a *slow* callback: the ack in the
+    fetch loop happens after `dispatch_batch()` returns, so a long callback
+    (especially with `callback_serialize: true`) stalls acking, which triggers
+    redelivery, which slows the stage further. If you see `consumer_seq`
+    climbing well past `stream_seq` in a stage log, that is this loop. Reduce
+    `callback_batch` and make the callback faster.

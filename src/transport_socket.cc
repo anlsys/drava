@@ -120,20 +120,28 @@ int drava_transport_socket_main(drava_t *drava,
             std::vector<std::string> batch_payloads = std::move(pending);
             pending.clear();
             pending.reserve(drava->callback_batch_size);
+            /* Reserve on this thread (the fetch loop) so batches are
+             * numbered in arrival order, not task-execution order. */
+            size_t reserved_data_count = 0;
+            const uint64_t base_index = drava_reserve_base_index(
+                    drava, batch_payloads, &reserved_data_count);
+
             if (drava->callback_serialize) {
                 drava_callback_task_begin(drava);
                 drava_dispatch_payload_batch(drava, device_global_id,
-                                             batch_payloads);
+                                             batch_payloads, base_index,
+                                             reserved_data_count);
                 return;
             }
             drava_callback_task_begin(drava);
             drava->runtime.team_task_spawn(
                     team,
-                    [drava, device_global_id,
+                    [drava, device_global_id, base_index, reserved_data_count,
                      batch_payloads = std::move(batch_payloads)](task_t *task) {
                         (void)task;
                         drava_dispatch_payload_batch(drava, device_global_id,
-                                                     batch_payloads);
+                                                     batch_payloads, base_index,
+                                                     reserved_data_count);
                     });
         };
 

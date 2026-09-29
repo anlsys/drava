@@ -134,6 +134,7 @@ def _import_module_from(path: Path, extra_syspath: Path):
 # Publishers whose *module-scope* code resolves config tuples etc.
 _PUBLISHERS = [
     ("ptychonn", "publisher_util.py"),
+    ("ptychopinn", "publisher_util.py"),
     ("tomogan", "publisher_util.py"),
 ]
 
@@ -157,6 +158,13 @@ def test_ptychonn_publisher_util_returns_3tuple():
     assert len(out) == 3, f"ptychonn load_publish_config expected 3-tuple, got {out!r}"
 
 
+def test_ptychopinn_publisher_util_returns_3tuple():
+    _install_all_stubs()
+    mod = _run_with_env("ptychopinn", "publisher_util.py")
+    out = mod.load_publish_config()
+    assert len(out) == 3, f"ptychopinn load_publish_config expected 3-tuple, got {out!r}"
+
+
 def test_tomogan_publisher_util_returns_2tuple():
     _install_all_stubs()
     mod = _run_with_env("tomogan", "publisher_util.py")
@@ -170,7 +178,7 @@ def test_publisher_modules_import_cleanly():
     # of load_publish_config happens inside main(), so we import the module and
     # then call a no-op main path where safe. Here we at least ensure import.
     _install_all_stubs()
-    for example in ("ptychonn", "tomogan"):
+    for example in ("ptychonn", "ptychopinn", "tomogan"):
         ex_dir = _EXAMPLES / example
         os.environ["DRAVA_STAGE_CONFIG"] = str(ex_dir / "pipeline.yaml")
         os.environ["DRAVA_PUBLISH_NUM_FRAMES"] = "8"

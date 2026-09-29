@@ -1,0 +1,37 @@
+# PtychoPINN example dependencies.
+#
+# Versions are intentionally loose. Unlike the TensorFlow examples, this one
+# pulls in a large scientific stack whose correct build depends on the CUDA
+# toolkit loaded on the node, so pinning an exact torch wheel here would be
+# wrong more often than right. Install torch first, matched to the node's CUDA,
+# then the rest:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cu121
+#     pip install -r requirements.txt
+#
+# See README.md for the free-threaded-Python caveat on JLSE.
+
+# --- Drava publisher/runtime side -------------------------------------------
+nats-py>=2.6
+PyYAML>=6.0
+
+# --- PtychoPINN model + inference -------------------------------------------
+# torch is installed separately (see above) so the CUDA build is explicit.
+lightning>=2.2
+tensordict>=0.4
+mlflow>=2.12
+
+# --- Data handling ----------------------------------------------------------
+numpy>=1.26
+scipy>=1.11
+
+# --- Evaluation (FRC) -------------------------------------------------------
+scikit-image>=0.22
+opencv-python-headless>=4.9
+matplotlib>=3.8
+
+# --- Dataset download -------------------------------------------------------
+# (stdlib urllib is used; nothing extra required)
+
+# The published package itself is installed from a checkout, not from PyPI:
+#     pip install -e /path/to/PtychoPINN-torch-pub
