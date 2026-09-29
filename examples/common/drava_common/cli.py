@@ -17,6 +17,7 @@ Usage:
     drava-pipeline validate pipeline.yaml
     drava-pipeline run pipeline.yaml [--app-cmd stage1=python app.py ...]
     drava-pipeline new-app NAME [--dir DIR] [--stages N]
+    drava-pipeline from-systemflow MODEL.yaml [-o pipeline.yaml]
 
 Run as a module if not installed on PATH:
     python -m drava_common.cli run pipeline.yaml
@@ -39,6 +40,11 @@ from .config import (
     load_pipeline_config,
     validate_pipeline,
 )
+from .systemflow import (
+    SystemFlowImportError,
+    dump_pipeline_yaml,
+    import_systemflow_pipeline,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -55,6 +61,54 @@ def cmd_validate(args) -> int:
     print(f"    stages: {' -> '.join(cfg.stage_names)}")
     for w in warnings:
         print(f"    warning: {w}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# from-systemflow
+# --------------------------------------------------------------------------- #
+def cmd_from_systemflow(args) -> int:
+    """Derive an initial pipeline.yaml from a SystemFlow model document.
+
+    Read-only with respect to SystemFlow: the model document is parsed, never
+    written. The generated config is validated before anything hits disk, and
+    ``--output`` refuses to clobber an existing file without ``--force``.
+    """
+    try:
+        mapping, cfg = import_systemflow_pipeline(args.model, graph=args.graph)
+        warnings = validate_pipeline(cfg)
+    except (SystemFlowImportError, PipelineConfigError) as exc:
+        print(f"IMPORT FAILED: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        text = dump_pipeline_yaml(mapping)
+    except SystemFlowImportError as exc:
+        print(f"IMPORT FAILED: {exc}", file=sys.stderr)
+        return 1
+
+    provenance = mapping.get("systemflow", {})
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+
+    if not args.output:
+        sys.stdout.write(text)
+        return 0
+
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        print(
+            f"refusing to overwrite {out} (pass --force to replace it)",
+            file=sys.stderr,
+        )
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(f"wrote {out} — pipeline '{cfg.name}', transport={cfg.transport_type}")
+    print(f"    stages: {' -> '.join(cfg.stage_names)}")
+    print(f"    from SystemFlow graph '{provenance.get('graph')}' in {args.model}")
+    for stage, node in (provenance.get("stage_nodes") or {}).items():
+        print(f"      {stage} <- node '{node}'")
     return 0
 
 
@@ -450,6 +504,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional nats-server config file for --start-nats (else -js -p PORT).",
     )
     r.set_defaults(func=cmd_run)
+
+    fs = sub.add_parser(
+        "from-systemflow",
+        help="Derive an initial pipeline.yaml from a SystemFlow model document.",
+    )
+    fs.add_argument("model", help="Path to a SystemFlow model document (YAML/JSON).")
+    fs.add_argument(
+        "-o",
+        "--output",
+        default="",
+        help="Write the pipeline.yaml here (default: print to stdout).",
+    )
+    fs.add_argument(
+        "--graph",
+        default=None,
+        help="Which graph to import (required if the document has several).",
+    )
+    fs.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite --output if it already exists.",
+    )
+    fs.set_defaults(func=cmd_from_systemflow)
 
     na = sub.add_parser("new-app", help="Scaffold a new example app.")
     na.add_argument("name", help="App name (used for the dir and pipeline name).")

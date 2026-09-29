@@ -1,0 +1,126 @@
+# SystemFlow model document for the PtychoPINN two-stage Drava pipeline.
+#
+# This is a *SystemFlow* document (Model Definition Standard v1.0), not a Drava
+# pipeline.yaml. It is the input to:
+#
+#     ./drava-pipeline from-systemflow examples/ptychopinn/systemflow_model.yaml \
+#         -o examples/ptychopinn/pipeline.yaml
+#
+# which regenerates the checked-in pipeline.yaml byte-for-byte in content.
+#
+# Two audiences read this file, and the split matters:
+#
+#   * SystemFlow reads `graphs`, and within it the physics/cost parameters
+#     ("resolution (n,n)", "overlap (%)", ...). It ignores the top-level
+#     `drava:` key and any "drava ..." parameter, because
+#     systemflow/io/schema.py:105 ignores unknown top-level keys and
+#     systemflow/node.py:288 tolerates extra Component parameters.
+#
+#   * Drava reads the graph *topology* plus the "drava ..." parameters, and
+#     ignores the physics. It never derives threads or batch sizes from
+#     SystemFlow's FLOP/energy estimates.
+#
+# Everything under `drava:` and every "drava ..." parameter is therefore an
+# explicit, auditable statement of intent -- not an inference.
+
+schema_version: "1.0"
+name: PtychoPINN two-stage inference pipeline
+
+# --------------------------------------------------------------------------- #
+# Drava-only section. Ignored by SystemFlow.
+# --------------------------------------------------------------------------- #
+drava:
+  pipeline_name: ptychopinn_two_stage
+
+  transport:
+    type: nats
+    nats_url: nats://127.0.0.1:4222
+
+  # Ingress of the first stage, i.e. where the publisher writes.
+  source:
+    stream: FRAMES
+    subject: frames.raw
+
+  publisher:
+    synthetic: false
+    # num_frames is deliberately omitted: the publisher defaults to the prepared
+    # group count in prep/<dataset>_<model>/meta.json, so a plain run streams the
+    # whole scan exactly once. Set it (or DRAVA_PUBLISH_NUM_FRAMES) to cap a run.
+    rate_hz: 0
+
+  benchmark:
+    app_timeout_s: 600
+
+# --------------------------------------------------------------------------- #
+# The SystemFlow performance model.
+# --------------------------------------------------------------------------- #
+graphs:
+  - name: ptychopinn inference
+    nodes:
+      # ---- stage1: PtychoPINN forward_predict on the GPU ------------------ #
+      - name: PtychoPINN inference
+        mutations: [{type: PhaseReconstruction3D}]
+        parameters:
+          # -- SystemFlow cost model. Drava does not read any of these. --
+          # PtychoPINN is a single forward pass, not an iterative solver.
+          "iterations (n)": 1
+          "op latency (s)": 1.0e-5
+          "parallelism (%)": 0.70
+          "overlap (%)": 0.40
+          # Scan grid for dataset W; mirrors WINDOW_SIZES["W"] in config.py.
+          "xy images (n,n)": [20, 20]
+
+          # -- Drava runtime knobs. SystemFlow does not read any of these. --
+          # NATS reserves thread 0 for I/O, so this must be >= 2.
+          "drava threads (n)": 4
+          # One frame is a C x N x N group (64 KB at C=4, N=64), so keep the
+          # callback batch well below PtychoNN's 256 to bound host and GPU memory.
+          "drava callback batch (n)": 128
+          # The callback is stateless: the model is read-only and base_index comes
+          # from the runtime, so parallel callbacks are safe here.
+          "drava callback serialize (bool)": false
+          "drava ingress durable (str)": drava_ptychopinn_stage1
+          "drava fetch batch (n)": 128
+          "drava fetch timeout (ms)": 200
+
+      # ---- stage2: scatter-add patches into a canvas, then FRC ------------ #
+      - name: Canvas assembly
+        mutations: [{type: StoreImage}]
+        parameters:
+          # -- SystemFlow cost model. Drava does not read any of these. --
+          "disk storage rate (B/s)": 1.0e9
+          "stored data (B)": 0
+          "stored images (n)": 0
+
+          # -- Drava runtime knobs. SystemFlow does not read any of these. --
+          "drava threads (n)": 4
+          # Keep this small. The runtime acks only after dispatch_batch() returns
+          # (src/transport_js.cc), so a long serialized callback stalls the fetch
+          # loop, acks stop flowing, JetStream's 30s ack_wait expires, and messages
+          # are redelivered -- which makes the stage slower still. 8 messages is
+          # ~512 groups per callback, which stays well inside ack_wait.
+          "drava callback batch (n)": 8
+          # REQUIRED. Unlike PtychoNN's stage2, which writes disjoint [start:end]
+          # slices, this stage scatter-adds overlapping patches into one shared
+          # canvas. Parallel callbacks would race on that in-place accumulation.
+          # Do not set this to false without reworking app_stage2.py to use a
+          # per-thread canvas merged at end-of-stream.
+          "drava callback serialize (bool)": true
+          "drava ingress durable (str)": drava_ptychopinn_stage2
+          "drava fetch batch (n)": 64
+          "drava fetch timeout (ms)": 500
+          # Terminal stage: nothing downstream, so do not forward the EOS marker.
+          # The app's on_end_of_stream hook fires instead. The importer already
+          # defaults the last stage to false; stated here to make it explicit.
+          "drava forward eos (bool)": false
+
+    links:
+      # One SystemFlow link == one Drava stream. Supplying the stream/subject
+      # here is what guarantees stage1.egress == stage2.ingress, so
+      # validate_pipeline() passes by construction.
+      - name: "PtychoPINN inference -> Canvas assembly"
+        tx: PtychoPINN inference
+        rx: Canvas assembly
+        parameters:
+          "drava stream (str)": PATCHES
+          "drava subject (str)": frames.stage1

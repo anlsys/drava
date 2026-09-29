@@ -19,6 +19,8 @@ jlse
 examples
 new-app
 configuration
+systemflow
+systemflow-jlse
 paper
 utils
 artifact-description

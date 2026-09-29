@@ -13,6 +13,11 @@ Public surface (import from ``drava_common``):
 - Publisher: :func:`load_transport_config`, :func:`load_publish_config`,
   :func:`write_publisher_metrics`, :func:`publish_stream`,
   :func:`socket_publish_stream`, ``EOS_PREFIX``.
+- SystemFlow: :func:`import_systemflow_pipeline`,
+  :func:`load_systemflow_document`, :func:`systemflow_to_pipeline`,
+  :func:`dump_pipeline_yaml`, :exc:`SystemFlowImportError`. Read-only import
+  of a SystemFlow performance model into an initial ``pipeline.yaml``; the
+  ``systemflow`` package is optional.
 """
 
 from .config import (
@@ -32,6 +37,14 @@ from .publisher import (
     socket_publish_stream,
     write_publisher_metrics,
 )
+from .systemflow import (
+    SystemFlowImportError,
+    dump_pipeline_yaml,
+    import_systemflow_pipeline,
+    load_systemflow_document,
+    pipeline_config_from_mapping,
+    systemflow_to_pipeline,
+)
 
 __all__ = [
     "PipelineConfig",
@@ -47,4 +60,10 @@ __all__ = [
     "publish_stream",
     "socket_publish_stream",
     "write_publisher_metrics",
+    "SystemFlowImportError",
+    "dump_pipeline_yaml",
+    "import_systemflow_pipeline",
+    "load_systemflow_document",
+    "pipeline_config_from_mapping",
+    "systemflow_to_pipeline",
 ]

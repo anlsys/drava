@@ -16,7 +16,9 @@ It can:
   extra stages);
 - **run** a pipeline: launch every stage with the correct `DRAVA_STAGE_NAME`
   wired automatically (downstream stages first), optionally starting NATS and
-  the publisher.
+  the publisher;
+- **import** an initial `pipeline.yaml` from a SystemFlow performance model
+  (`from-systemflow`; see [docs/systemflow.md](systemflow.md)).
 
 Run the `drava-pipeline` script at the repo root; it self-bootstraps, so no
 `pip install` and no `PYTHONPATH` are needed:
@@ -27,6 +29,10 @@ Run the `drava-pipeline` script at the repo root; it self-bootstraps, so no
 
 # Scaffold a new app + pipeline.yaml:
 ./drava-pipeline new-app myapp --stages 2
+
+# Derive a pipeline.yaml from a SystemFlow model document:
+./drava-pipeline from-systemflow examples/ptychopinn/systemflow_model.yaml \
+    -o examples/ptychopinn/pipeline.yaml --force
 
 # Launch all stages plus the publisher, managing NATS automatically:
 ./drava-pipeline run examples/ptychonn/pipeline.yaml \
@@ -65,6 +71,9 @@ PYTHONPATH=examples/common python -m drava_common.cli validate examples/ptychonn
 | `--workdir DIR` | `run` | Directory to launch stage commands in (default: config's dir) |
 | `--dir DIR` | `new-app` | Target directory (default `examples/NAME`) |
 | `--stages N` | `new-app` | Number of stages to scaffold |
+| `-o, --output FILE` | `from-systemflow` | Write the derived config (default: stdout) |
+| `--graph NAME` | `from-systemflow` | Which graph to import (if the document has several) |
+| `--force` | `from-systemflow` | Overwrite an existing `--output` file |
 
 ## Tests
 

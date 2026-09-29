@@ -87,6 +87,24 @@ not read `DRAVA_SOCKET_PATH`.
 Runtime behaviour (threads, batching, transport, streams, EOS forwarding) lives
 in [pipeline.yaml](pipeline.yaml). Everything else is an environment variable.
 
+### pipeline.yaml is derived from a SystemFlow model
+
+[systemflow_model.yaml](systemflow_model.yaml) is a
+[SystemFlow](https://github.com/wilkieolin/system_flow) model document that
+regenerates `pipeline.yaml`:
+
+```shell
+./drava-pipeline from-systemflow examples/ptychopinn/systemflow_model.yaml \
+    -o examples/ptychopinn/pipeline.yaml --force
+```
+
+`pipeline.yaml` stays the checked-in, authoritative file — the runtime reads it
+directly and you never need SystemFlow to run this example. The model document
+records *why* the knobs have the values they do, and ties each stage back to a
+node in the performance model. A unit test asserts the two stay in sync, so
+edit the model document and regenerate rather than editing `pipeline.yaml` by
+hand. See [docs/systemflow.md](../../docs/systemflow.md).
+
 Read by [config.py](config.py), so shared by every entry point:
 
 | Variable | Default | Meaning |

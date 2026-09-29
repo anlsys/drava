@@ -2,6 +2,9 @@
 
 Copy-paste. Background: [README.md](README.md), [NOTES.md](NOTES.md).
 
+To run this example from a config derived from its SystemFlow performance
+model, see [docs/systemflow-jlse.md](../../docs/systemflow-jlse.md).
+
 ## Get a node
 
 ```shell

@@ -105,7 +105,7 @@ Heavy Python duplication exists across `examples/*/benchmark*.py` and
 
 - Match surrounding style; a `.clang-format` exists at root (not yet CI-enforced).
 - Keep changes minimal and focused; do not commit or push unless the user asks.
-  If asked, branch first (current work branch: `feature/simplification`).
+  If asked, branch first (current work branch: `feature/systemflow`).
 - When adding a metric/config field, follow the existing optional-and-ignored
   convention so old readers keep working.
 
@@ -120,3 +120,27 @@ Heavy Python duplication exists across `examples/*/benchmark*.py` and
   `.venv/`, `build*/`, `.scratch/`), never outside it.
 - Do not run interpreters, tools, or commands that read/write paths outside the
   repo. If a task seems to require it, ask first.
+
+## 7. SystemFlow interface
+
+Drava can derive an initial `pipeline.yaml` from a
+[SystemFlow](https://github.com/wilkieolin/system_flow) performance model
+(`drava_common/systemflow.py`, `drava-pipeline from-systemflow`, and
+[docs/systemflow.md](docs/systemflow.md)).
+
+- **One-way and read-only.** Drava reads SystemFlow; it never writes to a
+  SystemFlow checkout. A `system_flow/` clone alongside this repo is reference
+  material: never `git add/commit/push` in it, never edit its files, never
+  `pip install -e` it. Use `PYTHONDONTWRITEBYTECODE=1` if you import from it so
+  you do not leave `__pycache__` behind.
+- **`systemflow` is an optional import.** A model document is plain YAML, and
+  the importer must keep working where SystemFlow is not installed. Do not add
+  `systemflow` to any `requirements.txt`.
+- **Explicit, not inferred.** Map only parameters prefixed `drava `. Never
+  derive `threads` or `callback_batch` from SystemFlow's FLOP/energy numbers.
+  Unknown `drava ...` keys must stay a hard error.
+- **There is no `pipeline.yaml` in SystemFlow.** Its format is the Model
+  Definition Standard v1.0 (`graphs → nodes/links`). Do not go looking for one.
+- **Phase 2 (pushing measured benchmarks back via `systemflow.io.calibrate`) is
+  not implemented.** Do not start it unless the user asks. When it lands it must
+  write to a Drava-owned path.
