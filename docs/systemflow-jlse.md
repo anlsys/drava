@@ -290,6 +290,87 @@ true, adding GPU threads will not help and transport/batching changes will.
 > above uses those. This is an upstream SystemFlow data issue — do not patch the
 > SystemFlow checkout, report it.
 
+## Measuring batch size, and calibrating SystemFlow from it
+
+### Why
+
+`runtime.callback_batch` is the **real GPU inference batch** for this example —
+`app.py:206` takes `n = len(frames)` and `_infer` runs one `forward_predict`
+over all of them, with no sub-batching. (`DRAVA_INFER_BATCH` sizes the *warmup*
+tensor only.) Nobody has measured whether 128 is a good value.
+
+SystemFlow cannot advise, for two reasons: its coefficient table has rows for
+`batch_size = 1024` only, and its latency formula
+(`A_intercept + s_per_gflop * total_gflops`) has **no batch-size term at all**.
+Drava can supply what is missing.
+
+### Run the sweep
+
+```shell
+cd ~/drava/examples/ptychopinn
+python sweep_callback_batch.py --dry-run     # check the plan first
+python sweep_callback_batch.py               # 6 batches x 6 workloads, ~15 min
+```
+
+Two axes on purpose: fitting `latency = intercept + slope * work` needs several
+*workload* sizes per batch size. SystemFlow's shipped rows were fit from 8
+points each (the `n` column).
+
+Results land in `run_logs/sweep_<stamp>/sweep.csv`, rewritten after every run so
+a crashed sweep still leaves usable data. The script prints the batch size with
+the highest median stage1 throughput — **that answer alone is worth the run,
+independent of SystemFlow.**
+
+### Fit coefficient rows
+
+```shell
+python fit_systemflow_coefficients.py run_logs/sweep_<stamp>/sweep.csv
+python fit_systemflow_coefficients.py run_logs/sweep_<stamp>/sweep.csv \
+    --latency-column stage1_total_s        # and report both
+```
+
+Emits `modeling_inference_flops_coefficients_drava.csv` in SystemFlow's own
+column layout, ready to send upstream. **Do not edit the `system_flow`
+checkout.**
+
+Which measured column maps to SystemFlow's `compute_latency_s` is a *modelling
+choice, not a fact* — its coefficients were fit on a batch inference script, not
+a streaming two-stage pipeline. Run it both ways and report both.
+
+### The two calibration paths — pick the right one
+
+|  | Use when | Mechanism |
+|---|---|---|
+| **Re-fit coefficient rows** (`fit_systemflow_coefficients.py`) | The model is missing a *dimension* — e.g. batch size, a new GPU | Linear fit over a drava sweep → new CSV rows |
+| **`systemflow.io.calibrate()`** | The model has the right shape but wrong *values* | Bounded optimizer nudges declared free parameters to match observations |
+
+`calibrate()` cannot add a batch-size term the model does not have, which is why
+the batch-size work is a fitting job. Use `calibrate()` for analytic knobs
+inside a model document:
+
+```python
+from systemflow.io import Model, calibrate
+
+model = Model.from_file("systemflow_model.yaml")
+result = calibrate(
+    model,
+    measurements=[                       # from your summary.csv
+        {"node": "PtychoPINN inference",
+         "property": "phase reconstruction latency (s)",
+         "value": 3.066, "weight": 1.0},
+    ],
+    free_parameters=[
+        {"node": "PtychoPINN inference",
+         "key": "parallelism (%)", "bounds": [0.1, 0.99]},
+    ],
+)
+print(result.report)                     # success, cost, fitted values
+result.model.save("calibrated_model.yaml")   # drava-owned path, never system_flow/
+```
+
+Needs `systemflow` installed (`scipy` does the optimization). Write the refined
+model to a drava-owned path.
+
 ## Troubleshooting
 
 | Symptom | Fix |

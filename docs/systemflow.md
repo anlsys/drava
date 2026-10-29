@@ -188,10 +188,37 @@ the same node, each ignored by the other project.
 
 ## Roadmap
 
-Phase 2 — pushing measured benchmark data back into SystemFlow via
-`systemflow.io.calibrate` to refine the model after real Drava runs — is **not
-implemented**. When it lands it must write to a Drava-owned output path and
-never modify a SystemFlow checkout.
+### What SystemFlow cannot do for Drava
+
+Be clear about the limits before relying on this:
+
+- SystemFlow has **no concept** of threads, callback batching, queues or
+  transports — grep its source for `thread`, `callback`, `nats`: zero hits. It
+  therefore **cannot supply Drava's runtime knobs**. Every `"drava ..."` value
+  in a model document is a hand-written passthrough, not a derived quantity.
+- The only genuine derivation in the importer is **topology**: nodes become
+  stages, and a link becomes the stream wiring both sides.
+- Its fitted PtychoPINN table has rows for `batch_size = 1024` only, and the
+  latency formula has no batch-size term, so it cannot advise on batch size
+  either.
+
+The useful coupling therefore runs **Drava → SystemFlow**: Drava measures
+per-stage latency and energy, which is exactly the data SystemFlow is fitted
+from.
+
+### Feeding measurements back
+
+Two distinct paths — see
+[systemflow-jlse.md](systemflow-jlse.md#the-two-calibration-paths--pick-the-right-one):
+
+| Path | Use when |
+|---|---|
+| Re-fit coefficient rows (`examples/ptychopinn/fit_systemflow_coefficients.py`) | The model is missing a *dimension* (batch size, a new GPU) |
+| `systemflow.io.calibrate()` | The model has the right shape but wrong *values* |
+
+`examples/ptychopinn/sweep_callback_batch.py` produces the measurements for
+both. Anything written back must go to a Drava-owned output path and **never**
+modify a SystemFlow checkout.
 
 ## Tests
 
