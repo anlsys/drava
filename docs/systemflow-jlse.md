@@ -312,14 +312,44 @@ python sweep_callback_batch.py --dry-run     # check the plan first
 python sweep_callback_batch.py               # 6 batches x 6 workloads, ~15 min
 ```
 
+Each run is bounded twice. `--app-timeout` (default 180 s) is passed through as
+`APP_TIMEOUT_S`, because `run_two_stages.sh:27` otherwise defaults to **3600 s**
+and a single wedged run would stall the whole sweep for an hour. A second,
+harder wall kills the process group if the shell itself hangs — for example on
+the XKRT/CUDA startup SIGSEGV noted in `STATUS.md`. Stray `nats-server` and
+stage processes are killed between runs, so a wedged run cannot leave a server
+holding stale `drava_ptychopinn_stage*` consumer state for the next one.
+
+If runs fail, nothing is lost — re-run only the missing cells:
+
+```shell
+python sweep_callback_batch.py \
+    --resume run_logs/sweep_<stamp>/sweep.csv \
+    --out    run_logs/sweep_<stamp>
+```
+
 Two axes on purpose: fitting `latency = intercept + slope * work` needs several
 *workload* sizes per batch size. SystemFlow's shipped rows were fit from 8
 points each (the `n` column).
 
 Results land in `run_logs/sweep_<stamp>/sweep.csv`, rewritten after every run so
-a crashed sweep still leaves usable data. The script prints the batch size with
-the highest median stage1 throughput — **that answer alone is worth the run,
+a crashed sweep still leaves usable data. The script reports **median ms/frame
+per batch size** — dividing out workload size makes all runs directly
+comparable — and names the best value. **That answer alone is worth the run,
 independent of SystemFlow.**
+
+First measurements (A100, 2026-10-29) already show the effect:
+
+| batch | frames | stage1_compute s | ms/frame |
+|---|---|---|---|
+| 32 | 5000 | 4.963 | 0.993 |
+| 32 | 8000 | 7.634 | 0.954 |
+| 32 | 12000 | 11.385 | 0.949 |
+| 128 | 20449 | 8.978 | **0.439** |
+
+`callback_batch: 32` costs ~2.2x more GPU time per frame than 128 — small
+batches underutilize the A100. Note this is precisely what SystemFlow's
+batch-invariant latency formula cannot express.
 
 ### Fit coefficient rows
 

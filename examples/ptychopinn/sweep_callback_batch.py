@@ -42,6 +42,7 @@ import argparse
 import copy
 import csv
 import os
+import signal
 import statistics
 import subprocess
 import sys
@@ -100,6 +101,47 @@ def read_summary(run_dir: Path) -> dict | None:
     return rows[0] if rows else None
 
 
+def kill_strays() -> None:
+    """Kill leftover nats-server/app processes from a wedged previous run.
+
+    A run that times out can leave a nats-server holding port 4222 and stage
+    processes attached to it. The next run would then connect to the *old*
+    server, whose durables (``drava_ptychopinn_stage1/2``) still carry the
+    previous run's consumer state, and never see the messages it expects.
+    """
+    for pattern in ("nats-server", "app_stage2.py", "ptychopinn/app.py"):
+        subprocess.run(["pkill", "-f", pattern],
+                       capture_output=True, check=False)
+    time.sleep(1.0)
+
+
+def run_one(script: Path, env: dict, hard_timeout: float) -> tuple[int, str]:
+    """Run one pipeline, killing the whole process group if it overruns.
+
+    ``run_two_stages.sh`` waits ``APP_TIMEOUT_S`` for stage2 to finalize. We set
+    that per run, but a stage wedged *before* the wait loop (e.g. the known
+    XKRT/CUDA startup SIGSEGV, see STATUS.md) can still hang the shell, so this
+    is a second, harder wall.
+    """
+    proc = subprocess.Popen(
+        [str(script)], cwd=str(EXAMPLE_DIR), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, start_new_session=True,
+    )
+    try:
+        out, _ = proc.communicate(timeout=hard_timeout)
+        return proc.returncode, out or ""
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            time.sleep(3)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.wait(timeout=30)
+        return 124, "TIMEOUT: killed by sweep after %.0fs" % hard_timeout
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--batches", default=",".join(map(str, DEFAULT_BATCHES)),
@@ -112,6 +154,13 @@ def main(argv=None) -> int:
     p.add_argument("--config", default=str(EXAMPLE_DIR / "pipeline.yaml"),
                    help="base pipeline.yaml to derive from")
     p.add_argument("--out", default="", help="output dir (default: run_logs/sweep_<stamp>)")
+    p.add_argument("--app-timeout", type=int, default=180,
+                   help="APP_TIMEOUT_S per run (default 180). run_two_stages.sh "
+                        "defaults to 3600, which would stall the whole sweep on "
+                        "one wedged run")
+    p.add_argument("--resume", default="",
+                   help="existing sweep.csv; skip (batch,frames,repeat) cells "
+                        "already recorded as successful")
     p.add_argument("--dry-run", action="store_true",
                    help="generate configs and print the plan without running")
     args = p.parse_args(argv)
@@ -129,10 +178,32 @@ def main(argv=None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     plan = [(b, f, r) for b in batches for f in frames for r in range(args.repeats)]
+
+    done: set[tuple[int, int, int]] = set()
+    results: list[dict] = []
+    if args.resume:
+        rpath = Path(args.resume)
+        if rpath.exists():
+            with rpath.open(newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    if row.get("status") in ("complete", "capped"):
+                        key = (int(row["callback_batch"]), int(row["num_frames"]),
+                               int(row["repeat"]))
+                        done.add(key)
+                        results.append(row)
+            plan = [c for c in plan if c not in done]
+            print(f"[sweep] resuming: {len(done)} cells already done, "
+                  f"{len(plan)} remaining")
+
+    hard_timeout = args.app_timeout + 180   # startup, warmup, teardown headroom
+
     print(f"[sweep] base config : {args.config}")
     print(f"[sweep] output dir  : {out_dir}")
+    print(f"[sweep] app timeout : {args.app_timeout}s per run "
+          f"(hard kill at {hard_timeout:.0f}s)")
     print(f"[sweep] grid        : {len(batches)} batches x {len(frames)} workloads "
           f"x {args.repeats} repeat(s) = {len(plan)} runs")
+    print(f"[sweep] worst case  : {len(plan) * hard_timeout / 60:.0f} min")
 
     # One config per batch size; the workload varies by env var, not by config.
     cfg_paths: dict[int, Path] = {}
@@ -157,9 +228,9 @@ def main(argv=None) -> int:
     if not script.exists():
         raise SystemExit(f"missing {script}")
 
-    results: list[dict] = []
     csv_path = out_dir / "sweep.csv"
     t0 = time.time()
+    failures = 0
 
     for i, (batch, nframes, rep) in enumerate(plan, 1):
         run_dir = out_dir / f"b{batch}_f{nframes}_r{rep}"
@@ -167,30 +238,41 @@ def main(argv=None) -> int:
         env["DRAVA_STAGE_CONFIG"] = str(cfg_paths[batch])
         env["DRAVA_PUBLISH_NUM_FRAMES"] = str(nframes)
         env["RUN_DIR"] = str(run_dir)
+        env["APP_TIMEOUT_S"] = str(args.app_timeout)
 
-        print(f"\n[sweep] ({i}/{len(plan)}) batch={batch} frames={nframes} rep={rep}")
-        proc = subprocess.run([str(script)], cwd=str(EXAMPLE_DIR), env=env,
-                              capture_output=True, text=True)
-        if proc.returncode != 0:
-            print(f"[sweep]   FAILED rc={proc.returncode}; see {run_dir}")
-            tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
-            for line in tail:
+        eta = (time.time() - t0) / max(1, i - 1) * (len(plan) - i + 1) if i > 1 else 0
+        print(f"\n[sweep] ({i}/{len(plan)}) batch={batch} frames={nframes} rep={rep}"
+              + (f"  eta ~{eta / 60:.0f} min" if eta else ""))
+
+        kill_strays()
+        rc, out = run_one(script, env, hard_timeout)
+        if rc != 0:
+            failures += 1
+            print(f"[sweep]   FAILED rc={rc}; see {run_dir}")
+            for line in out.strip().splitlines()[-5:]:
                 print(f"[sweep]   | {line}")
+            (run_dir).mkdir(parents=True, exist_ok=True)
+            (run_dir / "sweep_stdout.log").write_text(out, encoding="utf-8")
 
         summary = read_summary(run_dir)
         if summary is None:
-            print("[sweep]   no summary.csv -- recording the failure and continuing")
+            status = "TIMEOUT" if rc == 124 else "NO_SUMMARY"
+            print(f"[sweep]   {status} -- recorded, continuing")
             results.append({"callback_batch": batch, "num_frames": nframes,
-                            "repeat": rep, "rc": proc.returncode, "status": "NO_SUMMARY"})
+                            "repeat": rep, "rc": rc, "status": status})
         else:
             row = {"callback_batch": batch, "num_frames": nframes, "repeat": rep,
-                   "rc": proc.returncode}
+                   "rc": rc}
             row.update({k: summary.get(k) for k in SUMMARY_COLUMNS})
             results.append(row)
+            try:
+                per_frame = (float(row["stage1_compute_s"])
+                             / float(row["publisher_frames"]) * 1e3)
+            except (TypeError, ValueError, ZeroDivisionError):
+                per_frame = float("nan")
             print(f"[sweep]   status={row.get('status')} "
-                  f"stage1_total_s={row.get('stage1_total_s')} "
                   f"stage1_compute_s={row.get('stage1_compute_s')} "
-                  f"e2e={row.get('pipeline_e2e_s')}")
+                  f"({per_frame:.3f} ms/frame) e2e={row.get('pipeline_e2e_s')}")
 
         # Rewrite after every run so a crashed sweep still leaves usable data.
         fieldnames = ["callback_batch", "num_frames", "repeat", "rc"] + SUMMARY_COLUMNS
@@ -199,10 +281,14 @@ def main(argv=None) -> int:
             w.writeheader()
             w.writerows(results)
 
-    print(f"\n[sweep] {len(results)} runs in {time.time() - t0:.0f}s -> {csv_path}")
+    print(f"\n[sweep] {len(results)} runs in {time.time() - t0:.0f}s "
+          f"({failures} failed) -> {csv_path}")
+    kill_strays()
     _print_table(results)
-    print("\nNext: python fit_systemflow_coefficients.py "
-          f"{csv_path}")
+    if failures:
+        print(f"\n[sweep] {failures} run(s) failed. Re-run just those with:")
+        print(f"  python {Path(__file__).name} --resume {csv_path} --out {out_dir}")
+    print(f"\nNext: python fit_systemflow_coefficients.py {csv_path}")
     return 0
 
 
@@ -212,26 +298,35 @@ def _print_table(results: list[dict]) -> None:
         print("[sweep] no successful runs to summarize")
         return
     print(f"\n{'batch':>6} {'frames':>7} {'stage1_wall':>12} {'stage1_compute':>15} "
-          f"{'e2e':>8} {'fps':>9}")
+          f"{'ms/frame':>10} {'e2e':>8}")
     for r in ok:
-        print(f"{r['callback_batch']:>6} {r['num_frames']:>7} "
+        frames = float(r["publisher_frames"])
+        print(f"{int(r['callback_batch']):>6} {int(r['num_frames']):>7} "
               f"{float(r['stage1_total_s']):>12.3f} "
               f"{float(r['stage1_compute_s']):>15.3f} "
-              f"{float(r['pipeline_e2e_s']):>8.3f} "
-              f"{float(r['stage1_total_fps']):>9.1f}")
+              f"{float(r['stage1_compute_s']) / frames * 1e3:>10.3f} "
+              f"{float(r['pipeline_e2e_s']):>8.3f}")
 
-    print(f"\n{'batch':>6} {'median stage1 fps (all workloads)':>36}")
+    # ms/frame is the batch-efficiency signal: it divides out workload size, so
+    # all workloads for one batch size are directly comparable.
+    print(f"\n{'batch':>6} {'median ms/frame':>17} {'runs':>6}")
     by_batch: dict[int, list[float]] = {}
     for r in ok:
-        by_batch.setdefault(r["callback_batch"], []).append(float(r["stage1_total_fps"]))
+        by_batch.setdefault(int(r["callback_batch"]), []).append(
+            float(r["stage1_compute_s"]) / float(r["publisher_frames"]) * 1e3)
     best = None
     for b in sorted(by_batch):
         med = statistics.median(by_batch[b])
-        best = (b, med) if best is None or med > best[1] else best
-        print(f"{b:>6} {med:>36.1f}")
+        best = (b, med) if best is None or med < best[1] else best
+        print(f"{b:>6} {med:>17.3f} {len(by_batch[b]):>6}")
     if best:
-        print(f"\n[sweep] highest median stage1 throughput at callback_batch={best[0]} "
-              f"({best[1]:.1f} fps)")
+        worst = max(statistics.median(v) for v in by_batch.values())
+        print(f"\n[sweep] lowest per-frame cost at callback_batch={best[0]} "
+              f"({best[1]:.3f} ms/frame, {worst / best[1]:.2f}x better than the worst)")
+        if len(by_batch) > 1:
+            print("[sweep] per-frame cost varies with batch size -> SystemFlow's "
+                  "batch-invariant\n        latency formula is incomplete; "
+                  "this is the evidence for it.")
 
 
 if __name__ == "__main__":
